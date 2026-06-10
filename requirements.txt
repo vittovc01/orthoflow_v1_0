@@ -1,0 +1,14 @@
+streamlit
+pandas
+openpyxl
+xlrd
+xlsxwriter
+pypdf
+pillow
+python-dateutil
+supabase
+python-dotenv
+psycopg2-binary
+SQLAlchemy
+openai
+pdf2image
