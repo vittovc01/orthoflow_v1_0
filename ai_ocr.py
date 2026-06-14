@@ -141,7 +141,7 @@ Non inventare dati. Se un campo non è leggibile usa null e warning.
         schema = SCARICO_SALA_SCHEMA
         instructions = """
 Sei un motore OCR specializzato su scarichi sala operatoria ortopedici.
-Leggi etichette DePuy Synthes / Johnson & Johnson / Synthes e identifica REF/codice, LOT/lotto, scadenza, descrizione, produttore.
+Leggi anche il nome della clinica/struttura in alto nel modulo. Leggi etichette DePuy Synthes / Johnson & Johnson / Synthes e identifica REF/codice, LOT/lotto, scadenza, descrizione, produttore.
 Accetta come J&J solo Johnson & Johnson, J&J, DePuy Synthes, Synthes.
 Se trovi Smith & Nephew, Stryker, Zimmer Biomet o altri produttori, is_jnj_depuy_synthes=false.
 Non inventare dati. Se un campo non è leggibile usa null e warning.

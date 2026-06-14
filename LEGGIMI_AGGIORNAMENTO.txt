@@ -1,0 +1,14 @@
+Sostituisci questi file nel tuo repository GitHub:
+- app.py
+- database.py
+- helpers.py
+- ai_ocr.py
+- supabase_client.py
+- requirements.txt
+
+Poi GitHub Desktop:
+1. Summary: Upgrade OrthoFlow 2.0
+2. Commit to main
+3. Push origin
+
+Streamlit aggiornerà automaticamente l'app.

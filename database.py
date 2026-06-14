@@ -1,4 +1,3 @@
-
 import sqlite3
 from pathlib import Path
 
@@ -14,6 +13,11 @@ def get_conn():
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
     return conn
+
+def _add_column_if_missing(cur, table, column, definition):
+    cols = [r[1] for r in cur.execute(f"PRAGMA table_info({table})").fetchall()]
+    if column not in cols:
+        cur.execute(f"ALTER TABLE {table} ADD COLUMN {column} {definition}")
 
 def init_db():
     c = get_conn()
@@ -159,6 +163,16 @@ def init_db():
         valore REAL
     )""")
 
+    cur.execute("""CREATE TABLE IF NOT EXISTS alias_strutture(
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        alias TEXT UNIQUE NOT NULL,
+        codice_cliente TEXT NOT NULL,
+        descrizione_cliente TEXT,
+        priorita INTEGER DEFAULT 100,
+        note TEXT,
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP
+    )""")
+
     cur.execute("""CREATE TABLE IF NOT EXISTS anomalie(
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         tipo TEXT,
@@ -168,8 +182,24 @@ def init_db():
         created_at TEXT DEFAULT CURRENT_TIMESTAMP
     )""")
 
+    cur.execute("""CREATE TABLE IF NOT EXISTS audit_log(
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        utente TEXT,
+        azione TEXT,
+        tabella TEXT,
+        riferimento TEXT,
+        dettagli TEXT,
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP
+    )""")
+
+    for table in ["clienti","magazzino","offerte_header","interventi","righe_intervento","ddt","order_history","order_details","chiusure","anomalie"]:
+        _add_column_if_missing(cur, table, "stato_record", "TEXT DEFAULT 'Attivo'")
+
     cur.execute("INSERT OR IGNORE INTO utenti(username,password,ruolo) VALUES('admin','admin','Admin')")
+    cur.execute("INSERT OR IGNORE INTO utenti(username,password,ruolo) VALUES('collaboratore','1234','Collaboratore')")
+
     for a in AGENTI:
         cur.execute("INSERT OR IGNORE INTO agenti(nome) VALUES(?)", (a,))
+
     c.commit()
     c.close()
