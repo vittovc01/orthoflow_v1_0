@@ -1,5 +1,6 @@
 import sqlite3
 from pathlib import Path
+from supabase_persistence import download_db_if_available, upload_db_if_available
 
 DB_PATH = Path("data/orthoflow.db")
 
@@ -27,6 +28,7 @@ def add_column_if_missing(cur, table, column, definition):
         cur.execute(f"ALTER TABLE {table} ADD COLUMN {column} {definition}")
 
 def init_db():
+    download_db_if_available(DB_PATH)
     conn = get_conn()
     cur = conn.cursor()
 
@@ -269,3 +271,4 @@ def init_db():
 
     conn.commit()
     conn.close()
+    upload_db_if_available(DB_PATH)

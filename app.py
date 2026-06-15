@@ -4,6 +4,7 @@ import pandas as pd
 from datetime import date
 from database import init_db, get_conn
 from helpers import *
+from supabase_persistence import upload_db_if_available
 from ai_ocr import ai_enabled, analyze_image, normalize_ai_items
 import json
 
@@ -15,6 +16,13 @@ def q(sql, params=()):
     df = pd.read_sql_query(sql, c, params=params)
     c.close()
     return df
+
+def cloud_backup_now():
+    try:
+        upload_db_if_available()
+    except Exception:
+        pass
+
 
 
 def _idx(cols, wanted, default=0):
@@ -165,7 +173,7 @@ menu = st.sidebar.radio("Menu", menu_list, index=default_index)
 
 if menu == "Dashboard":
     st.title("🏥 OrthoFlow Control Tower")
-    st.caption("Gestione scarichi sala, DDT, offerte, magazzino e fatturato teorico. Modalità J&J Safe Match: la S sterile resta discriminante.")
+    st.caption("Gestione scarichi sala, DDT, offerte, magazzino e fatturato teorico. Modalità J&J Safe Match: la S sterile resta discriminante. Backup Supabase persistente attivo se configurato.")
 
     is_admin_user = st.session_state.get("ruolo") == "Admin"
 
@@ -238,7 +246,7 @@ elif menu == "Clienti":
                                  VALUES(?,?,?,?,?,'Attivo')""",
                               (codice, str(r[desc]), "" if not city else str(r[city]), "" if not prov else str(r[prov]), "" if not piva else str(r[piva])))
                     n += 1
-                c.commit(); c.close()
+                c.commit(); cloud_backup_now(); c.close()
                 st.success(f"Clienti importati/aggiornati: {n}. Scartati: {skipped}.")
     with tab2:
         editable_table("clienti", "Gestisci clienti")
@@ -263,7 +271,7 @@ elif menu == "Alias strutture":
             c = get_conn()
             c.execute("""INSERT OR REPLACE INTO alias_strutture(alias,codice_cliente,descrizione_cliente,priorita,note)
                          VALUES(?,?,?,?,?)""", (alias, codice, descr, priorita, note))
-            c.commit(); c.close(); st.success("Alias salvato.")
+            c.commit(); cloud_backup_now(); c.close(); st.success("Alias salvato.")
     editable_table("alias_strutture", "Alias presenti")
     test = st.text_input("Test riconoscimento struttura")
     if test:
@@ -305,7 +313,7 @@ elif menu == "Magazzino":
                                  ON CONFLICT(codice,lotto,origine) DO UPDATE SET quantita=excluded.quantita, descrizione=excluded.descrizione, scadenza=excluded.scadenza""",
                               (codice, "" if not des else str(r[des]), lotto, "" if not sca else str(r[sca]), qta, ori))
                     n += 1
-                c.commit(); c.close(); st.success(f"Righe importate/aggiornate: {n}. Scartate: {skipped}.")
+                c.commit(); cloud_backup_now(); c.close(); st.success(f"Righe importate/aggiornate: {n}. Scartate: {skipped}.")
     with tab2:
         editable_table("magazzino", "Gestisci magazzino")
 
@@ -405,7 +413,7 @@ elif menu == "Import iniziali":
                 for _, r in df.iterrows():
                     c.execute("""INSERT OR REPLACE INTO clienti(codice_cliente,descrizione,citta,provincia,piva)
                                  VALUES(?,?,?,?,?)""", (str(r[cc]), str(r[desc]), "" if not city else str(r[city]), "" if not prov else str(r[prov]), "" if not piva else str(r[piva])))
-                c.commit(); c.close()
+                c.commit(); cloud_backup_now(); c.close()
                 st.success("Clienti importati")
     with tab2:
         f = st.file_uploader("Giacenze magazzino Excel", type=["xlsx","xls"], key="mag")
@@ -431,13 +439,13 @@ elif menu == "Import iniziali":
                     c.execute("""INSERT OR REPLACE INTO magazzino(codice,descrizione,lotto,scadenza,quantita,origine)
                                  VALUES(?,?,?,?,?,?)""", (codice, "" if not des else str(r[des]), lotto, "" if not sca else str(r[sca]), qta, ori))
                     n += 1
-                c.commit(); c.close()
+                c.commit(); cloud_backup_now(); c.close()
                 st.success(f"Importate {n} righe")
     with tab3:
         st.dataframe(q("SELECT * FROM agenti ORDER BY nome"), use_container_width=True)
         nome = st.text_input("Nuovo agente")
         if st.button("Aggiungi agente") and nome:
-            c = get_conn(); c.execute("INSERT OR IGNORE INTO agenti(nome) VALUES(?)", (nome,)); c.commit(); c.close()
+            c = get_conn(); c.execute("INSERT OR IGNORE INTO agenti(nome) VALUES(?)", (nome,)); c.commit(); cloud_backup_now(); c.close()
             st.success("Agente aggiunto")
 
 elif menu == "Offerte":
@@ -474,7 +482,7 @@ elif menu == "Offerte":
                 x = x.strip()
                 if x:
                     c.execute("INSERT INTO offerte_clienti(offerta_id,codice_cliente) VALUES(?,?)", (off_id, x))
-            c.commit(); c.close()
+            c.commit(); cloud_backup_now(); c.close()
             st.success(f"Offerta creata ID {off_id}")
 
     with tab2:
@@ -513,7 +521,7 @@ elif menu == "Offerte":
                                      VALUES(?,?,?,?,?,?,?)""",
                                   (off_id,codice,"" if not des else str(r[des]),prezzo,"" if not iva else str(r[iva]),"" if not cnd else str(r[cnd]),"" if not rdm else str(r[rdm])))
                         n += 1
-                    c.commit(); c.close()
+                    c.commit(); cloud_backup_now(); c.close()
                     st.success(f"Prezzi importati: {n}. Righe scartate: {skipped}.")
 
     with tab3:
@@ -563,7 +571,7 @@ elif menu == "Offerte":
                              SET nome_offerta=?, linea=?, data_inizio=?, data_fine=?, note=?
                              WHERE id=?""",
                           (str(r.get("nome_offerta","")), str(r.get("linea","")), str(r.get("data_inizio","")), str(r.get("data_fine","")), str(r.get("note","")), off_id))
-                c.commit(); c.close()
+                c.commit(); cloud_backup_now(); c.close()
                 st.success("Testata aggiornata.")
 
             st.subheader("Modifica clienti associati")
@@ -576,7 +584,7 @@ elif menu == "Offerte":
                     codice_cliente = str(r.get("codice_cliente","")).strip()
                     if codice_cliente and codice_cliente.lower() != "nan":
                         c.execute("INSERT INTO offerte_clienti(offerta_id,codice_cliente) VALUES(?,?)", (off_id, codice_cliente))
-                c.commit(); c.close()
+                c.commit(); cloud_backup_now(); c.close()
                 st.success("Clienti offerta aggiornati.")
 
             st.subheader("Modifica prezzi")
@@ -611,7 +619,7 @@ elif menu == "Offerte":
                                      VALUES(?,?,?,?,?,?,?)""",
                                   (off_id, codice, str(r.get("descrizione","")), prezzo, str(r.get("iva","")), str(r.get("cnd","")), str(r.get("rdm",""))))
                         inserted += 1
-                c.commit(); c.close()
+                c.commit(); cloud_backup_now(); c.close()
                 st.success(f"Prezzi aggiornati: {saved}. Nuove righe: {inserted}.")
 
             st.warning("Eliminazione completa offerta: usare solo se sei sicuro.")
@@ -620,7 +628,7 @@ elif menu == "Offerte":
                 c.execute("DELETE FROM offerte_prezzi WHERE offerta_id=?", (off_id,))
                 c.execute("DELETE FROM offerte_clienti WHERE offerta_id=?", (off_id,))
                 c.execute("DELETE FROM offerte_header WHERE id=?", (off_id,))
-                c.commit(); c.close()
+                c.commit(); cloud_backup_now(); c.close()
                 st.success("Offerta eliminata. Ricarica la pagina.")
 
     with tab5:
@@ -716,7 +724,7 @@ elif menu == "DDT carico / Loan":
                          ON CONFLICT(codice,lotto,origine) DO UPDATE SET quantita=quantita+excluded.quantita, descrizione=excluded.descrizione, scadenza=excluded.scadenza""",
                       (codice,descr,lotto,scad,qta,tipo))
             n += 1
-        c.commit(); c.close()
+        c.commit(); cloud_backup_now(); c.close()
         st.success(f"DDT {ddt_id} creato. Righe caricate: {n}")
     st.subheader("DDT registrati")
     st.dataframe(q("SELECT * FROM ddt ORDER BY id DESC"), use_container_width=True)
@@ -810,7 +818,7 @@ elif menu == "Scarico sala":
                 c.execute("INSERT INTO anomalie(tipo,gravita,descrizione) VALUES('Lotto non trovato','Alta',?)", (f"Intervento {iid}: {codice} + lotto {lotto} non presente in magazzino/loan.",))
             c.execute("UPDATE magazzino SET quantita=quantita-? WHERE codice=? AND lotto=? AND origine=?", (qta,codice,lotto,origine))
             imported += 1
-        c.commit(); c.close()
+        c.commit(); cloud_backup_now(); c.close()
         st.success(f"Intervento {iid} creato. Righe importate: {imported}")
 elif menu == "Work Implant":
     
@@ -868,7 +876,7 @@ elif menu == "Ordini e chiusure":
                 c=get_conn()
                 for _,r in df.iterrows():
                     c.execute("INSERT INTO order_history(numero_ordine,riferimento_po,data_ordine,cliente,stato,totale) VALUES(?,?,?,?,?,?)", (str(r[no]), "" if not po else str(r[po]), "" if not data else str(r[data]), "" if not cliente else str(r[cliente]), "" if not stato else str(r[stato]), money(r[tot])))
-                c.commit(); c.close(); st.success("Importato")
+                c.commit(); cloud_backup_now(); c.close(); st.success("Importato")
     with tab2:
         f = st.file_uploader("Order Detail Excel", type=["xlsx","xls"])
         if f:
@@ -884,7 +892,7 @@ elif menu == "Ordini e chiusure":
                 c=get_conn()
                 for _,r in df.iterrows():
                     c.execute("INSERT INTO order_details(numero_ordine,codice,descrizione,quantita,prezzo,totale) VALUES(?,?,?,?,?,?)", (numero,str(r[cod]),"" if not des else str(r[des]),money(r[qty]) or 0, money(r[pre]) if pre else None, money(r[tot]) if tot else None))
-                c.commit(); c.close(); st.success("Importato")
+                c.commit(); cloud_backup_now(); c.close(); st.success("Importato")
     with tab3:
         f = st.file_uploader("Chiusura J&J Excel", type=["xlsx","xls"])
         if f:
@@ -900,7 +908,7 @@ elif menu == "Ordini e chiusure":
                 c=get_conn()
                 for _,r in df.iterrows():
                     c.execute("INSERT INTO chiusure(mese,numero_ordine,codice,descrizione,quantita,valore) VALUES(?,?,?,?,?,?)", (mese, "" if not ordine else str(r[ordine]), "" if not cod else str(r[cod]), "" if not des else str(r[des]), money(r[qty]) if qty else None, money(r[val])))
-                c.commit(); c.close(); st.success("Importato")
+                c.commit(); cloud_backup_now(); c.close(); st.success("Importato")
 
 elif menu == "Riconciliazione":
     
