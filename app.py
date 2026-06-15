@@ -17,6 +17,38 @@ def q(sql, params=()):
     return df
 
 
+def _idx(cols, wanted, default=0):
+    """Restituisce indice della colonna se presente."""
+    for w in wanted:
+        if w in cols:
+            return cols.index(w)
+    for i, c in enumerate(cols):
+        lc = str(c).lower()
+        if any(str(w).lower() in lc for w in wanted):
+            return i
+    return default
+
+def _idx_optional(cols, wanted):
+    opts = [""] + cols
+    for w in wanted:
+        if w in cols:
+            return opts.index(w)
+    for c in cols:
+        lc = str(c).lower()
+        if any(str(w).lower() in lc for w in wanted):
+            return opts.index(c)
+    return 0
+
+def _clean_import_code(v):
+    """Mantiene il codice come testo, evitando .0 finale da Excel."""
+    if pd.isna(v):
+        return ""
+    if isinstance(v, float) and v.is_integer():
+        return str(int(v))
+    return str(v).strip()
+
+
+
 def admin_only():
     if st.session_state.get("ruolo") != "Admin":
         st.error("Area riservata Admin.")
@@ -133,7 +165,7 @@ menu = st.sidebar.radio("Menu", menu_list, index=default_index)
 
 if menu == "Dashboard":
     st.title("🏥 OrthoFlow Control Tower")
-    st.caption("Gestione scarichi sala, DDT, offerte, magazzino e fatturato teorico.")
+    st.caption("Gestione scarichi sala, DDT, offerte, magazzino e fatturato teorico. Modalità J&J Safe Match: la S sterile resta discriminante.")
 
     is_admin_user = st.session_state.get("ruolo") == "Admin"
 
@@ -191,15 +223,15 @@ elif menu == "Clienti":
             st.write(f"Righe lette: **{len(df)}**")
             st.dataframe(df.head(50), use_container_width=True)
             cols = list(df.columns)
-            cc = st.selectbox("Colonna Codice cliente", cols, key="clienti_page_cod")
-            desc = st.selectbox("Colonna Descrizione", cols, key="clienti_page_desc")
-            city = st.selectbox("Colonna Città", [""] + cols, key="clienti_page_city")
-            prov = st.selectbox("Colonna Provincia", [""] + cols, key="clienti_page_prov")
-            piva = st.selectbox("Colonna P.IVA", [""] + cols, key="clienti_page_piva")
+            cc = st.selectbox("Colonna Codice cliente", cols, index=_idx(cols, ["Codice", "codice_cliente", "Cliente"]), key="clienti_page_cod")
+            desc = st.selectbox("Colonna Descrizione", cols, index=_idx(cols, ["Descrizione", "Ragione sociale", "Cliente"], 1 if len(cols)>1 else 0), key="clienti_page_desc")
+            city = st.selectbox("Colonna Città", [""] + cols, index=_idx_optional(cols, ["Città", "Citta", "Comune"]), key="clienti_page_city")
+            prov = st.selectbox("Colonna Provincia", [""] + cols, index=_idx_optional(cols, ["Prov", "Provincia"]), key="clienti_page_prov")
+            piva = st.selectbox("Colonna P.IVA", [""] + cols, index=_idx_optional(cols, ["Partita Iva", "P.IVA", "PIVA", "Partita IVA"]), key="clienti_page_piva")
             if st.button("Importa / aggiorna clienti", use_container_width=True, key="clienti_page_import"):
                 c = get_conn(); n = 0; skipped = 0
                 for _, r in df.iterrows():
-                    codice = str(r[cc]).strip()
+                    codice = _clean_import_code(r[cc])
                     if not codice or codice.lower() == "nan":
                         skipped += 1; continue
                     c.execute("""INSERT OR REPLACE INTO clienti(codice_cliente,descrizione,citta,provincia,piva,stato_record)
@@ -252,19 +284,22 @@ elif menu == "Magazzino":
             st.write(f"Righe lette: **{len(df)}**")
             st.dataframe(df.head(50), use_container_width=True)
             cols = list(df.columns)
-            cod = st.selectbox("Colonna Codice", cols, key="mag_page_cod")
-            lot = st.selectbox("Colonna Lotto", cols, key="mag_page_lot")
-            qty = st.selectbox("Colonna Quantità", cols, key="mag_page_qty")
-            des = st.selectbox("Colonna Descrizione", [""] + cols, key="mag_page_des")
-            sca = st.selectbox("Colonna Scadenza", [""] + cols, key="mag_page_sca")
+            cod = st.selectbox("Colonna Codice", cols, index=_idx(cols, ["Articolo", "Codice", "Codice prodotto"]), key="mag_page_cod")
+            lot = st.selectbox("Colonna Lotto", cols, index=_idx(cols, ["Lotto", "LOT", "Batch"], 2 if len(cols)>2 else 0), key="mag_page_lot")
+            qty = st.selectbox("Colonna Quantità", cols, index=_idx(cols, ["Quantità", "Quantita", "Qta", "Qty"], 3 if len(cols)>3 else 0), key="mag_page_qty")
+            des = st.selectbox("Colonna Descrizione", [""] + cols, index=_idx_optional(cols, ["Descr. articolo", "Descrizione articolo", "Descrizione", "Descr."]), key="mag_page_des")
+            sca = st.selectbox("Colonna Scadenza", [""] + cols, index=_idx_optional(cols, ["Scadenza", "Data scadenza", "EXP"]), key="mag_page_sca")
             ori = st.selectbox("Origine", ["CONTO DEPOSITO", "LOAN / CONTO VISIONE"], key="mag_page_ori")
+            only_pos = st.checkbox("Solo quantità positive (>0) consigliato per TTKEYS", value=True, key="mag_page_only_positive")
             if st.button("Importa / aggiorna magazzino", use_container_width=True, key="mag_page_import"):
                 c = get_conn(); n = 0; skipped = 0
                 for _, r in df.iterrows():
-                    codice, lotto = str(r[cod]).strip(), str(r[lot]).strip()
+                    codice, lotto = _clean_import_code(r[cod]), _clean_import_code(r[lot])
                     if not codice or codice.lower()=="nan" or not lotto or lotto.lower()=="nan":
                         skipped += 1; continue
                     qta = money(r[qty]) or 0
+                    if only_pos and qta <= 0:
+                        skipped += 1; continue
                     c.execute("""INSERT INTO magazzino(codice,descrizione,lotto,scadenza,quantita,origine,stato_record)
                                  VALUES(?,?,?,?,?,?,'Attivo')
                                  ON CONFLICT(codice,lotto,origine) DO UPDATE SET quantita=excluded.quantita, descrizione=excluded.descrizione, scadenza=excluded.scadenza""",
@@ -388,7 +423,7 @@ elif menu == "Import iniziali":
                 c = get_conn()
                 n = 0
                 for _, r in df.iterrows():
-                    codice, lotto = str(r[cod]).strip(), str(r[lot]).strip()
+                    codice, lotto = _clean_import_code(r[cod]), _clean_import_code(r[lot])
                     if not codice or codice=="nan" or not lotto or lotto=="nan":
                         continue
                     qta = pd.to_numeric(r[qty], errors="coerce")
@@ -412,7 +447,7 @@ elif menu == "Offerte":
         st.stop()
 
     st.title("💰 Offerte")
-    st.write("Visualizza, importa, modifica e controlla le offerte caricate.")
+    st.write("Visualizza, importa, modifica e controlla le offerte caricate. J&J Safe Match: 413.050S ≠ 413.050.")
 
     tab1, tab2, tab3, tab4, tab5 = st.tabs([
         "Crea offerta",
@@ -457,9 +492,9 @@ elif menu == "Offerte":
                 st.dataframe(df.head(50), use_container_width=True)
                 cols = list(df.columns)
 
-                cod = st.selectbox("Codice prodotto", cols, index=cols.index("codice") if "codice" in cols else 0, key="v5_cod")
-                pre = st.selectbox("Prezzo", cols, index=cols.index("prezzo") if "prezzo" in cols else 0, key="v5_pre")
-                des = st.selectbox("Descrizione", [""]+cols, index=([""]+cols).index("descrizione") if "descrizione" in cols else 0, key="v5_des")
+                cod = st.selectbox("Codice prodotto", cols, index=_idx(cols, ["Codice Prodotto", "Codice prodotto", "codice", "Articolo"]), key="v5_cod")
+                pre = st.selectbox("Prezzo", cols, index=_idx(cols, ["Prezzo unitario offerto cifre e lettere", "Prezzo", "prezzo"], 2 if len(cols)>2 else 0), key="v5_pre")
+                des = st.selectbox("Descrizione", [""]+cols, index=_idx_optional(cols, ["Descrizione prodotto", "Descrizione", "descrizione"]), key="v5_des")
                 iva = st.selectbox("IVA", [""]+cols, key="v5_iva")
                 cnd = st.selectbox("CND", [""]+cols, key="v5_cnd")
                 rdm = st.selectbox("RDM", [""]+cols, key="v5_rdm")
@@ -470,7 +505,7 @@ elif menu == "Offerte":
                     skipped = 0
                     for _, r in df.iterrows():
                         prezzo = money(r[pre])
-                        codice = str(r[cod]).strip()
+                        codice = _clean_import_code(r[cod])
                         if not codice or codice.lower()=="nan" or prezzo is None:
                             skipped += 1
                             continue
@@ -593,7 +628,7 @@ elif menu == "Offerte":
         clienti = q("SELECT codice_cliente || ' - ' || descrizione label FROM clienti ORDER BY descrizione")["label"].tolist()
         cliente_label = st.selectbox("Cliente", clienti if clienti else [""], key="v5_test_cliente")
         codice_cliente = cliente_label.split(" - ")[0] if cliente_label else ""
-        codice_test = st.text_input("Codice prodotto da testare", placeholder="es. 413.050s")
+        codice_test = st.text_input("Codice prodotto da testare", placeholder="es. 413.050S oppure 413.050")
         linea_test = st.selectbox("Linea", ["TRAUMA", "PROTESICA", "CMF", "SPINE", "SPORTS", "ALTRO"], key="v5_test_linea")
         data_test = st.date_input("Data intervento", date.today(), key="v5_test_data")
         if st.button("Testa aggancio prezzo", use_container_width=True, key="v5_test_btn"):
@@ -687,6 +722,7 @@ elif menu == "DDT carico / Loan":
     st.dataframe(q("SELECT * FROM ddt ORDER BY id DESC"), use_container_width=True)
 elif menu == "Scarico sala":
     st.title("Scarico sala")
+    st.info("J&J Safe Match: controlla sempre che il codice OCR mantenga la S finale se presente. 413.050S e 413.050 sono articoli diversi.")
     st.caption("Motore OCR AI: " + ("attivo" if ai_enabled() else "non configurato"))
     clienti = q("SELECT codice_cliente || ' - ' || descrizione label FROM clienti ORDER BY descrizione")["label"].tolist()
     agenti = q("SELECT nome FROM agenti ORDER BY nome")["nome"].tolist()

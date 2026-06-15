@@ -98,8 +98,14 @@ def prezzo_per(conn, codice_cliente, codice, linea, data_intervento):
 
 
 def detect_origine(conn, codice, lotto):
-    r = conn.execute("SELECT origine FROM magazzino WHERE codice=? AND lotto=? ORDER BY id DESC LIMIT 1", (codice, lotto)).fetchone()
-    return r["origine"] if r else "NON TROVATO"
+    lotto_s = str(lotto or "").strip()
+    variants = list(code_variants(codice))
+    placeholders = ",".join(["?"] * len(variants))
+    rows = conn.execute(f"SELECT codice, origine FROM magazzino WHERE lotto=? ORDER BY id DESC", (lotto_s,)).fetchall()
+    for r in rows:
+        if normalize_code(r["codice"]) in variants:
+            return r["origine"]
+    return "NON TROVATO"
 
 def excel_bytes(sheets):
     import io
@@ -212,3 +218,110 @@ def diagnose_price(conn, codice_cliente, codice, linea, data_intervento):
     issues.append(f"Codice {codice} non presente nei prezzi offerta. Formati cercati: {', '.join(sorted(target_variants))}. Esempi offerta: {sample}")
     return issues
 
+
+
+
+def normalize_code_exact(codice):
+    """
+    Normalizzazione sicura J&J:
+    - rimuove spazi, punti, trattini solo per confrontare formati diversi
+      es. 413.050S == 413050S
+    - NON aggiunge e NON rimuove S finale
+      quindi 413.050S != 413.050
+    """
+    s = str(codice or "").upper().strip()
+    s = re.sub(r"[^A-Z0-9]", "", s)
+    return s
+
+def same_jj_code(a, b):
+    return normalize_code_exact(a) == normalize_code_exact(b)
+
+def prezzo_per(conn, codice_cliente, codice, linea, data_intervento):
+    """
+    Matching prezzo J&J Safe Match:
+    coincidono cliente + linea + codice articolo identico.
+    La S finale resta discriminante:
+    413.050S != 413.050
+    """
+    target = normalize_code_exact(codice)
+    rows = conn.execute("""
+        SELECT p.codice, p.prezzo
+        FROM offerte_prezzi p
+        JOIN offerte_header h ON h.id=p.offerta_id
+        JOIN offerte_clienti c ON c.offerta_id=h.id
+        WHERE c.codice_cliente=? AND h.linea=?
+        AND (h.data_inizio IS NULL OR h.data_inizio='' OR h.data_inizio<=?)
+        AND (h.data_fine IS NULL OR h.data_fine='' OR h.data_fine>=?)
+        ORDER BY h.data_inizio DESC
+    """, (codice_cliente, linea, data_intervento, data_intervento)).fetchall()
+
+    for r in rows:
+        if normalize_code_exact(r["codice"]) == target:
+            return float(r["prezzo"]) if r["prezzo"] is not None else None
+    return None
+
+def detect_origine(conn, codice, lotto):
+    """
+    Cerca origine in magazzino rispettando S finale.
+    Punti/spazi possono differire, ma S non viene mai ignorata.
+    """
+    lotto_s = str(lotto or "").strip()
+    target = normalize_code_exact(codice)
+    rows = conn.execute("SELECT codice, origine FROM magazzino WHERE lotto=? ORDER BY id DESC", (lotto_s,)).fetchall()
+    for r in rows:
+        if normalize_code_exact(r["codice"]) == target:
+            return r["origine"]
+    return "NON TROVATO"
+
+def diagnose_price(conn, codice_cliente, codice, linea, data_intervento):
+    issues = []
+    if not codice_cliente:
+        issues.append("Codice cliente non risolto dalla struttura")
+        return issues
+
+    linked = conn.execute("""
+        SELECT h.id, h.nome_offerta, h.linea
+        FROM offerte_header h
+        JOIN offerte_clienti c ON c.offerta_id=h.id
+        WHERE c.codice_cliente=? AND h.linea=?
+    """, (codice_cliente, linea)).fetchall()
+
+    if not linked:
+        issues.append(f"Nessuna offerta collegata al cliente {codice_cliente} per linea {linea}")
+        return issues
+
+    target = normalize_code_exact(codice)
+    rows = conn.execute("""
+        SELECT p.codice
+        FROM offerte_prezzi p
+        JOIN offerte_header h ON h.id=p.offerta_id
+        JOIN offerte_clienti c ON c.offerta_id=h.id
+        WHERE c.codice_cliente=? AND h.linea=?
+        LIMIT 50000
+    """, (codice_cliente, linea)).fetchall()
+
+    for r in rows:
+        if normalize_code_exact(r["codice"]) == target:
+            return issues
+
+    # Cerca codici simili solo come suggerimento, NON come match.
+    no_s_target = target[:-1] if target.endswith("S") else target + "S"
+    similar = []
+    for r in rows[:50000]:
+        rc = normalize_code_exact(r["codice"])
+        if rc == no_s_target:
+            similar.append(str(r["codice"]))
+
+    if similar:
+        issues.append(
+            f"Prezzo non agganciato: trovato codice simile {similar[0]}, "
+            f"ma differisce per S sterile/non sterile. {codice} ≠ {similar[0]}"
+        )
+    else:
+        sample = ", ".join([str(r["codice"]) for r in rows[:8]])
+        issues.append(
+            f"Codice {codice} non presente nell'offerta per cliente {codice_cliente}, linea {linea}. "
+            f"Esempi offerta: {sample}"
+        )
+
+    return issues

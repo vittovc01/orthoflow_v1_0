@@ -6,6 +6,10 @@ from pathlib import Path
 from typing import List, Dict, Any
 from dotenv import load_dotenv
 from openai import OpenAI
+try:
+    import streamlit as st
+except Exception:
+    st = None
 
 load_dotenv()
 
@@ -162,6 +166,7 @@ def analyze_image(path: str, mode: str = "scarico_sala") -> Dict[str, Any]:
 Sei un motore OCR specializzato su DDT Johnson & Johnson / DePuy Synthes.
 Estrai testata documento e righe materiali. Identifica se il DDT è 'CONTO VISIONE', 'CONTO DEPOSITO', 'LOAN', 'IN/OUT'.
 Per ogni etichetta e per ogni riga estrai codice prodotto, lotto, scadenza, descrizione, quantità. Non fermarti alle prime righe: analizza tutta l'immagine.
+Il codice REF va mantenuto esatto: punti e S finale sono parte del codice.
 Non inventare dati. Se ci sono più etichette, restituisci una riga per ogni etichetta visibile. Se un campo non è leggibile usa null e warning.
 """
     else:
@@ -169,6 +174,9 @@ Non inventare dati. Se ci sono più etichette, restituisci una riga per ogni eti
         instructions = """
 Sei un motore OCR specializzato su scarichi sala operatoria ortopedici.
 Leggi anche il nome della clinica/struttura in alto nel modulo. Leggi etichette DePuy Synthes / Johnson & Johnson / Synthes e identifica REF/codice, LOT/lotto, scadenza, descrizione, produttore.
+ATTENZIONE: il codice REF deve essere restituito ESATTAMENTE come stampato, includendo punti e soprattutto la S finale se presente.
+La S finale indica sterile; senza S indica non sterile. Non aggiungere mai S e non rimuovere mai S.
+Esempio: 413.050S è diverso da 413.050.
 Accetta come J&J solo Johnson & Johnson, J&J, DePuy Synthes, Synthes.
 Se trovi Smith & Nephew, Stryker, Zimmer Biomet o altri produttori, is_jnj_depuy_synthes=false.
 Non inventare dati. Se ci sono più etichette, restituisci una riga per ogni etichetta visibile. Se un campo non è leggibile usa null e warning.
