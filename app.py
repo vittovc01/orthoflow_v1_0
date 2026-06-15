@@ -4,7 +4,7 @@ import pandas as pd
 from datetime import date
 from database import init_db, get_conn
 from helpers import *
-from ai_ocr import ai_enabled, analyze_image, normalize_ai_items
+from ai_ocr import ai_enabled, analyze_image, normalize_ai_items, ocr_engine_status
 import json
 
 st.set_page_config(page_title="OrthoFlow Control Tower v1.1", page_icon="🦴", layout="wide", initial_sidebar_state="expanded")
@@ -306,7 +306,19 @@ elif menu == "📸 Nuovo scarico sala":
         else:
             st.warning(f"Struttura letta: {detected_clinic}, ma non collegata. Aggiungi alias o seleziona manualmente.")
 
-    if ai_rows:
+    
+    st.subheader("Diagnostica OCR / Aggancio")
+    diag_cols = st.columns(4)
+    diag_cols[0].metric("Motore OCR", ocr_engine_status())
+    diag_cols[1].metric("Struttura letta", detected_clinic if detected_clinic else "NON LETTA")
+    diag_cols[2].metric("Cliente agganciato", resolved["codice_cliente"] if resolved else "NO")
+    diag_cols[3].metric("Righe estratte", len(ai_rows) if ai_rows else 0)
+
+    if ai_meta:
+        with st.expander("Vedi risultato OCR completo"):
+            st.json(ai_meta)
+
+if ai_rows:
         st.subheader("Righe estratte - correggi prima di salvare")
         edited = st.data_editor(pd.DataFrame(ai_rows), use_container_width=True, num_rows="dynamic", key="editor_ai_scarico_v34")
     else:

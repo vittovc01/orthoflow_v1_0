@@ -93,8 +93,13 @@ Per ogni riga estrai codice prodotto, lotto, scadenza, descrizione, quantità. N
     else:
         schema = SCARICO_SALA_SCHEMA
         instructions = """
-Sei un motore OCR specializzato su scarichi sala operatoria ortopedici.
+Sei un motore OCR specializzato su scarichi sala operatoria ortopedici Johnson & Johnson / DePuy Synthes. Devi estrarre SEMPRE la struttura/clinica se compare sul documento.
 Leggi nome struttura/clinica, cartella clinica, chirurgo, data, codici, lotti, scadenze e produttore.
+Per ogni etichetta cerca:
+- REF / REF. / CODICE / CAT = codice prodotto
+- LOT / LOTTO / BATCH = lotto
+- EXP / SCAD / SCADENZA / USE BY = scadenza
+Non confondere intestazioni ospedaliere o parole del modulo con lotti.
 Accetta come J&J solo Johnson & Johnson, J&J, DePuy Synthes, Synthes.
 Se trovi Smith & Nephew, Stryker, Zimmer Biomet o altri produttori, is_jnj_depuy_synthes=false.
 Non inventare.
@@ -431,3 +436,11 @@ def normalize_ai_items(result: Dict[str, Any]) -> List[Dict[str, Any]]:
             "source_text": it.get("source_text") or ""
         })
     return out
+
+
+def ocr_engine_status() -> str:
+    if openai_enabled():
+        return "OpenAI AI OCR"
+    if free_ocr_enabled():
+        return "OCR gratuito Tesseract"
+    return "OCR non attivo"
