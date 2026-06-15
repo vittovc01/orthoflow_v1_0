@@ -281,7 +281,7 @@ elif menu == "📸 Nuovo scarico sala":
         saved_path = save_file(allegato)
         if getattr(allegato, "type", "").startswith("image/"):
             st.image(allegato, caption="Foto scarico sala", use_container_width=True)
-            if st.button("Leggi con AI OCR"):
+            if st.button("Estrai codici / lotti / scadenze"):
                 if not ai_enabled():
                     st.error("OCR non configurato. Il gratuito usa ENABLE_FREE_OCR=true; l'AI avanzata usa OPENAI_API_KEY.")
                 else:
@@ -307,8 +307,8 @@ elif menu == "📸 Nuovo scarico sala":
             st.warning(f"Struttura letta: {detected_clinic}, ma non collegata. Aggiungi alias o seleziona manualmente.")
 
     if ai_rows:
-        st.subheader("Righe lette dall'AI - correggi prima di salvare")
-        edited = st.data_editor(pd.DataFrame(ai_rows), use_container_width=True, num_rows="dynamic")
+        st.subheader("Righe estratte - correggi prima di salvare")
+        edited = st.data_editor(pd.DataFrame(ai_rows), use_container_width=True, num_rows="dynamic", key="editor_ai_scarico_v34")
     else:
         edited = pd.DataFrame(columns=["codice","descrizione","lotto","scadenza","quantita","produttore","is_jnj"])
 
@@ -502,7 +502,7 @@ elif menu == "Import iniziali":
             c = get_conn(); c.execute("INSERT OR IGNORE INTO agenti(nome) VALUES(?)", (nome,)); c.commit(); c.close()
             st.success("Agente aggiunto")
 
-elif menu == "Offerte":
+elif menu in ["Offerte", "💰 Offerte"]:
     admin_only()
     st.title("Gestione offerte")
     st.write("Qui potrai aggiungere nuove offerte anche in futuro, senza modificare l'app.")
@@ -601,7 +601,7 @@ elif menu in ["DDT carico / Loan", "🚚 DDT carico / Loan", "🚚 Nuovo DDT / L
     rows = st.session_state.get("ai_ddt_rows", []) or []
     if rows:
         st.subheader("Righe DDT estratte da verificare")
-        edited = st.data_editor(pd.DataFrame(rows), use_container_width=True, num_rows="dynamic")
+        edited = st.data_editor(pd.DataFrame(rows), use_container_width=True, num_rows="dynamic", key="editor_ai_ddt_v34")
     else:
         edited = pd.DataFrame(columns=["codice","descrizione","lotto","scadenza","quantita","produttore"])
 
@@ -653,7 +653,7 @@ elif menu in ["Scarico sala", "🏥 Scarico sala", "📸 Nuovo scarico sala"]:
         st.success(f"File salvato: {saved_path}")
         if allegato.type.startswith("image/"):
             st.image(allegato, caption="Scarico sala", use_container_width=True)
-            if st.button("Analizza con OCR AI"):
+            if st.button("Estrai codici / lotti / scadenze"):
                 if not ai_enabled():
                     st.error("OCR non configurato. Il gratuito usa ENABLE_FREE_OCR=true; l'AI avanzata usa OPENAI_API_KEY.")
                 else:
@@ -672,9 +672,9 @@ elif menu in ["Scarico sala", "🏥 Scarico sala", "📸 Nuovo scarico sala"]:
             st.info("Per PDF scansionati serve conversione pagine→immagini/OCR AI. In questa v0.6 l'OCR AI lavora direttamente sulle immagini caricate.")
 
     if "ai_scarico_rows" in st.session_state and st.session_state["ai_scarico_rows"]:
-        st.subheader("2) Righe estratte da AI da verificare")
+        st.subheader("2) Righe estratte da verificare")
         df_ai = pd.DataFrame(st.session_state["ai_scarico_rows"])
-        edited = st.data_editor(df_ai, use_container_width=True, num_rows="dynamic")
+        edited = st.data_editor(df_ai, use_container_width=True, num_rows="dynamic", key="editor_ai_scarico_legacy_v34")
     else:
         edited = pd.DataFrame(columns=["codice","descrizione","lotto","scadenza","quantita","produttore","is_jnj","warning"])
 

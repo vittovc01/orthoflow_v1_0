@@ -173,16 +173,34 @@ def _extract_codes(text: str):
     return found
 
 def _extract_lots(text: str):
+    """
+    OCR gratuito: estrazione lotto prudente.
+    Evita parole del modulo lette male come IERA, DIRETTORE, OSPEDALE ecc.
+    Accetta preferibilmente stringhe vicino a LOT/LOTTO/BATCH e con almeno un numero.
+    """
     lots = []
     up = text.upper()
-    patterns = [
-        r"(?:LOT|LOTTO|BATCH|L\.?)\s*[:\-]?\s*([A-Z0-9]{4,20})",
-        r"\b([A-Z]{1,3}\d{5,12})\b",
-    ]
-    for pat in patterns:
-        for m in re.findall(pat, up):
-            if m not in lots:
-                lots.append(m)
+
+    blacklist = {
+        "DIRETTORE", "OSPEDALE", "OSPEDALIERA", "AZIENDA", "UNIVERSITARIA",
+        "UNIVE", "IERA", "SALA", "CHIRURGO", "PAZIENTE", "DATA", "CODICE",
+        "DESCRIZIONE", "QUANTITA", "SCADENZA", "LOTTO", "PRODUTTORE"
+    }
+
+    # Lotto dopo etichetta esplicita
+    for m in re.findall(r"(?:LOT|LOTTO|BATCH|L\.?)\s*[:\-]?\s*([A-Z0-9][A-Z0-9\-]{3,20})", up):
+        clean = m.strip(" -:;,.")
+        if clean not in blacklist and any(ch.isdigit() for ch in clean):
+            if clean not in lots:
+                lots.append(clean)
+
+    # Lotto alfanumerico plausibile, sempre con numeri
+    for m in re.findall(r"\b([A-Z]{1,4}\d{4,14}[A-Z0-9]{0,6})\b", up):
+        clean = m.strip(" -:;,.")
+        if clean not in blacklist and any(ch.isdigit() for ch in clean):
+            if clean not in lots:
+                lots.append(clean)
+
     return lots
 
 def _extract_expiries(text: str):
@@ -199,6 +217,137 @@ def _extract_expiries(text: str):
                 dates.append(m)
     return dates
 
+
+def _normalize_line(line: str) -> str:
+    return re.sub(r"\s+", " ", str(line or "").strip())
+
+def _nearby_value(lines, idx, labels, max_lookahead=3):
+    """
+    Cerca valore vicino a etichette tipo REF/LOT/EXP nella stessa riga o righe successive.
+    """
+    for j in range(idx, min(len(lines), idx + max_lookahead + 1)):
+        line = lines[j].upper()
+        for lab in labels:
+            if lab in line:
+                # valore dopo label nella stessa riga
+                parts = re.split(rf"{lab}\s*[:\-]?", line, maxsplit=1)
+                if len(parts) > 1:
+                    val = parts[1].strip(" :;-")
+                    if val:
+                        return val
+                # prima riga successiva non vuota
+                for k in range(j + 1, min(len(lines), j + max_lookahead + 1)):
+                    val = lines[k].strip()
+                    if val:
+                        return val
+    return None
+
+def _clean_code(value: str):
+    if not value:
+        return None
+    up = value.upper()
+    pats = [
+        r"\b\d{2}\.\d{3}\.\d{3,4}S?\b",
+        r"\b\d{3}\.\d{3,4}S?\b",
+        r"\b\d{2}\.\d{4}\.\d{3,4}S?\b",
+    ]
+    for p in pats:
+        m = re.search(p, up)
+        if m:
+            return m.group(0)
+    return None
+
+def _clean_lot(value: str):
+    if not value:
+        return None
+    up = value.upper()
+    blacklist = {
+        "DIRETTORE", "OSPEDALE", "OSPEDALIERA", "AZIENDA", "UNIVERSITARIA",
+        "UNIVE", "IERA", "SALA", "CHIRURGO", "PAZIENTE", "DATA", "CODICE",
+        "DESCRIZIONE", "QUANTITA", "SCADENZA", "LOTTO", "PRODUTTORE",
+        "REF", "LOT", "EXP", "STERILE", "SYNTHES", "DEPUY", "JOHNSON"
+    }
+    candidates = re.findall(r"\b[A-Z0-9][A-Z0-9\-]{3,20}\b", up)
+    for c in candidates:
+        if c in blacklist:
+            continue
+        if any(ch.isdigit() for ch in c) and not _clean_code(c):
+            return c
+    return None
+
+def _clean_expiry(value: str):
+    if not value:
+        return None
+    up = value.upper()
+    pats = [
+        r"\b20\d{2}[-/\.]\d{1,2}[-/\.]\d{1,2}\b",
+        r"\b\d{1,2}[-/\.]\d{1,2}[-/\.]20\d{2}\b",
+        r"\b\d{1,2}[-/\.]20\d{2}\b",
+        r"\b20\d{2}[-/\.]\d{1,2}\b",
+    ]
+    for p in pats:
+        m = re.search(p, up)
+        if m:
+            return m.group(0)
+    return None
+
+def _extract_structured_items(text: str):
+    """
+    Estrazione specializzata per etichette ortopediche J&J/DePuy/Synthes.
+    Cerca codici prodotto e poi associa LOT/EXP nelle righe vicine.
+    """
+    raw_lines = [_normalize_line(x) for x in text.splitlines()]
+    lines = [x for x in raw_lines if x]
+    items = []
+
+    code_positions = []
+    for i, line in enumerate(lines):
+        code = _clean_code(line)
+        if code:
+            code_positions.append((i, code))
+
+    # Se REF è su riga separata, cerca codice nelle 3 righe successive
+    for i, line in enumerate(lines):
+        up = line.upper()
+        if any(label in up for label in ["REF", "REF.", "CAT", "CODICE"]):
+            val = _nearby_value(lines, i, ["REF", "REF.", "CAT", "CODICE"], 3)
+            code = _clean_code(val or "")
+            if code and all(code != c for _, c in code_positions):
+                code_positions.append((i, code))
+
+    seen = set()
+    for idx, code in code_positions:
+        if code in seen:
+            continue
+        seen.add(code)
+
+        window = "\n".join(lines[max(0, idx-4): min(len(lines), idx+8)])
+        lot_val = _nearby_value(lines, max(0, idx-4), ["LOT", "LOTTO", "BATCH"], 12)
+        exp_val = _nearby_value(lines, max(0, idx-4), ["EXP", "SCAD", "SCADENZA", "USE BY"], 12)
+
+        lot = _clean_lot(lot_val or window)
+        expiry = _clean_expiry(exp_val or window)
+
+        # produttore nel blocco vicino
+        up_window = window.upper()
+        is_jnj = any(w in up_window or w in text.upper() for w in ["DEPUY", "SYNTHES", "JOHNSON", "J&J"])
+
+        items.append({
+            "code": code,
+            "lot": lot,
+            "expiry": expiry,
+            "description": "",
+            "quantity": 1,
+            "manufacturer": "DePuy Synthes" if is_jnj else None,
+            "is_jnj_depuy_synthes": is_jnj,
+            "is_sterile": code.upper().endswith("S"),
+            "source_text": window[:1000],
+            "confidence": 0.70 if lot or expiry else 0.55,
+            "warning": "" if lot and expiry else "Controllare manualmente lotto/scadenza: OCR gratuito."
+        })
+
+    return items
+
 def _free_ocr_result(path: str, mode: str):
     p = Path(path)
     text = _ocr_pdf_text(path) if p.suffix.lower() == ".pdf" else _ocr_image_text(path)
@@ -210,21 +359,25 @@ def _free_ocr_result(path: str, mode: str):
     expiries = _extract_expiries(text)
     is_jnj = any(w in up for w in ["DEPUY", "SYNTHES", "JOHNSON", "J&J"])
 
-    items = []
-    for i, code in enumerate(codes):
-        items.append({
-            "code": code,
-            "lot": lots[i] if i < len(lots) else None,
-            "expiry": expiries[i] if i < len(expiries) else None,
-            "description": "",
-            "quantity": 1,
-            "manufacturer": "DePuy Synthes" if is_jnj else None,
-            "is_jnj_depuy_synthes": is_jnj,
-            "is_sterile": str(code).upper().endswith("S"),
-            "source_text": text[:1000],
-            "confidence": 0.55,
-            "warning": "OCR gratuito: controllare manualmente codice, lotto e scadenza."
-        })
+    items = _extract_structured_items(text)
+
+    # Fallback semplice se l'estrazione strutturata non trova nulla.
+    if not items:
+        items = []
+        for i, code in enumerate(codes):
+            items.append({
+                "code": code,
+                "lot": lots[i] if i < len(lots) and any(ch.isdigit() for ch in str(lots[i])) else None,
+                "expiry": expiries[i] if i < len(expiries) else None,
+                "description": "",
+                "quantity": 1,
+                "manufacturer": "DePuy Synthes" if is_jnj else None,
+                "is_jnj_depuy_synthes": is_jnj,
+                "is_sterile": str(code).upper().endswith("S"),
+                "source_text": text[:1000],
+                "confidence": 0.55,
+                "warning": "OCR gratuito: controllare manualmente codice, lotto e scadenza."
+            })
 
     if mode == "ddt":
         return {
