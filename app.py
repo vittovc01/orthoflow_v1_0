@@ -652,82 +652,124 @@ elif menu == "Offerte":
                     st.warning(i)
 
 elif menu == "DDT carico / Loan":
-    
     if st.session_state.get("ruolo") != "Admin":
         st.error("Area riservata Admin.")
         st.stop()
 
-    st.title("DDT carico / Loan con OCR AI")
-    st.write("I DDT 'Conto Visione / Loan' entrano nel WI se impiantati, ma NON nel reintegro Customer Connect.")
+    st.title("🚚 DDT carico / Loan")
+    st.write("Carica DDT con OCR AI da foto/PDF oppure importa righe da Excel. I Loan/Conto Visione entrano nel Work Implant se impiantati, ma non nel reintegro Customer Connect.")
 
-    allegato = st.file_uploader("Carica DDT foto/PDF", type=["pdf","jpg","jpeg","png"], key="ddt_ai_file")
-    saved_path = ""
-    ddt_ai = {}
-    ddt_rows = []
+    tab_ocr, tab_excel, tab_storico = st.tabs(["📸 OCR AI foto/PDF", "📊 Import Excel", "📚 DDT registrati"])
 
-    if allegato:
-        saved_path = save_file(allegato)
-        st.success(f"File salvato: {saved_path}")
-        if allegato.type.startswith("image/"):
-            st.image(allegato, caption="DDT", use_container_width=True)
-            if st.button("Analizza DDT con OCR AI"):
-                if not ai_enabled():
-                    st.error("OCR AI non configurato. Controlla Streamlit Secrets: OPENAI_API_KEY e ENABLE_AI_OCR=true.")
-                else:
-                    with st.spinner("Analisi DDT in corso..."):
-                        try:
-                            ddt_ai = analyze_image(saved_path, mode="ddt")
-                            ddt_rows = normalize_ai_items(ddt_ai)
-                            st.session_state["ai_ddt_meta"] = ddt_ai
-                            st.session_state["ai_ddt_rows"] = ddt_rows
-                            st.success(f"Righe DDT estratte: {len(ddt_rows)}")
-                        except Exception as e:
-                            st.error(f"Errore OCR AI: {e}")
-        elif allegato.type == "application/pdf":
-            text = pdf_text(allegato)
-            st.text_area("Testo PDF estratto", text[:4000], height=180)
-            st.info("Per DDT PDF nativi puoi usare i dati estratti testualmente; per scansioni/foto usa OCR AI su immagine.")
+    with tab_ocr:
+        st.subheader("1) Carica foto DDT")
+        allegato = st.file_uploader("Foto/PDF DDT", type=["pdf", "jpg", "jpeg", "png"], key="ddt_ai_file_v532")
+        saved_path = ""
+        if allegato:
+            saved_path = save_file(allegato)
+            st.success(f"File salvato: {saved_path}")
 
-    meta = st.session_state.get("ai_ddt_meta", {}) or {}
-    rows = st.session_state.get("ai_ddt_rows", []) or []
-    if rows:
-        st.subheader("Righe DDT estratte da verificare")
-        edited = st.data_editor(pd.DataFrame(rows), use_container_width=True, num_rows="dynamic", key="ddt_rows_editor_v5")
-    else:
-        edited = pd.DataFrame(columns=["codice","descrizione","lotto","scadenza","quantita","produttore"])
+            if allegato.type.startswith("image/"):
+                st.image(allegato, caption="DDT", use_container_width=True)
+                if st.button("Estrai DDT con OCR AI", use_container_width=True, key="ddt_ai_extract_v532"):
+                    if not ai_enabled():
+                        st.error("OCR AI non configurato. Controlla OPENAI_API_KEY e ENABLE_AI_OCR=true nei Secrets.")
+                    else:
+                        with st.spinner("Analisi DDT in corso..."):
+                            try:
+                                meta = analyze_image(saved_path, mode="ddt")
+                                rows = normalize_ai_items(meta)
+                                st.session_state["ai_ddt_meta"] = meta
+                                st.session_state["ai_ddt_rows"] = rows
+                                st.success(f"Righe DDT estratte: {len(rows)}")
+                            except Exception as e:
+                                st.error(f"Errore OCR AI: {e}")
 
-    with st.form("ddt_ai_form"):
-        numero = st.text_input("Numero DDT", value=meta.get("ddt_number") or "")
-        data_ddt = st.text_input("Data DDT", value=meta.get("ddt_date") or str(date.today()))
-        default_tipo = "LOAN / CONTO VISIONE" if meta.get("is_loan_or_conto_visione") else "CONTO DEPOSITO"
-        tipo = st.selectbox("Tipo DDT", ["CONTO DEPOSITO", "LOAN / CONTO VISIONE"], index=0 if default_tipo=="CONTO DEPOSITO" else 1)
-        cliente = st.text_input("Cliente/destinazione", value=meta.get("customer") or meta.get("destination") or "")
-        note = st.text_area("Note", value=meta.get("transport_reason") or "")
-        ok = st.form_submit_button("Crea DDT e carica righe in magazzino/loan")
-    if ok:
-        c = get_conn()
-        cur = c.execute("INSERT INTO ddt(numero_ddt,data_ddt,tipo_ddt,cliente,allegato,note) VALUES(?,?,?,?,?,?)", (numero,str(data_ddt),tipo,cliente,saved_path,note))
-        ddt_id = cur.lastrowid
-        n = 0
-        for _, rr in edited.iterrows():
-            codice = str(rr.get("codice","")).strip()
-            lotto = str(rr.get("lotto","")).strip()
-            if not codice or not lotto or codice.lower()=="nan" or lotto.lower()=="nan":
-                continue
-            qta = money(rr.get("quantita")) or 1
-            descr = str(rr.get("descrizione",""))
-            scad = str(rr.get("scadenza",""))
-            c.execute("""INSERT INTO ddt_righe(ddt_id,codice,descrizione,lotto,scadenza,quantita,origine)
-                         VALUES(?,?,?,?,?,?,?)""", (ddt_id,codice,descr,lotto,scad,qta,tipo))
-            c.execute("""INSERT INTO magazzino(codice,descrizione,lotto,scadenza,quantita,origine)
-                         VALUES(?,?,?,?,?,?)
-                         ON CONFLICT(codice,lotto,origine) DO UPDATE SET quantita=quantita+excluded.quantita, descrizione=excluded.descrizione, scadenza=excluded.scadenza""",
-                      (codice,descr,lotto,scad,qta,tipo))
-            n += 1
-        c.commit(); cloud_backup_now(); c.close()
-        st.success(f"DDT {ddt_id} creato. Righe caricate: {n}")
-    st.subheader("DDT registrati")
-    st.dataframe(q("SELECT * FROM ddt ORDER BY id DESC"), use_container_width=True)
+            elif allegato.type == "application/pdf":
+                text = pdf_text(allegato)
+                st.text_area("Testo PDF estratto", text[:5000], height=220)
+                st.info("Per PDF scannerizzati conviene caricare la foto/pagina come immagine. Per PDF testuali puoi copiare le righe o usare import Excel.")
+
+        meta = st.session_state.get("ai_ddt_meta", {}) or {}
+        rows = st.session_state.get("ai_ddt_rows", []) or []
+
+        st.subheader("2) Controlla righe estratte")
+        if rows:
+            df_rows = pd.DataFrame(rows)
+        else:
+            df_rows = pd.DataFrame(columns=["codice", "descrizione", "lotto", "scadenza", "quantita", "produttore", "warning"])
+        edited = st.data_editor(df_rows, use_container_width=True, num_rows="dynamic", key="ddt_ai_rows_editor_v532")
+
+        st.subheader("3) Conferma carico DDT")
+        with st.form("ddt_ai_confirm_v532"):
+            numero = st.text_input("Numero DDT", value=meta.get("ddt_number") or "")
+            data_ddt = st.text_input("Data DDT", value=meta.get("ddt_date") or str(date.today()))
+            default_tipo = "LOAN / CONTO VISIONE" if meta.get("is_loan_or_conto_visione") else "CONTO DEPOSITO"
+            tipo = st.selectbox("Tipo carico", ["CONTO DEPOSITO", "LOAN / CONTO VISIONE"], index=0 if default_tipo=="CONTO DEPOSITO" else 1)
+            cliente = st.text_input("Cliente / destinazione", value=meta.get("customer") or meta.get("destination") or "")
+            note = st.text_area("Note", value=meta.get("transport_reason") or "")
+            ok = st.form_submit_button("Crea DDT e carica righe", use_container_width=True)
+
+        if ok:
+            ddt_id, n, skipped = import_ddt_rows_to_db(numero, data_ddt, tipo, cliente, note, edited, saved_path)
+            st.success(f"DDT {ddt_id} creato. Righe caricate: {n}. Scartate: {skipped}.")
+
+    with tab_excel:
+        st.subheader("Import DDT da Excel")
+        st.write("Usa questa modalità quando ricevi un Excel strutturato con codici, lotti, quantità e scadenze.")
+
+        f = st.file_uploader("Excel DDT / carico magazzino", type=["xlsx", "xls"], key="ddt_excel_file_v532")
+        if f:
+            df = norm(pd.read_excel(f))
+            st.write(f"Righe lette: **{len(df)}**")
+            st.dataframe(df.head(50), use_container_width=True)
+
+            cols = list(df.columns)
+            cod = st.selectbox("Colonna Codice", cols, index=_idx(cols, ["Codice", "Articolo", "Codice Prodotto", "REF"]), key="ddt_xls_cod")
+            lot = st.selectbox("Colonna Lotto", cols, index=_idx(cols, ["Lotto", "LOT", "Batch"]), key="ddt_xls_lot")
+            qty = st.selectbox("Colonna Quantità", cols, index=_idx(cols, ["Quantità", "Quantita", "Qta", "Qty"], 0), key="ddt_xls_qty")
+            des = st.selectbox("Colonna Descrizione", [""] + cols, index=_idx_optional(cols, ["Descrizione", "Descr.", "Descr. articolo", "Descrizione articolo"]), key="ddt_xls_des")
+            sca = st.selectbox("Colonna Scadenza", [""] + cols, index=_idx_optional(cols, ["Scadenza", "Data scadenza", "EXP"]), key="ddt_xls_sca")
+
+            preview = pd.DataFrame({
+                "codice": df[cod].map(_clean_import_code),
+                "descrizione": "" if not des else df[des].astype(str),
+                "lotto": df[lot].map(_clean_import_code),
+                "scadenza": "" if not sca else df[sca].astype(str),
+                "quantita": df[qty],
+            })
+            st.subheader("Anteprima righe da caricare")
+            edited_excel = st.data_editor(preview, use_container_width=True, num_rows="dynamic", key="ddt_excel_editor_v532")
+
+            with st.form("ddt_excel_confirm_v532"):
+                numero = st.text_input("Numero DDT", "")
+                data_ddt = st.text_input("Data DDT", str(date.today()))
+                tipo = st.selectbox("Tipo carico", ["CONTO DEPOSITO", "LOAN / CONTO VISIONE"], key="ddt_xls_tipo")
+                cliente = st.text_input("Cliente / destinazione", "")
+                note = st.text_area("Note", "Import Excel DDT")
+                ok = st.form_submit_button("Crea DDT da Excel e carica magazzino", use_container_width=True)
+
+            if ok:
+                ddt_id, n, skipped = import_ddt_rows_to_db(numero, data_ddt, tipo, cliente, note, edited_excel, "")
+                st.success(f"DDT {ddt_id} creato da Excel. Righe caricate: {n}. Scartate: {skipped}.")
+
+    with tab_storico:
+        st.subheader("DDT registrati")
+        ddt_df = q("SELECT * FROM ddt ORDER BY id DESC")
+        st.dataframe(ddt_df, use_container_width=True)
+        if not ddt_df.empty:
+            righe = q("""SELECT d.numero_ddt, d.data_ddt, d.tipo_ddt, d.cliente,
+                                r.codice, r.descrizione, r.lotto, r.scadenza, r.quantita, r.origine
+                         FROM ddt_righe r
+                         JOIN ddt d ON d.id=r.ddt_id
+                         ORDER BY d.id DESC, r.id ASC""")
+            st.download_button(
+                "Scarica DDT + righe Excel",
+                excel_bytes({"DDT": ddt_df, "Righe": righe}),
+                "ddt_registrati.xlsx",
+                use_container_width=True
+            )
+
 elif menu == "Scarico sala":
     st.title("Scarico sala")
     st.info("J&J Safe Match: controlla sempre che il codice OCR mantenga la S finale se presente. 413.050S e 413.050 sono articoli diversi.")
