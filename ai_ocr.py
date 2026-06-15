@@ -9,6 +9,33 @@ from openai import OpenAI
 
 load_dotenv()
 
+
+def _secret(name: str, default: str = "") -> str:
+    """Legge prima Streamlit Secrets, poi variabili ambiente/.env."""
+    try:
+        import streamlit as st
+        if name in st.secrets:
+            value = st.secrets.get(name)
+            if value is not None:
+                return str(value)
+    except Exception:
+        pass
+    return str(os.getenv(name, default) or default)
+
+def _flag(name: str, default: str = "false") -> bool:
+    return _secret(name, default).strip().lower() in {"1", "true", "yes", "y", "on"}
+
+def _responses_json_schema_format(schema_obj: dict) -> dict:
+    """Converte il formato stile Chat Completions nel formato Responses API."""
+    js = schema_obj.get("json_schema", {})
+    return {
+        "type": "json_schema",
+        "name": js.get("name", "orthoflow_extraction"),
+        "schema": js.get("schema", {}),
+        "strict": bool(js.get("strict", True)),
+    }
+
+
 SUPPORTED_IMAGE_EXT = {".jpg", ".jpeg", ".png", ".webp"}
 
 SCARICO_SALA_SCHEMA = {
@@ -110,7 +137,7 @@ DDT_SCHEMA = {
 }
 
 def ai_enabled() -> bool:
-    return os.getenv("ENABLE_AI_OCR", "false").lower() == "true" and bool(os.getenv("OPENAI_API_KEY"))
+    return _flag("ENABLE_AI_OCR", "false") and bool(_secret("OPENAI_API_KEY", ""))
 
 def image_to_data_url(path: str) -> str:
     p = Path(path)
@@ -126,8 +153,8 @@ def analyze_image(path: str, mode: str = "scarico_sala") -> Dict[str, Any]:
     if not ai_enabled():
         raise RuntimeError("AI OCR non abilitato. Imposta OPENAI_API_KEY e ENABLE_AI_OCR=true.")
 
-    model = os.getenv("OPENAI_VISION_MODEL", "gpt-4.1-mini")
-    client = OpenAI()
+    model = _secret("OPENAI_VISION_MODEL", "gpt-4.1-mini")
+    client = OpenAI(api_key=_secret("OPENAI_API_KEY"))
 
     if mode == "ddt":
         schema = DDT_SCHEMA
@@ -150,25 +177,42 @@ La quantità normalmente è 1 per etichetta, ma se sono presenti più etichette 
 
     data_url = image_to_data_url(path)
 
-    response = client.responses.create(
-        model=model,
-        input=[
-            {
-                "role": "system",
-                "content": instructions
-            },
-            {
-                "role": "user",
-                "content": [
-                    {"type": "input_text", "text": "Analizza questa immagine e restituisci esclusivamente JSON conforme allo schema."},
-                    {"type": "input_image", "image_url": data_url}
-                ]
-            }
-        ],
-        response_format=schema,
-    )
+    input_payload = [
+        {
+            "role": "system",
+            "content": instructions,
+        },
+        {
+            "role": "user",
+            "content": [
+                {"type": "input_text", "text": "Analizza questa immagine e restituisci esclusivamente JSON conforme allo schema."},
+                {"type": "input_image", "image_url": data_url},
+            ],
+        },
+    ]
 
-    text = response.output_text
+    # OpenAI Python recente: Responses API usa text={"format": ...}.
+    try:
+        response = client.responses.create(
+            model=model,
+            input=input_payload,
+            text={"format": _responses_json_schema_format(schema)},
+        )
+    except TypeError:
+        # Fallback per versioni SDK compatibili con response_format.
+        response = client.responses.create(
+            model=model,
+            input=input_payload,
+            response_format=schema,
+        )
+
+    text = getattr(response, "output_text", None)
+    if not text:
+        # Fallback prudente se output_text non è popolato.
+        try:
+            text = response.output[0].content[0].text
+        except Exception:
+            text = str(response)
     return json.loads(text)
 
 def normalize_ai_items(result: Dict[str, Any]) -> List[Dict[str, Any]]:

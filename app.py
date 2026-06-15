@@ -16,6 +16,61 @@ def q(sql, params=()):
     c.close()
     return df
 
+
+def admin_only():
+    if st.session_state.get("ruolo") != "Admin":
+        st.error("Area riservata Admin.")
+        st.stop()
+
+def table_exists(table: str) -> bool:
+    c = get_conn()
+    try:
+        r = c.execute("SELECT name FROM sqlite_master WHERE type='table' AND name=?", (table,)).fetchone()
+        return r is not None
+    finally:
+        c.close()
+
+def editable_table(table: str, title: str):
+    st.subheader(title)
+    if not table_exists(table):
+        st.warning(f"Tabella {table} non presente.")
+        return
+    df = q(f"SELECT * FROM {table} ORDER BY id DESC" if table != "agenti" else f"SELECT * FROM {table} ORDER BY nome")
+    st.write(f"Righe presenti: **{len(df)}**")
+    if df.empty:
+        st.info("Nessun dato presente.")
+        return
+    edited = st.data_editor(df, use_container_width=True, num_rows="dynamic", key=f"edit_{table}")
+    c1, c2 = st.columns(2)
+    with c1:
+        if st.button(f"Salva modifiche {table}", key=f"save_{table}", use_container_width=True):
+            c = get_conn()
+            try:
+                original_ids = set(df["id"].dropna().astype(int).tolist()) if "id" in df.columns else set()
+                edited_ids = set(edited["id"].dropna().astype(int).tolist()) if "id" in edited.columns else set()
+                # cancella righe rimosse dall'editor
+                for rid in original_ids - edited_ids:
+                    c.execute(f"DELETE FROM {table} WHERE id=?", (int(rid),))
+                cols = [col for col in edited.columns if col != "id"]
+                for _, row in edited.iterrows():
+                    vals = [None if pd.isna(row.get(col)) else row.get(col) for col in cols]
+                    rid = row.get("id") if "id" in edited.columns else None
+                    if pd.notna(rid) and str(rid).strip() != "":
+                        set_clause = ", ".join([f"{col}=?" for col in cols])
+                        c.execute(f"UPDATE {table} SET {set_clause} WHERE id=?", vals + [int(rid)])
+                    else:
+                        col_clause = ", ".join(cols)
+                        ph = ", ".join(["?"] * len(cols))
+                        c.execute(f"INSERT INTO {table} ({col_clause}) VALUES ({ph})", vals)
+                c.commit()
+                st.success("Modifiche salvate.")
+                st.rerun()
+            finally:
+                c.close()
+    with c2:
+        st.download_button(f"Scarica {table} Excel", excel_bytes({table: df}), f"{table}.xlsx", use_container_width=True)
+
+
 def login():
     st.sidebar.title("OrthoFlow")
     if "user" not in st.session_state:
@@ -46,6 +101,9 @@ if not login():
 
 admin_menu = [
     "Dashboard",
+    "Clienti",
+    "Alias strutture",
+    "Magazzino",
     "KPI Agenti",
     "Loan Monitor",
     "Scadenze",
@@ -58,6 +116,7 @@ admin_menu = [
     "Ordini e chiusure",
     "Riconciliazione",
     "Anomalie",
+    "Gestione dati",
     "Export completo"
 ]
 collab_menu = [
@@ -118,6 +177,102 @@ if menu == "Dashboard":
 
     st.subheader("Istruzioni rapide")
     st.success("1. Carica foto/PDF dello scarico. 2. Controlla le righe estratte. 3. Conferma e salva.")
+
+
+elif menu == "Clienti":
+    admin_only()
+    st.title("👥 Clienti")
+    st.write("Importa, visualizza e modifica l'anagrafica clienti.")
+    tab1, tab2 = st.tabs(["Importa clienti", "Gestisci clienti"])
+    with tab1:
+        f = st.file_uploader("Anagrafica clienti Excel", type=["xlsx", "xls"], key="clienti_page_upload")
+        if f:
+            df = norm(pd.read_excel(f))
+            st.write(f"Righe lette: **{len(df)}**")
+            st.dataframe(df.head(50), use_container_width=True)
+            cols = list(df.columns)
+            cc = st.selectbox("Colonna Codice cliente", cols, key="clienti_page_cod")
+            desc = st.selectbox("Colonna Descrizione", cols, key="clienti_page_desc")
+            city = st.selectbox("Colonna Città", [""] + cols, key="clienti_page_city")
+            prov = st.selectbox("Colonna Provincia", [""] + cols, key="clienti_page_prov")
+            piva = st.selectbox("Colonna P.IVA", [""] + cols, key="clienti_page_piva")
+            if st.button("Importa / aggiorna clienti", use_container_width=True, key="clienti_page_import"):
+                c = get_conn(); n = 0; skipped = 0
+                for _, r in df.iterrows():
+                    codice = str(r[cc]).strip()
+                    if not codice or codice.lower() == "nan":
+                        skipped += 1; continue
+                    c.execute("""INSERT OR REPLACE INTO clienti(codice_cliente,descrizione,citta,provincia,piva,stato_record)
+                                 VALUES(?,?,?,?,?,'Attivo')""",
+                              (codice, str(r[desc]), "" if not city else str(r[city]), "" if not prov else str(r[prov]), "" if not piva else str(r[piva])))
+                    n += 1
+                c.commit(); c.close()
+                st.success(f"Clienti importati/aggiornati: {n}. Scartati: {skipped}.")
+    with tab2:
+        editable_table("clienti", "Gestisci clienti")
+
+elif menu == "Alias strutture":
+    admin_only()
+    st.title("🏷️ Alias strutture")
+    st.write("Collega i nomi letti dall'OCR ai codici cliente interni.")
+    clienti_df = q("SELECT codice_cliente, descrizione FROM clienti ORDER BY descrizione")
+    if clienti_df.empty:
+        st.warning("Importa prima l'anagrafica clienti.")
+    else:
+        with st.form("alias_form"):
+            alias = st.text_input("Alias struttura", placeholder="es. Federico II / A.O.U. Federico II / Azienda Ospedaliera Universitaria Federico II")
+            cliente_label = st.selectbox("Cliente corretto", [f"{r.codice_cliente} - {r.descrizione}" for r in clienti_df.itertuples()])
+            priorita = st.number_input("Priorità", min_value=1, max_value=999, value=100)
+            note = st.text_input("Note")
+            ok = st.form_submit_button("Salva alias", use_container_width=True)
+        if ok and alias:
+            codice = cliente_label.split(" - ")[0]
+            descr = " - ".join(cliente_label.split(" - ")[1:])
+            c = get_conn()
+            c.execute("""INSERT OR REPLACE INTO alias_strutture(alias,codice_cliente,descrizione_cliente,priorita,note)
+                         VALUES(?,?,?,?,?)""", (alias, codice, descr, priorita, note))
+            c.commit(); c.close(); st.success("Alias salvato.")
+    editable_table("alias_strutture", "Alias presenti")
+    test = st.text_input("Test riconoscimento struttura")
+    if test:
+        c = get_conn(); res = resolve_cliente_from_structure(c, test); c.close()
+        if res:
+            st.success(f"Riconosciuto: {res['codice_cliente']} - {res['descrizione']} | {res['metodo']} | score {res['score']}")
+        else:
+            st.error("Nessun cliente trovato. Aggiungi un alias.")
+
+elif menu == "Magazzino":
+    admin_only()
+    st.title("📦 Magazzino")
+    tab1, tab2 = st.tabs(["Importa giacenze", "Gestisci magazzino"])
+    with tab1:
+        f = st.file_uploader("Giacenze magazzino Excel", type=["xlsx", "xls"], key="magazzino_page_upload")
+        if f:
+            df = norm(pd.read_excel(f))
+            st.write(f"Righe lette: **{len(df)}**")
+            st.dataframe(df.head(50), use_container_width=True)
+            cols = list(df.columns)
+            cod = st.selectbox("Colonna Codice", cols, key="mag_page_cod")
+            lot = st.selectbox("Colonna Lotto", cols, key="mag_page_lot")
+            qty = st.selectbox("Colonna Quantità", cols, key="mag_page_qty")
+            des = st.selectbox("Colonna Descrizione", [""] + cols, key="mag_page_des")
+            sca = st.selectbox("Colonna Scadenza", [""] + cols, key="mag_page_sca")
+            ori = st.selectbox("Origine", ["CONTO DEPOSITO", "LOAN / CONTO VISIONE"], key="mag_page_ori")
+            if st.button("Importa / aggiorna magazzino", use_container_width=True, key="mag_page_import"):
+                c = get_conn(); n = 0; skipped = 0
+                for _, r in df.iterrows():
+                    codice, lotto = str(r[cod]).strip(), str(r[lot]).strip()
+                    if not codice or codice.lower()=="nan" or not lotto or lotto.lower()=="nan":
+                        skipped += 1; continue
+                    qta = money(r[qty]) or 0
+                    c.execute("""INSERT INTO magazzino(codice,descrizione,lotto,scadenza,quantita,origine,stato_record)
+                                 VALUES(?,?,?,?,?,?,'Attivo')
+                                 ON CONFLICT(codice,lotto,origine) DO UPDATE SET quantita=excluded.quantita, descrizione=excluded.descrizione, scadenza=excluded.scadenza""",
+                              (codice, "" if not des else str(r[des]), lotto, "" if not sca else str(r[sca]), qta, ori))
+                    n += 1
+                c.commit(); c.close(); st.success(f"Righe importate/aggiornate: {n}. Scartate: {skipped}.")
+    with tab2:
+        editable_table("magazzino", "Gestisci magazzino")
 
 elif menu == "KPI Agenti":
     
@@ -474,7 +629,7 @@ elif menu == "DDT carico / Loan":
             st.image(allegato, caption="DDT", use_container_width=True)
             if st.button("Analizza DDT con OCR AI"):
                 if not ai_enabled():
-                    st.error("OCR AI non configurato. Imposta OPENAI_API_KEY e ENABLE_AI_OCR=true.")
+                    st.error("OCR AI non configurato. Controlla Streamlit Secrets: OPENAI_API_KEY e ENABLE_AI_OCR=true.")
                 else:
                     with st.spinner("Analisi DDT in corso..."):
                         try:
@@ -532,6 +687,7 @@ elif menu == "DDT carico / Loan":
     st.dataframe(q("SELECT * FROM ddt ORDER BY id DESC"), use_container_width=True)
 elif menu == "Scarico sala":
     st.title("Scarico sala")
+    st.caption("Motore OCR AI: " + ("attivo" if ai_enabled() else "non configurato"))
     clienti = q("SELECT codice_cliente || ' - ' || descrizione label FROM clienti ORDER BY descrizione")["label"].tolist()
     agenti = q("SELECT nome FROM agenti ORDER BY nome")["nome"].tolist()
 
@@ -548,7 +704,7 @@ elif menu == "Scarico sala":
             st.image(allegato, caption="Scarico sala", use_container_width=True)
             if st.button("Estrai codici / lotti / scadenze"):
                 if not ai_enabled():
-                    st.error("OCR AI non configurato. Imposta OPENAI_API_KEY e ENABLE_AI_OCR=true nel file .env / variabili cloud.")
+                    st.error("OCR AI non configurato. Controlla Streamlit Secrets: OPENAI_API_KEY e ENABLE_AI_OCR=true.")
                 else:
                     with st.spinner("Analisi AI in corso..."):
                         try:
@@ -740,6 +896,20 @@ elif menu == "Anomalie":
     st.title("Anomalie")
     st.dataframe(q("SELECT * FROM anomalie ORDER BY id DESC"), use_container_width=True)
 
+
+elif menu == "Gestione dati":
+    admin_only()
+    st.title("🛠️ Gestione dati")
+    st.write("Modifica, aggiungi o elimina dati già inseriti. Usare con attenzione.")
+    tables = [
+        "clienti", "alias_strutture", "agenti", "magazzino",
+        "offerte_header", "offerte_clienti", "offerte_prezzi",
+        "interventi", "righe_intervento", "ddt", "ddt_righe",
+        "order_history", "order_details", "chiusure", "anomalie"
+    ]
+    table = st.selectbox("Tabella", tables)
+    editable_table(table, f"Gestione {table}")
+
 elif menu == "Export completo":
     
     if st.session_state.get("ruolo") != "Admin":
@@ -747,6 +917,6 @@ elif menu == "Export completo":
         st.stop()
 
     st.title("Export completo")
-    tables = ["clienti","agenti","magazzino","offerte_header","offerte_clienti","offerte_prezzi","interventi","righe_intervento","ddt","ddt_righe","order_history","order_details","chiusure","anomalie"]
+    tables = ["clienti","alias_strutture","agenti","magazzino","offerte_header","offerte_clienti","offerte_prezzi","interventi","righe_intervento","ddt","ddt_righe","order_history","order_details","chiusure","anomalie"]
     sheets = {t: q(f"SELECT * FROM {t}") for t in tables}
     st.download_button("Scarica backup completo", excel_bytes(sheets), "orthoflow_backup_completo.xlsx")

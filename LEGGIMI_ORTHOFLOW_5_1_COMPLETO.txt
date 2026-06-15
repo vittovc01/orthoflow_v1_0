@@ -1,0 +1,32 @@
+OrthoFlow 5.1 COMPLETO STABILE
+
+Sostituisci nel repository GitHub TUTTI questi file:
+- app.py
+- ai_ocr.py
+- database.py
+- helpers.py
+- requirements.txt
+- packages.txt
+- supabase_client.py
+
+Correzioni incluse:
+1. OpenAI OCR legge correttamente Streamlit Secrets.
+2. Home con pulsanti cliccabili.
+3. Pagine dedicate: Clienti, Alias strutture, Magazzino.
+4. Offerte visualizzabili, modificabili e test matching prezzo.
+5. Gestione dati per modificare/eliminare tabelle principali.
+6. Matching codici offerta più flessibile: con/senza punti, con/senza S finale.
+7. Ruolo collaboratore limitato a Dashboard e Scarico sala.
+
+Secrets Streamlit richiesti per OCR OpenAI:
+OPENAI_API_KEY="sk-proj-..."
+ENABLE_AI_OCR=true
+ENABLE_FREE_OCR=false
+OPENAI_VISION_MODEL="gpt-4.1-mini"
+
+Dopo la sostituzione:
+1. GitHub Desktop
+2. Summary: OrthoFlow 5.1 completo stabile
+3. Commit to main
+4. Push origin
+5. Streamlit > Manage app > Reboot app
