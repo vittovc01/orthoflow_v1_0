@@ -58,20 +58,44 @@ def pdf_text(upload):
     reader = PdfReader(upload)
     return "\n".join([(p.extract_text() or "") for p in reader.pages])
 
+def normalize_code(codice):
+    s = str(codice or "").upper().strip()
+    s = re.sub(r"[^A-Z0-9]", "", s)
+    return s
+
+def code_variants(codice):
+    base = normalize_code(codice)
+    variants = {base}
+    if base.endswith("S"):
+        variants.add(base[:-1])
+    else:
+        variants.add(base + "S")
+    return variants
+
 def prezzo_per(conn, codice_cliente, codice, linea, data_intervento):
-    q = """
-    SELECT p.prezzo
-    FROM offerte_prezzi p
-    JOIN offerte_header h ON h.id=p.offerta_id
-    JOIN offerte_clienti c ON c.offerta_id=h.id
-    WHERE c.codice_cliente=? AND p.codice=? AND h.linea=?
-    AND (h.data_inizio IS NULL OR h.data_inizio='' OR h.data_inizio<=?)
-    AND (h.data_fine IS NULL OR h.data_fine='' OR h.data_fine>=?)
-    ORDER BY h.data_inizio DESC
-    LIMIT 1
     """
-    r = conn.execute(q, (codice_cliente, codice, linea, data_intervento, data_intervento)).fetchone()
-    return float(r["prezzo"]) if r else None
+    Matching prezzo intelligente:
+    confronta codici anche se nell'offerta sono scritti con/senza punti o con/senza S finale.
+    Esempi considerati compatibili:
+    413.050s, 413.050S, 413050, 413050S.
+    """
+    target_variants = code_variants(codice)
+    rows = conn.execute("""
+        SELECT p.codice, p.prezzo
+        FROM offerte_prezzi p
+        JOIN offerte_header h ON h.id=p.offerta_id
+        JOIN offerte_clienti c ON c.offerta_id=h.id
+        WHERE c.codice_cliente=? AND h.linea=?
+        AND (h.data_inizio IS NULL OR h.data_inizio='' OR h.data_inizio<=?)
+        AND (h.data_fine IS NULL OR h.data_fine='' OR h.data_fine>=?)
+        ORDER BY h.data_inizio DESC
+    """, (codice_cliente, linea, data_intervento, data_intervento)).fetchall()
+
+    for r in rows:
+        if normalize_code(r["codice"]) in target_variants:
+            return float(r["prezzo"]) if r["prezzo"] is not None else None
+    return None
+
 
 def detect_origine(conn, codice, lotto):
     r = conn.execute("SELECT origine FROM magazzino WHERE codice=? AND lotto=? ORDER BY id DESC LIMIT 1", (codice, lotto)).fetchone()
@@ -169,14 +193,22 @@ def diagnose_price(conn, codice_cliente, codice, linea, data_intervento):
     if not linked:
         issues.append(f"Nessuna offerta collegata al cliente {codice_cliente} per linea {linea}")
         return issues
-    found_code = conn.execute("""
+
+    target_variants = code_variants(codice)
+    rows = conn.execute("""
         SELECT p.codice
         FROM offerte_prezzi p
         JOIN offerte_header h ON h.id=p.offerta_id
         JOIN offerte_clienti c ON c.offerta_id=h.id
-        WHERE c.codice_cliente=? AND h.linea=? AND p.codice=?
-        LIMIT 1
-    """, (codice_cliente, linea, codice)).fetchone()
-    if not found_code:
-        issues.append(f"Codice {codice} non presente nei prezzi offerta per cliente {codice_cliente} linea {linea}")
+        WHERE c.codice_cliente=? AND h.linea=?
+        LIMIT 50000
+    """, (codice_cliente, linea)).fetchall()
+
+    for r in rows:
+        if normalize_code(r["codice"]) in target_variants:
+            return issues
+
+    sample = ", ".join([str(r["codice"]) for r in rows[:8]])
+    issues.append(f"Codice {codice} non presente nei prezzi offerta. Formati cercati: {', '.join(sorted(target_variants))}. Esempi offerta: {sample}")
     return issues
+
