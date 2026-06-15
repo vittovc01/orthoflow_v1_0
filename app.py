@@ -752,7 +752,7 @@ elif menu in ["Customer Connect", "🔁 Customer Connect"]:
     if not df.empty:
         st.download_button("Scarica Excel Customer Connect", excel_bytes({"Customer Connect": df}), "customer_connect.xlsx")
 
-elif menu == "Ordini e chiusure":
+elif False and menu == "Ordini e chiusure":
     admin_only()
     st.title("Ordini e chiusure")
     tab1, tab2, tab3 = st.tabs(["Order History", "Order Detail", "Chiusure J&J"])
@@ -805,7 +805,7 @@ elif menu == "Ordini e chiusure":
                     c.execute("INSERT INTO chiusure(mese,numero_ordine,codice,descrizione,quantita,valore) VALUES(?,?,?,?,?,?)", (mese, "" if not ordine else str(r[ordine]), "" if not cod else str(r[cod]), "" if not des else str(r[des]), money(r[qty]) if qty else None, money(r[val])))
                 c.commit(); c.close(); st.success("Importato")
 
-elif menu == "Riconciliazione":
+elif False and menu == "Riconciliazione":
     admin_only()
     st.title("Riconciliazione")
     wi = q("""SELECT i.id intervento, i.data_intervento, i.cliente, i.cartella_clinica, i.agente, COALESCE(SUM(r.totale),0) valore_teorico
@@ -827,7 +827,7 @@ elif menu in ["Anomalie", "⚠️ Anomalie"]:
     st.dataframe(q("SELECT * FROM anomalie ORDER BY id DESC"), use_container_width=True)
 
 
-elif menu == "Gestione dati":
+elif False and menu == "Gestione dati":
     admin_only()
     st.title("🛠️ Gestione dati")
     st.markdown('<div class="ok-box">Da qui puoi modificare o eliminare/annullare tutto quello che viene inserito. Ogni modifica viene registrata in Audit Log.</div>', unsafe_allow_html=True)
@@ -843,8 +843,455 @@ elif menu == "Gestione dati":
     except Exception:
         st.info("Audit log non ancora disponibile.")
 
-elif menu == "Export completo":
+
+
+elif menu in ["👥 Clienti", "Clienti"]:
+    admin_only()
+    st.title("👥 Clienti")
+    st.write("Importa, visualizza, modifica o annulla i clienti.")
+
+    tab1, tab2 = st.tabs(["Importa anagrafica", "Gestisci clienti"])
+
+    with tab1:
+        f = st.file_uploader("Anagrafica clienti Excel", type=["xlsx","xls"], key="clienti_fix32")
+        if f:
+            df = norm(pd.read_excel(f))
+            st.write(f"Righe lette dal file: **{len(df)}**")
+            st.dataframe(df, use_container_width=True)
+
+            cols = list(df.columns)
+            cc = st.selectbox("Colonna Codice cliente", cols, key="cc32")
+            desc = st.selectbox("Colonna Descrizione", cols, index=cols.index("Descrizione") if "Descrizione" in cols else 0, key="desc32")
+            city = st.selectbox("Colonna Città", [""] + cols, key="city32")
+            prov = st.selectbox("Colonna Provincia", [""] + cols, key="prov32")
+            piva = st.selectbox("Colonna P.IVA", [""] + cols, key="piva32")
+
+            if st.button("Importa / aggiorna clienti", use_container_width=True, key="import_clienti32"):
+                c = get_conn()
+                imported = 0
+                skipped = 0
+                for _, r in df.iterrows():
+                    codice = str(r[cc]).strip()
+                    if not codice or codice.lower() == "nan":
+                        skipped += 1
+                        continue
+                    c.execute("""INSERT OR REPLACE INTO clienti(codice_cliente,descrizione,citta,provincia,piva,stato_record)
+                                 VALUES(?,?,?,?,?,'Attivo')""",
+                              (
+                                  codice,
+                                  str(r[desc]),
+                                  "" if not city else str(r[city]),
+                                  "" if not prov else str(r[prov]),
+                                  "" if not piva else str(r[piva]),
+                              ))
+                    imported += 1
+                c.commit()
+                c.close()
+                st.success(f"Clienti importati/aggiornati: {imported}. Righe scartate: {skipped}.")
+
+    with tab2:
+        dfc = q("""SELECT id,codice_cliente,descrizione,citta,provincia,piva,
+                          COALESCE(stato_record,'Attivo') stato_record
+                   FROM clienti
+                   ORDER BY descrizione""")
+        st.write(f"Clienti presenti: **{len(dfc)}**")
+        st.dataframe(dfc, use_container_width=True)
+        if len(dfc) > 0:
+            editable_manager("clienti", "Modifica / annulla clienti")
+
+elif menu in ["🏷️ Alias strutture", "Alias strutture"]:
+    admin_only()
+    st.title("🏷️ Alias strutture")
+    st.write("Collega i nomi letti da OCR ai codici cliente interni.")
+
+    clienti_df = q("SELECT codice_cliente, descrizione FROM clienti ORDER BY descrizione")
+    if clienti_df.empty:
+        st.warning("Importa prima l'anagrafica clienti.")
+    else:
+        with st.form("alias_form_fix32"):
+            alias = st.text_input("Alias struttura", placeholder="es. Federico II / A.O.U. Federico II / Cardarelli")
+            cliente_label = st.selectbox("Cliente corretto", [f"{r.codice_cliente} - {r.descrizione}" for r in clienti_df.itertuples()])
+            priorita = st.number_input("Priorità", min_value=1, max_value=999, value=100)
+            note = st.text_input("Note")
+            ok = st.form_submit_button("Salva alias", use_container_width=True)
+        if ok and alias:
+            codice = cliente_label.split(" - ")[0]
+            descr = " - ".join(cliente_label.split(" - ")[1:])
+            c = get_conn()
+            c.execute("""INSERT OR REPLACE INTO alias_strutture(alias,codice_cliente,descrizione_cliente,priorita,note)
+                         VALUES(?,?,?,?,?)""", (alias, codice, descr, priorita, note))
+            c.commit()
+            c.close()
+            st.success("Alias salvato.")
+
+    dfa = q("SELECT * FROM alias_strutture ORDER BY priorita, alias")
+    st.write(f"Alias presenti: **{len(dfa)}**")
+    st.dataframe(dfa, use_container_width=True)
+
+    test = st.text_input("Test riconoscimento struttura", placeholder="Scrivi ad esempio Federico II")
+    if test:
+        c = get_conn()
+        res = resolve_cliente_from_structure(c, test)
+        c.close()
+        if res:
+            st.success(f"Riconosciuto: {res['codice_cliente']} - {res['descrizione']} | metodo {res['metodo']} | score {res['score']}")
+        else:
+            st.error("Nessun cliente trovato. Aggiungi un alias.")
+
+elif menu in ["📦 Magazzino", "Magazzino"]:
+    admin_only()
+    st.title("📦 Magazzino")
+
+    tab1, tab2 = st.tabs(["Importa giacenze", "Gestisci magazzino"])
+
+    with tab1:
+        f = st.file_uploader("Giacenze magazzino Excel", type=["xlsx","xls"], key="mag_fix32")
+        if f:
+            df = norm(pd.read_excel(f))
+            st.write(f"Righe lette dal file: **{len(df)}**")
+            st.dataframe(df, use_container_width=True)
+
+            cols = list(df.columns)
+            cod = st.selectbox("Colonna Codice", cols, key="codmag32")
+            lot = st.selectbox("Colonna Lotto", cols, key="lotmag32")
+            qty = st.selectbox("Colonna Quantità", cols, key="qtymag32")
+            des = st.selectbox("Colonna Descrizione", [""] + cols, key="desmag32")
+            sca = st.selectbox("Colonna Scadenza", [""] + cols, key="scamag32")
+            ori = st.selectbox("Origine", ["CONTO DEPOSITO", "LOAN / CONTO VISIONE"], key="orimag32")
+
+            if st.button("Importa magazzino", use_container_width=True, key="importmag32"):
+                c = get_conn()
+                imported = 0
+                skipped = 0
+                for _, r in df.iterrows():
+                    codice = str(r[cod]).strip()
+                    lotto = str(r[lot]).strip()
+                    if not codice or codice.lower() == "nan" or not lotto or lotto.lower() == "nan":
+                        skipped += 1
+                        continue
+                    qta = pd.to_numeric(r[qty], errors="coerce")
+                    qta = 0 if pd.isna(qta) else float(qta)
+                    c.execute("""INSERT OR REPLACE INTO magazzino(codice,descrizione,lotto,scadenza,quantita,origine,stato_record)
+                                 VALUES(?,?,?,?,?,?,'Attivo')""",
+                              (
+                                  codice,
+                                  "" if not des else str(r[des]),
+                                  lotto,
+                                  "" if not sca else str(r[sca]),
+                                  qta,
+                                  ori,
+                              ))
+                    imported += 1
+                c.commit()
+                c.close()
+                st.success(f"Righe magazzino importate/aggiornate: {imported}. Scartate: {skipped}.")
+
+    with tab2:
+        dfm = q("""SELECT id,codice,descrizione,lotto,scadenza,quantita,ubicazione,origine,
+                          COALESCE(stato_record,'Attivo') stato_record
+                   FROM magazzino
+                   ORDER BY id DESC""")
+        st.write(f"Righe magazzino presenti: **{len(dfm)}**")
+        st.dataframe(dfm, use_container_width=True)
+        if len(dfm) > 0:
+            editable_manager("magazzino", "Modifica / annulla magazzino")
+
+elif False and menu == "Export completo":
     st.title("Export completo")
     tables = ["clienti","agenti","magazzino","offerte_header","offerte_clienti","offerte_prezzi","interventi","righe_intervento","ddt","ddt_righe","order_history","order_details","chiusure","anomalie"]
     sheets = {t: q(f"SELECT * FROM {t}") for t in tables}
     st.download_button("Scarica backup completo", excel_bytes(sheets), "orthoflow_backup_completo.xlsx")
+
+
+elif menu in ["👥 Clienti", "Clienti"]:
+    admin_only()
+    st.title("👥 Clienti")
+    st.write("Importa, visualizza, modifica o annulla i clienti.")
+
+    tab1, tab2 = st.tabs(["Importa anagrafica", "Gestisci clienti"])
+
+    with tab1:
+        f = st.file_uploader("Anagrafica clienti Excel", type=["xlsx","xls"], key="clienti_fix33")
+        if f:
+            df = norm(pd.read_excel(f))
+            st.write(f"Righe lette dal file: **{len(df)}**")
+            st.dataframe(df, use_container_width=True)
+
+            cols = list(df.columns)
+            cc = st.selectbox("Colonna Codice cliente", cols, key="cc33")
+            desc = st.selectbox("Colonna Descrizione", cols, index=cols.index("Descrizione") if "Descrizione" in cols else 0, key="desc33")
+            city = st.selectbox("Colonna Città", [""] + cols, key="city33")
+            prov = st.selectbox("Colonna Provincia", [""] + cols, key="prov33")
+            piva = st.selectbox("Colonna P.IVA", [""] + cols, key="piva33")
+
+            if st.button("Importa / aggiorna clienti", use_container_width=True, key="import_clienti33"):
+                c = get_conn()
+                imported = 0
+                skipped = 0
+                for _, r in df.iterrows():
+                    codice = str(r[cc]).strip()
+                    if not codice or codice.lower() == "nan":
+                        skipped += 1
+                        continue
+                    c.execute("""INSERT OR REPLACE INTO clienti(codice_cliente,descrizione,citta,provincia,piva,stato_record)
+                                 VALUES(?,?,?,?,?,'Attivo')""",
+                              (codice, str(r[desc]), "" if not city else str(r[city]), "" if not prov else str(r[prov]), "" if not piva else str(r[piva])))
+                    imported += 1
+                c.commit()
+                c.close()
+                st.success(f"Clienti importati/aggiornati: {imported}. Righe scartate: {skipped}.")
+
+    with tab2:
+        dfc = q("""SELECT id,codice_cliente,descrizione,citta,provincia,piva,
+                          COALESCE(stato_record,'Attivo') stato_record
+                   FROM clienti
+                   ORDER BY descrizione""")
+        st.write(f"Clienti presenti: **{len(dfc)}**")
+        st.dataframe(dfc, use_container_width=True)
+        if len(dfc) > 0:
+            editable_manager("clienti", "Modifica / annulla clienti")
+
+elif menu in ["🏷️ Alias strutture", "Alias strutture"]:
+    admin_only()
+    st.title("🏷️ Alias strutture")
+    st.write("Collega i nomi letti da OCR ai codici cliente interni.")
+
+    clienti_df = q("SELECT codice_cliente, descrizione FROM clienti ORDER BY descrizione")
+    if clienti_df.empty:
+        st.warning("Importa prima l'anagrafica clienti.")
+    else:
+        with st.form("alias_form_fix33"):
+            alias = st.text_input("Alias struttura", placeholder="es. Federico II / A.O.U. Federico II / Cardarelli")
+            cliente_label = st.selectbox("Cliente corretto", [f"{r.codice_cliente} - {r.descrizione}" for r in clienti_df.itertuples()])
+            priorita = st.number_input("Priorità", min_value=1, max_value=999, value=100)
+            note = st.text_input("Note")
+            ok = st.form_submit_button("Salva alias", use_container_width=True)
+        if ok and alias:
+            codice = cliente_label.split(" - ")[0]
+            descr = " - ".join(cliente_label.split(" - ")[1:])
+            c = get_conn()
+            c.execute("""INSERT OR REPLACE INTO alias_strutture(alias,codice_cliente,descrizione_cliente,priorita,note)
+                         VALUES(?,?,?,?,?)""", (alias, codice, descr, priorita, note))
+            c.commit()
+            c.close()
+            st.success("Alias salvato.")
+
+    dfa = q("SELECT * FROM alias_strutture ORDER BY priorita, alias")
+    st.write(f"Alias presenti: **{len(dfa)}**")
+    st.dataframe(dfa, use_container_width=True)
+
+    test = st.text_input("Test riconoscimento struttura", placeholder="Scrivi ad esempio Federico II")
+    if test:
+        c = get_conn()
+        res = resolve_cliente_from_structure(c, test)
+        c.close()
+        if res:
+            st.success(f"Riconosciuto: {res['codice_cliente']} - {res['descrizione']} | metodo {res['metodo']} | score {res['score']}")
+        else:
+            st.error("Nessun cliente trovato. Aggiungi un alias.")
+
+elif menu in ["📦 Magazzino", "Magazzino"]:
+    admin_only()
+    st.title("📦 Magazzino")
+
+    tab1, tab2 = st.tabs(["Importa giacenze", "Gestisci magazzino"])
+
+    with tab1:
+        f = st.file_uploader("Giacenze magazzino Excel", type=["xlsx","xls"], key="mag_fix33")
+        if f:
+            df = norm(pd.read_excel(f))
+            st.write(f"Righe lette dal file: **{len(df)}**")
+            st.dataframe(df, use_container_width=True)
+
+            cols = list(df.columns)
+            cod = st.selectbox("Colonna Codice", cols, key="codmag33")
+            lot = st.selectbox("Colonna Lotto", cols, key="lotmag33")
+            qty = st.selectbox("Colonna Quantità", cols, key="qtymag33")
+            des = st.selectbox("Colonna Descrizione", [""] + cols, key="desmag33")
+            sca = st.selectbox("Colonna Scadenza", [""] + cols, key="scamag33")
+            ori = st.selectbox("Origine", ["CONTO DEPOSITO", "LOAN / CONTO VISIONE"], key="orimag33")
+
+            if st.button("Importa magazzino", use_container_width=True, key="importmag33"):
+                c = get_conn()
+                imported = 0
+                skipped = 0
+                for _, r in df.iterrows():
+                    codice = str(r[cod]).strip()
+                    lotto = str(r[lot]).strip()
+                    if not codice or codice.lower() == "nan" or not lotto or lotto.lower() == "nan":
+                        skipped += 1
+                        continue
+                    qta = pd.to_numeric(r[qty], errors="coerce")
+                    qta = 0 if pd.isna(qta) else float(qta)
+                    c.execute("""INSERT OR REPLACE INTO magazzino(codice,descrizione,lotto,scadenza,quantita,origine,stato_record)
+                                 VALUES(?,?,?,?,?,?,'Attivo')""",
+                              (codice, "" if not des else str(r[des]), lotto, "" if not sca else str(r[sca]), qta, ori))
+                    imported += 1
+                c.commit()
+                c.close()
+                st.success(f"Righe magazzino importate/aggiornate: {imported}. Scartate: {skipped}.")
+
+    with tab2:
+        dfm = q("""SELECT id,codice,descrizione,lotto,scadenza,quantita,ubicazione,origine,
+                          COALESCE(stato_record,'Attivo') stato_record
+                   FROM magazzino
+                   ORDER BY id DESC""")
+        st.write(f"Righe magazzino presenti: **{len(dfm)}**")
+        st.dataframe(dfm, use_container_width=True)
+        if len(dfm) > 0:
+            editable_manager("magazzino", "Modifica / annulla magazzino")
+
+elif menu in ["📊 Fatturato e KPI", "Fatturato e KPI", "KPI Agenti"]:
+    admin_only()
+    st.title("📊 Fatturato e KPI")
+    st.write("Area riservata Admin.")
+
+    c = get_conn()
+    fatturato = c.execute("""SELECT COALESCE(SUM(totale),0) n
+                             FROM righe_intervento
+                             WHERE COALESCE(stato_record,'Attivo')='Attivo'
+                             AND validazione='Validato J&J'""").fetchone()["n"]
+    interventi = c.execute("""SELECT COUNT(*) n
+                              FROM interventi
+                              WHERE COALESCE(stato_record,'Attivo')='Attivo'""").fetchone()["n"]
+    righe = c.execute("""SELECT COUNT(*) n
+                         FROM righe_intervento
+                         WHERE COALESCE(stato_record,'Attivo')='Attivo'""").fetchone()["n"]
+    anomalie = c.execute("""SELECT COUNT(*) n
+                            FROM anomalie
+                            WHERE stato='Aperta'""").fetchone()["n"]
+    c.close()
+
+    m1, m2, m3, m4 = st.columns(4)
+    m1.metric("Fatturato teorico", f"€ {fatturato:,.2f}")
+    m2.metric("Interventi", interventi)
+    m3.metric("Righe impiantate", righe)
+    m4.metric("Anomalie aperte", anomalie)
+
+    st.subheader("Fatturato per agente")
+    df_agenti = q("""SELECT i.agente,
+                            COUNT(DISTINCT i.id) interventi,
+                            COUNT(r.id) righe,
+                            COALESCE(SUM(r.totale),0) fatturato
+                     FROM interventi i
+                     LEFT JOIN righe_intervento r
+                       ON r.intervento_id=i.id
+                       AND COALESCE(r.stato_record,'Attivo')='Attivo'
+                     WHERE COALESCE(i.stato_record,'Attivo')='Attivo'
+                     GROUP BY i.agente
+                     ORDER BY fatturato DESC""")
+    st.dataframe(df_agenti, use_container_width=True)
+
+    st.subheader("Fatturato per struttura")
+    df_clienti = q("""SELECT i.cliente,
+                            COUNT(DISTINCT i.id) interventi,
+                            COALESCE(SUM(r.totale),0) fatturato
+                     FROM interventi i
+                     LEFT JOIN righe_intervento r
+                       ON r.intervento_id=i.id
+                       AND COALESCE(r.stato_record,'Attivo')='Attivo'
+                     WHERE COALESCE(i.stato_record,'Attivo')='Attivo'
+                     GROUP BY i.cliente
+                     ORDER BY fatturato DESC""")
+    st.dataframe(df_clienti, use_container_width=True)
+
+elif menu in ["🛠️ Gestione dati", "Gestione dati"]:
+    admin_only()
+    st.title("🛠️ Gestione dati")
+    st.write("Modifica o annulla i dati inseriti. Area riservata Admin.")
+
+    tables = [
+        "clienti",
+        "alias_strutture",
+        "magazzino",
+        "offerte_header",
+        "offerte_clienti",
+        "offerte_prezzi",
+        "interventi",
+        "righe_intervento",
+        "ddt",
+        "ddt_righe",
+        "order_history",
+        "order_details",
+        "chiusure",
+        "anomalie",
+    ]
+    table = st.selectbox("Tabella da gestire", tables, key="gestione_table33")
+    editable_manager(table, f"Gestione {table}")
+
+    st.subheader("Audit Log")
+    try:
+        st.dataframe(q("SELECT * FROM audit_log ORDER BY id DESC"), use_container_width=True)
+    except Exception:
+        st.info("Audit Log non ancora disponibile.")
+
+elif menu in ["🔍 Riconciliazione", "Riconciliazione"]:
+    admin_only()
+    st.title("🔍 Riconciliazione")
+    st.write("Controllo tra interventi, righe impiantate e valorizzazione teorica.")
+
+    df = q("""SELECT i.id intervento,
+                     i.data_intervento,
+                     i.codice_cliente,
+                     i.cliente,
+                     i.cartella_clinica,
+                     i.agente,
+                     i.linea,
+                     COUNT(r.id) righe,
+                     COALESCE(SUM(r.totale),0) valore_teorico
+              FROM interventi i
+              LEFT JOIN righe_intervento r
+                ON r.intervento_id=i.id
+                AND COALESCE(r.stato_record,'Attivo')='Attivo'
+              WHERE COALESCE(i.stato_record,'Attivo')='Attivo'
+              GROUP BY i.id
+              ORDER BY i.id DESC""")
+    st.dataframe(df, use_container_width=True)
+
+elif menu in ["🧾 Ordini e chiusure", "Ordini e chiusure"]:
+    admin_only()
+    st.title("🧾 Ordini e chiusure")
+    st.write("Gestione dati ordini e chiusure.")
+    tab1, tab2, tab3 = st.tabs(["Order History", "Order Details", "Chiusure"])
+    with tab1:
+        editable_manager("order_history", "Order History")
+    with tab2:
+        editable_manager("order_details", "Order Details")
+    with tab3:
+        editable_manager("chiusure", "Chiusure")
+
+elif menu in ["📤 Export completo", "Export completo"]:
+    admin_only()
+    st.title("📤 Export completo")
+
+    tables = [
+        "clienti",
+        "alias_strutture",
+        "agenti",
+        "magazzino",
+        "offerte_header",
+        "offerte_clienti",
+        "offerte_prezzi",
+        "interventi",
+        "righe_intervento",
+        "ddt",
+        "ddt_righe",
+        "order_history",
+        "order_details",
+        "chiusure",
+        "anomalie",
+        "audit_log",
+    ]
+    sheets = {}
+    for t in tables:
+        try:
+            sheets[t] = q(f"SELECT * FROM {t}")
+        except Exception:
+            pass
+
+    st.download_button(
+        "Scarica backup completo Excel",
+        excel_bytes(sheets),
+        "orthoflow_backup_completo.xlsx",
+        use_container_width=True,
+    )
