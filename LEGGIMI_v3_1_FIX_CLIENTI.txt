@@ -1,0 +1,17 @@
+OrthoFlow 3.1 - Fix Clienti e Ruoli
+
+Correzioni:
+- La voce 👥 Clienti ora apre una pagina reale.
+- Import anagrafica clienti.
+- Visualizzazione clienti presenti.
+- Modifica/annulla clienti tramite Gestione.
+- Collaboratore vede solo Home e Nuovo scarico sala.
+- Pagine sensibili protette Admin-only.
+
+Da sostituire:
+- app.py
+
+Consigliato lasciare anche i file OCR gratuito già aggiornati:
+- ai_ocr.py
+- requirements.txt
+- packages.txt

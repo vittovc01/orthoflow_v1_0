@@ -1,0 +1,20 @@
+OrthoFlow 3.0 - OCR gratuito
+
+Sostituisci nel repository:
+- app.py
+- ai_ocr.py
+- requirements.txt
+- packages.txt
+
+Consigliato sostituire anche:
+- database.py
+- helpers.py
+- supabase_client.py
+
+Cosa cambia:
+- OCR gratuito Tesseract attivo di default.
+- Non serve OPENAI_API_KEY.
+- ENABLE_FREE_OCR=true è implicito.
+- Se in futuro aggiungi OPENAI_API_KEY e ENABLE_AI_OCR=true, usa AI avanzata.
+- PDF scannerizzati: prova conversione PDF -> immagine con poppler-utils.
+- Il risultato va sempre controllato manualmente.

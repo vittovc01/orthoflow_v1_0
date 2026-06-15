@@ -7,7 +7,7 @@ from helpers import *
 from ai_ocr import ai_enabled, analyze_image, normalize_ai_items
 import json
 
-st.set_page_config(page_title="OrthoFlow 2.0", page_icon="🦴", layout="wide", initial_sidebar_state="expanded")
+st.set_page_config(page_title="OrthoFlow Control Tower v1.1", page_icon="🦴", layout="wide", initial_sidebar_state="expanded")
 init_db()
 
 def ensure_alias_table():
@@ -230,20 +230,21 @@ admin_menu = [
 
 collaboratore_menu = [
     "🏠 Home",
-    "📸 Nuovo scarico sala",
-    "🚚 Nuovo DDT / Loan",
-    "📄 Work Implant",
-    "🔁 Customer Connect"
+    "📸 Nuovo scarico sala"
 ]
 
-menu = st.sidebar.radio("Menu", admin_menu if ruolo == "Admin" else collaboratore_menu)
+_menu_list = admin_menu if ruolo == "Admin" else collaboratore_menu
+_default_index = 0
+if st.session_state.get("_quick_nav") in _menu_list:
+    _default_index = _menu_list.index(st.session_state.pop("_quick_nav"))
+menu = st.sidebar.radio("Menu", _menu_list, index=_default_index)
 
 
 
 if menu == "🏠 Home":
     st.markdown("""
     <div class="big-hero">
-      <h1>🦴 OrthoFlow 2.0</h1>
+      <h1>🦴 OrthoFlow</h1>
       <p>Carica foto, controlla le righe, conferma. Il resto lo fa l'app.</p>
     </div>
     """, unsafe_allow_html=True)
@@ -282,7 +283,7 @@ elif menu == "📸 Nuovo scarico sala":
             st.image(allegato, caption="Foto scarico sala", use_container_width=True)
             if st.button("Leggi con AI OCR"):
                 if not ai_enabled():
-                    st.error("AI OCR non configurata: inserisci OPENAI_API_KEY e ENABLE_AI_OCR=true nei secrets.")
+                    st.error("OCR non configurato. Il gratuito usa ENABLE_FREE_OCR=true; l'AI avanzata usa OPENAI_API_KEY.")
                 else:
                     with st.spinner("Lettura AI in corso..."):
                         try:
@@ -360,6 +361,7 @@ elif menu == "📸 Nuovo scarico sala":
         st.success(f"Scarico salvato. Intervento {iid}. Righe importate: {imported}")
 
 elif menu == "🚚 Nuovo DDT / Loan":
+    admin_only()
     st.title("🚚 Nuovo DDT / Loan")
     st.info("Carica o scatta una foto del DDT. Se è Loan/Conto Visione non verrà inserito nei reintegri.")
     st.warning("Usa il menu 'DDT carico / Loan' nella versione corrente se questa pagina non mostra il form completo dopo aggiornamento.")
@@ -409,6 +411,7 @@ elif menu == "KPI Agenti":
     st.dataframe(det, use_container_width=True)
 
 elif menu in ["Loan Monitor", "⏳ Loan Monitor"]:
+    admin_only()
     st.title("Loan Monitor")
     st.write("Controlla materiale Loan / Conto Visione: entra nel WI, non entra nel reintegro.")
     df = q("""SELECT codice, descrizione, lotto, scadenza, quantita, origine
@@ -441,7 +444,7 @@ elif menu in ["Scadenze", "🗓️ Scadenze"]:
     if not df.empty:
         st.download_button("Scarica scadenze", excel_bytes({"Scadenze": df}), "scadenze_magazzino.xlsx")
 
-elif menu in ["Import iniziali"]:
+elif menu == "Import iniziali":
     admin_only()
     st.title("Import iniziali")
     tab1, tab2, tab3 = st.tabs(["Clienti",
@@ -499,7 +502,7 @@ elif menu in ["Import iniziali"]:
             c = get_conn(); c.execute("INSERT OR IGNORE INTO agenti(nome) VALUES(?)", (nome,)); c.commit(); c.close()
             st.success("Agente aggiunto")
 
-elif menu in ["Offerte", "💰 Offerte"]:
+elif menu == "Offerte":
     admin_only()
     st.title("Gestione offerte")
     st.write("Qui potrai aggiungere nuove offerte anche in futuro, senza modificare l'app.")
@@ -562,6 +565,7 @@ elif menu in ["Offerte", "💰 Offerte"]:
                       GROUP BY h.id ORDER BY h.id DESC"""), use_container_width=True)
 
 elif menu in ["DDT carico / Loan", "🚚 DDT carico / Loan", "🚚 Nuovo DDT / Loan"]:
+    admin_only()
     st.title("DDT carico / Loan con OCR AI")
     st.write("I DDT 'Conto Visione / Loan' entrano nel WI se impiantati, ma NON nel reintegro Customer Connect.")
 
@@ -577,7 +581,7 @@ elif menu in ["DDT carico / Loan", "🚚 DDT carico / Loan", "🚚 Nuovo DDT / L
             st.image(allegato, caption="DDT", use_container_width=True)
             if st.button("Analizza DDT con OCR AI"):
                 if not ai_enabled():
-                    st.error("OCR AI non configurato. Imposta OPENAI_API_KEY e ENABLE_AI_OCR=true.")
+                    st.error("OCR non configurato. Il gratuito usa ENABLE_FREE_OCR=true; l'AI avanzata usa OPENAI_API_KEY.")
                 else:
                     with st.spinner("Analisi DDT in corso..."):
                         try:
@@ -651,7 +655,7 @@ elif menu in ["Scarico sala", "🏥 Scarico sala", "📸 Nuovo scarico sala"]:
             st.image(allegato, caption="Scarico sala", use_container_width=True)
             if st.button("Analizza con OCR AI"):
                 if not ai_enabled():
-                    st.error("OCR AI non configurato. Imposta OPENAI_API_KEY e ENABLE_AI_OCR=true nel file .env / variabili cloud.")
+                    st.error("OCR non configurato. Il gratuito usa ENABLE_FREE_OCR=true; l'AI avanzata usa OPENAI_API_KEY.")
                 else:
                     with st.spinner("Analisi AI in corso..."):
                         try:
@@ -723,41 +727,8 @@ elif menu in ["Scarico sala", "🏥 Scarico sala", "📸 Nuovo scarico sala"]:
             imported += 1
         c.commit(); c.close()
         st.success(f"Intervento {iid} creato. Righe importate: {imported}")
-
-elif menu == "🏷️ Alias strutture":
-    admin_only()
-    st.title("🏷️ Alias strutture")
-    st.write("Collega il nome letto dallo scarico sala al codice cliente.")
-    clienti_df = q("SELECT codice_cliente, descrizione FROM clienti ORDER BY descrizione")
-    if clienti_df.empty:
-        st.warning("Importa prima l'anagrafica clienti.")
-    else:
-        with st.form("alias_form"):
-            alias = st.text_input("Alias struttura", placeholder="Federico II / A.O.U. Federico II / Cardarelli")
-            cliente_label = st.selectbox("Cliente corretto", [f"{r.codice_cliente} - {r.descrizione}" for r in clienti_df.itertuples()])
-            priorita = st.number_input("Priorità", min_value=1, max_value=999, value=100)
-            note = st.text_input("Note")
-            ok = st.form_submit_button("Salva alias", use_container_width=True)
-        if ok and alias:
-            codice = cliente_label.split(" - ")[0]
-            descr = " - ".join(cliente_label.split(" - ")[1:])
-            c = get_conn()
-            c.execute("INSERT OR REPLACE INTO alias_strutture(alias,codice_cliente,descrizione_cliente,priorita,note) VALUES(?,?,?,?,?)", (alias, codice, descr, priorita, note))
-            c.commit(); c.close()
-            st.success("Alias salvato.")
-    st.subheader("Alias registrati")
-    st.dataframe(q("SELECT * FROM alias_strutture ORDER BY priorita, alias"), use_container_width=True)
-    test = st.text_input("Test riconoscimento")
-    if test:
-        c = get_conn()
-        res = resolve_cliente_from_structure(c, test)
-        c.close()
-        if res:
-            st.success(f"Riconosciuto: {res['codice_cliente']} - {res['descrizione']} | {res['metodo']} | score {res['score']}")
-        else:
-            st.error("Nessun match trovato.")
-
 elif menu in ["Work Implant", "📄 Work Implant"]:
+    admin_only()
     st.title("Work Implant")
     df = q("""SELECT i.data_intervento Data, i.cliente Clinica, i.cartella_clinica Cartella, i.agente Agente, i.linea Linea,
               r.codice Codice, r.descrizione Descrizione, r.lotto Lotto, r.quantita Quantita,
@@ -770,6 +741,7 @@ elif menu in ["Work Implant", "📄 Work Implant"]:
         st.download_button("Scarica Work Implant Excel", excel_bytes({"Work Implant": df}), "work_implant.xlsx")
 
 elif menu in ["Customer Connect", "🔁 Customer Connect"]:
+    admin_only()
     st.title("Customer Connect")
     st.write("Esclude automaticamente materiale Loan / Conto Visione.")
     df = q("""SELECT r.codice Codice, SUM(r.quantita) Quantita
@@ -780,7 +752,7 @@ elif menu in ["Customer Connect", "🔁 Customer Connect"]:
     if not df.empty:
         st.download_button("Scarica Excel Customer Connect", excel_bytes({"Customer Connect": df}), "customer_connect.xlsx")
 
-elif menu in ["Ordini e chiusure", "🧾 Ordini e chiusure"]:
+elif menu == "Ordini e chiusure":
     admin_only()
     st.title("Ordini e chiusure")
     tab1, tab2, tab3 = st.tabs(["Order History", "Order Detail", "Chiusure J&J"])
@@ -833,7 +805,7 @@ elif menu in ["Ordini e chiusure", "🧾 Ordini e chiusure"]:
                     c.execute("INSERT INTO chiusure(mese,numero_ordine,codice,descrizione,quantita,valore) VALUES(?,?,?,?,?,?)", (mese, "" if not ordine else str(r[ordine]), "" if not cod else str(r[cod]), "" if not des else str(r[des]), money(r[qty]) if qty else None, money(r[val])))
                 c.commit(); c.close(); st.success("Importato")
 
-elif menu in ["Riconciliazione", "🔍 Riconciliazione"]:
+elif menu == "Riconciliazione":
     admin_only()
     st.title("Riconciliazione")
     wi = q("""SELECT i.id intervento, i.data_intervento, i.cliente, i.cartella_clinica, i.agente, COALESCE(SUM(r.totale),0) valore_teorico
@@ -855,7 +827,7 @@ elif menu in ["Anomalie", "⚠️ Anomalie"]:
     st.dataframe(q("SELECT * FROM anomalie ORDER BY id DESC"), use_container_width=True)
 
 
-elif menu in ["Gestione dati", "🛠️ Gestione dati"]:
+elif menu == "Gestione dati":
     admin_only()
     st.title("🛠️ Gestione dati")
     st.markdown('<div class="ok-box">Da qui puoi modificare o eliminare/annullare tutto quello che viene inserito. Ogni modifica viene registrata in Audit Log.</div>', unsafe_allow_html=True)
@@ -871,7 +843,7 @@ elif menu in ["Gestione dati", "🛠️ Gestione dati"]:
     except Exception:
         st.info("Audit log non ancora disponibile.")
 
-elif menu in ["Export completo", "📤 Export completo"]:
+elif menu == "Export completo":
     st.title("Export completo")
     tables = ["clienti","agenti","magazzino","offerte_header","offerte_clienti","offerte_prezzi","interventi","righe_intervento","ddt","ddt_righe","order_history","order_details","chiusure","anomalie"]
     sheets = {t: q(f"SELECT * FROM {t}") for t in tables}

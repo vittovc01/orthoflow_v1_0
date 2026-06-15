@@ -180,27 +180,3 @@ def diagnose_price(conn, codice_cliente, codice, linea, data_intervento):
     if not found_code:
         issues.append(f"Codice {codice} non presente nei prezzi offerta per cliente {codice_cliente} linea {linea}")
     return issues
-
-
-def prezzo_per_flessibile(conn, codice_cliente, codice, linea, data_intervento):
-    codice = str(codice or "").strip()
-    variants = [codice]
-    if codice.upper().endswith("S"):
-        variants.append(codice[:-1])
-    else:
-        variants.append(codice + "S")
-    placeholders = ",".join(["?"] * len(variants))
-    query = f"""
-    SELECT p.prezzo
-    FROM offerte_prezzi p
-    JOIN offerte_header h ON h.id=p.offerta_id
-    JOIN offerte_clienti c ON c.offerta_id=h.id
-    WHERE c.codice_cliente=? AND h.linea=? AND p.codice IN ({placeholders})
-    AND (h.data_inizio IS NULL OR h.data_inizio='' OR h.data_inizio<=?)
-    AND (h.data_fine IS NULL OR h.data_fine='' OR h.data_fine>=?)
-    ORDER BY CASE WHEN p.codice=? THEN 0 ELSE 1 END
-    LIMIT 1
-    """
-    params = [codice_cliente, linea] + variants + [data_intervento, data_intervento, codice]
-    r = conn.execute(query, params).fetchone()
-    return float(r["prezzo"]) if r else None
