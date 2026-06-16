@@ -142,7 +142,7 @@ if 'user' not in st.session_state:
     with st.sidebar.form('login'):
         u=st.text_input('Utente','admin'); p=st.text_input('Password','admin',type='password'); ok=st.form_submit_button('Accedi')
     if ok:
-        if (u,p)==('admin','admin'): st.session_state.user=u; st.session_state.ruolo='Admin'; st.rerun()
+        if (u,p)==('admin','Mastrota09@'): st.session_state.user=u; st.session_state.ruolo='Admin'; st.rerun()
         elif (u,p)==('collaboratore','1234'): st.session_state.user=u; st.session_state.ruolo='Collaboratore'; st.rerun()
         else: st.sidebar.error('Credenziali errate')
     st.title('OrthoFlow 6.0 Cloud'); st.stop()
