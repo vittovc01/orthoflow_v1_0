@@ -33,6 +33,13 @@ def df(table, order='id', desc=False):
     try: return pd.DataFrame(sb().table(table).select('*').order(order, desc=desc).execute().data or [])
     except Exception as e: st.error(f'Errore {table}: {e}'); return pd.DataFrame()
 def ins(table, data): return sb().table(table).insert(data).execute().data[0]
+def ins_safe(table, data):
+    try:
+        res = sb().table(table).insert(data).execute().data
+        return res[0] if res else None
+    except Exception as e:
+        st.warning(f'Avviso: impossibile salvare su {table}: {e}')
+        return None
 def upsert(table, data, conflict): return sb().table(table).upsert(data, on_conflict=conflict).execute()
 
 def chunks(items, size=500):
@@ -385,9 +392,9 @@ elif menu=='Scarico sala':
             pr=prezzo_per(cs['codice_cliente'],c,linea)
             tot=pr*q if pr is not None else None
             if pr is None:
-                ins('anomalie',{'tipo':'PREZZO_NON_TROVATO','gravita':'Media','descrizione':f'Intervento {inter["id"]}: prezzo non trovato per cliente {cs["codice_cliente"]}, linea {linea}, codice {c}. Verifica offerta e S sterile/non sterile.','stato':'Aperta'})
+                ins_safe('anomalie',{'tipo':'PREZZO_NON_TROVATO','gravita':'Media','descrizione':f'Intervento {inter["id"]}: prezzo non trovato per cliente {cs["codice_cliente"]}, linea {linea}, codice {c}. Verifica offerta e S sterile/non sterile.','stato':'Aperta'})
             ins('righe_intervento',{'intervento_id':inter['id'],'codice':c,'descrizione':descr,'lotto':l,'scadenza':str(x.get('scadenza','') or '') or None,'quantita':q,'produttore':prod,'validazione':valid,'origine':'CONTO DEPOSITO','prezzo':pr,'totale':tot,'reintegro':True})
-            if disp(mag,c,l)<q: ins('anomalie',{'tipo':'GIACENZA_INSUFFICIENTE','gravita':'Alta','descrizione':f'Intervento {inter["id"]}: {c} lotto {l} disponibile {disp(mag,c,l)} richiesta {q}','stato':'Aperta'})
+            if disp(mag,c,l)<q: ins_safe('anomalie',{'tipo':'GIACENZA_INSUFFICIENTE','gravita':'Alta','descrizione':f'Intervento {inter["id"]}: {c} lotto {l} disponibile {disp(mag,c,l)} richiesta {q}','stato':'Aperta'})
             movimento('SCARICO_INTERVENTO',mag,c,l,-abs(q),descr,str(x.get('scadenza','') or '') or None,'CONTO DEPOSITO','INTERVENTO',inter['id']); fatt+=tot or 0; n+=1
         st.success(f'Intervento {inter["id"]} creato. Righe: {n}. Fatturato: € {fatt:,.2f}')
 elif menu=='Work Implant': st.title('📄 Work Implant'); st.dataframe(df('righe_intervento','id',True),use_container_width=True)
