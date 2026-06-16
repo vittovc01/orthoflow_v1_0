@@ -28,6 +28,7 @@ def client():
     return create_client(str(url).rstrip('/'), str(key))
 
 def sb(): return client()
+@st.cache_data(ttl=120)
 def df(table, order='id', desc=False):
     try: return pd.DataFrame(sb().table(table).select('*').order(order, desc=desc).execute().data or [])
     except Exception as e: st.error(f'Errore {table}: {e}'); return pd.DataFrame()
@@ -146,10 +147,11 @@ if 'user' not in st.session_state:
         elif (u,p)==('collaboratore','1234'): st.session_state.user=u; st.session_state.ruolo='Collaboratore'; st.rerun()
         else: st.sidebar.error('Credenziali errate')
     st.title('OrthoFlow 6.0 Cloud'); st.stop()
+st.sidebar.markdown('## 🏥 OrthoFlow 6.0')
 st.sidebar.success(f"{st.session_state.user} - {st.session_state.ruolo}")
 if st.sidebar.button('Esci'): st.session_state.clear(); st.rerun()
 admin=st.session_state.get('ruolo')=='Admin'
-menu_admin=['Dashboard','Clienti','Magazzini','Inventario','Offerte','DDT carico / Loan','Scarico sala','Work Implant','Customer Connect','KPI e Fatturato','Anomalie']
+menu_admin=['Dashboard','Gestione dati','Clienti','Magazzini','Inventario','Offerte','DDT carico / Loan','Scarico sala','Work Implant','Customer Connect','KPI e Fatturato','Anomalie']
 menu_collab=['Dashboard','Scarico sala']
 menu=st.sidebar.radio('Menu', menu_admin if admin else menu_collab)
 
@@ -158,6 +160,17 @@ if menu=='Dashboard':
     st.caption('Supabase nativo + inventario a movimenti + J&J Safe Match: 413.050S ≠ 413.050')
     r=df('righe_intervento'); fatt=float(r['totale'].fillna(0).sum()) if not r.empty and 'totale' in r else 0
     c1,c2,c3,c4,c5=st.columns(5); c1.metric('Clienti',len(df('clienti'))); c2.metric('Giacenze',len(df('giacenze'))); c3.metric('Interventi',len(df('interventi'))); c4.metric('Movimenti',len(df('movimenti_magazzino'))); c5.metric('Fatturato',f'€ {fatt:,.2f}')
+
+elif menu=='Gestione dati':
+    st.title('🗄️ Gestione dati')
+    t1,t2,t3=st.tabs(['Clienti','Giacenze','Interventi'])
+    with t1:
+        st.dataframe(df('clienti','descrizione'),use_container_width=True)
+    with t2:
+        st.dataframe(df('giacenze','updated_at',True),use_container_width=True)
+    with t3:
+        st.dataframe(df('interventi','id',True),use_container_width=True)
+
 elif menu=='Clienti':
     st.title('👥 Clienti')
     t1,t2=st.tabs(['Import ANAGRA','Clienti presenti'])
