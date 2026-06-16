@@ -132,7 +132,28 @@ def price_map(codice_cliente, linea):
 def prezzo_per(codice_cliente,codice,linea):
     return price_map(codice_cliente, linea).get(ncode(codice))
 def movimento(tipo, mag, codice, lotto, qta, descr='', scad=None, origine='CONTO DEPOSITO', ref_tipo='', ref_id='', note=''):
-    return ins('movimenti_magazzino', {'tipo_movimento':tipo,'codice_magazzino':mag,'codice':codice,'descrizione':descr,'lotto':lotto,'scadenza':scad or None,'quantita':float(qta),'origine':origine,'riferimento_tipo':ref_tipo,'riferimento_id':str(ref_id or ''),'note':note,'utente':st.session_state.get('user','')})
+    return ins('movimenti_magazzino', movimento_row(tipo, mag, codice, lotto, qta, descr, scad, origine, ref_tipo, ref_id, note))
+
+def movimento_row(tipo, mag, codice, lotto, qta, descr='', scad=None, origine='CONTO DEPOSITO', ref_tipo='', ref_id='', note=''):
+    return {
+        'tipo_movimento':tipo,
+        'codice_magazzino':mag,
+        'codice':codice,
+        'descrizione':descr,
+        'lotto':lotto,
+        'scadenza':scad or None,
+        'quantita':float(qta),
+        'origine':origine,
+        'riferimento_tipo':ref_tipo,
+        'riferimento_id':str(ref_id or ''),
+        'note':note,
+        'utente':st.session_state.get('user','')
+    }
+
+@st.cache_data(show_spinner=False)
+def read_excel_cached(file_bytes, file_name):
+    import io
+    return norm(pd.read_excel(io.BytesIO(file_bytes)))
 def disp(mag,codice,lotto):
     rows=sb().table('giacenze').select('*').eq('codice_magazzino',mag).eq('lotto',lotto).execute().data or []
     return sum(float(r.get('quantita') or 0) for r in rows if ncode(r.get('codice'))==ncode(codice))
@@ -233,7 +254,7 @@ elif menu=='Clienti':
     with t1:
         f=st.file_uploader('ANAGRA Excel',type=['xlsx','xls'])
         if f:
-            d=norm(pd.read_excel(f)); st.dataframe(d.head(30),use_container_width=True); cols=list(d.columns)
+            d=read_excel_cached(f.getvalue(), f.name); st.dataframe(d.head(30),use_container_width=True); cols=list(d.columns)
             cc=st.selectbox('Codice cliente',cols,index=idx(cols,['Codice','codice_cliente'])); de=st.selectbox('Descrizione',cols,index=idx(cols,['Descrizione','Cliente'],1 if len(cols)>1 else 0)); ci=st.selectbox('Città',['']+cols,index=idxo(cols,['Città','Citta'])); pr=st.selectbox('Provincia',['']+cols,index=idxo(cols,['Prov','Provincia'])); pv=st.selectbox('P.IVA',['']+cols,index=idxo(cols,['Partita Iva','PIVA','P.IVA']))
             if st.button('Importa clienti',use_container_width=True):
                 rows=[]
@@ -265,20 +286,21 @@ elif menu=='Inventario':
         m=mags(); labels=[f'{r.codice_magazzino} - {r.nome_magazzino}' for r in m.itertuples()] if not m.empty else ['MAG1 - Magazzino 1']; ml=st.selectbox('Magazzino',labels); mag=ml.split(' - ')[0]; origine=st.selectbox('Origine',['CONTO DEPOSITO','LOAN / CONTO VISIONE'])
         f=st.file_uploader('TTKEYS / giacenze',type=['xlsx','xls'])
         if f:
-            d=norm(pd.read_excel(f)); st.dataframe(d.head(30),use_container_width=True); cols=list(d.columns)
+            d=read_excel_cached(f.getvalue(), f.name); st.dataframe(d.head(30),use_container_width=True); cols=list(d.columns)
             cod=st.selectbox('Codice',cols,index=idx(cols,['Articolo','Codice'])); des=st.selectbox('Descrizione',['']+cols,index=idxo(cols,['Descr. articolo','Descrizione','Descr.'])); lot=st.selectbox('Lotto',cols,index=idx(cols,['Lotto','LOT'])); qty=st.selectbox('Quantità',cols,index=idx(cols,['Quantità','Quantita','Qta'])); sca=st.selectbox('Scadenza',['']+cols,index=idxo(cols,['Scadenza','EXP'])); only=st.checkbox('Solo quantità positive',True)
             if st.button('Importa giacenze',use_container_width=True):
-                n=0
+                rows=[]
                 prog = st.progress(0)
                 total = len(d)
                 for i,(_,x) in enumerate(d.iterrows(), start=1):
                     c=clean(x[cod]); l=clean(x[lot]); q=money(x[qty]) or 0
                     if c and l and not (only and q<=0):
-                        movimento('CARICO_INIZIALE',mag,c,l,q,'' if not des else str(x[des]),None if not sca else str(x[sca]),origine,'IMPORT','TTKEYS')
-                        n+=1
-                    if i % 100 == 0 or i == total:
+                        rows.append(movimento_row('CARICO_INIZIALE',mag,c,l,q,'' if not des else str(x[des]),None if not sca else str(x[sca]),origine,'IMPORT','TTKEYS'))
+                    if i % 500 == 0 or i == total:
                         prog.progress(min(i/total, 1.0))
-                st.success(f'Movimenti caricati: {n}')
+                n=batch_insert('movimenti_magazzino', rows, size=1000)
+                st.cache_data.clear()
+                st.success(f'Movimenti caricati in blocco: {n}')
     with t2: st.dataframe(df('giacenze','updated_at',True),use_container_width=True)
     with t3: st.dataframe(df('movimenti_magazzino','id',True),use_container_width=True)
 elif menu=='Offerte':
@@ -299,7 +321,7 @@ elif menu=='Offerte':
         if not o.empty:
             sel=st.selectbox('Offerta',[f'{r.id} - {r.nome_offerta} ({r.linea})' for r in o.itertuples()]); oid=int(sel.split(' - ')[0]); f=st.file_uploader('Excel prezzi',type=['xlsx','xls'])
             if f:
-                d=norm(pd.read_excel(f)); st.dataframe(d.head(30),use_container_width=True); cols=list(d.columns); cod=st.selectbox('Codice',cols,index=idx(cols,['Codice Prodotto','Codice','Articolo'])); des=st.selectbox('Descrizione',['']+cols,index=idxo(cols,['Descrizione prodotto','Descrizione'])); pre=st.selectbox('Prezzo',cols,index=idx(cols,['Prezzo unitario offerto cifre e lettere','Prezzo','prezzo']))
+                d=read_excel_cached(f.getvalue(), f.name); st.dataframe(d.head(30),use_container_width=True); cols=list(d.columns); cod=st.selectbox('Codice',cols,index=idx(cols,['Codice Prodotto','Codice','Articolo'])); des=st.selectbox('Descrizione',['']+cols,index=idxo(cols,['Descrizione prodotto','Descrizione'])); pre=st.selectbox('Prezzo',cols,index=idx(cols,['Prezzo unitario offerto cifre e lettere','Prezzo','prezzo']))
                 if st.button('Importa prezzi',use_container_width=True):
                     rows=[]
                     for _,x in d.iterrows():
@@ -323,14 +345,22 @@ elif menu=='DDT carico / Loan':
         labels=[f'{r.codice_magazzino} - {r.nome_magazzino}' for r in mags().itertuples()]; ml=st.selectbox('Magazzino destinazione',labels); mag=ml.split(' - ')[0]; tipo=st.selectbox('Tipo',['CONTO DEPOSITO','LOAN / CONTO VISIONE'])
         f=st.file_uploader('Excel DDT',type=['xlsx','xls'])
         if f:
-            d=norm(pd.read_excel(f)); st.dataframe(d.head(30),use_container_width=True); cols=list(d.columns); cod=st.selectbox('Codice',cols,index=idx(cols,['Codice','Articolo','REF'])); lot=st.selectbox('Lotto',cols,index=idx(cols,['Lotto','LOT'])); qty=st.selectbox('Quantità',cols,index=idx(cols,['Quantità','Qta','Qty'])); des=st.selectbox('Descrizione',['']+cols,index=idxo(cols,['Descrizione','Descr.'])); sca=st.selectbox('Scadenza',['']+cols,index=idxo(cols,['Scadenza','EXP']))
+            d=read_excel_cached(f.getvalue(), f.name); st.dataframe(d.head(30),use_container_width=True); cols=list(d.columns); cod=st.selectbox('Codice',cols,index=idx(cols,['Codice','Articolo','REF'])); lot=st.selectbox('Lotto',cols,index=idx(cols,['Lotto','LOT'])); qty=st.selectbox('Quantità',cols,index=idx(cols,['Quantità','Qta','Qty'])); des=st.selectbox('Descrizione',['']+cols,index=idxo(cols,['Descrizione','Descr.'])); sca=st.selectbox('Scadenza',['']+cols,index=idxo(cols,['Scadenza','EXP']))
             num=st.text_input('Numero DDT',''); cli=st.text_input('Cliente/destinazione','')
             if st.button('Crea DDT e carica magazzino',use_container_width=True):
-                ddt=ins('ddt',{'numero_ddt':num,'data_ddt':str(date.today()),'tipo_ddt':tipo,'cliente':cli,'codice_magazzino_destinazione':mag}); n=0
+                ddt=ins('ddt',{'numero_ddt':num,'data_ddt':str(date.today()),'tipo_ddt':tipo,'cliente':cli,'codice_magazzino_destinazione':mag})
+                righe=[]; movs=[]
                 for _,x in d.iterrows():
                     c=clean(x[cod]); l=clean(x[lot]); q=money(x[qty]) or 1
-                    if c and l: ins('ddt_righe',{'ddt_id':ddt['id'],'codice':c,'descrizione':'' if not des else str(x[des]),'lotto':l,'scadenza':None if not sca else str(x[sca]),'quantita':q,'origine':tipo}); movimento('CARICO_DDT',mag,c,l,q,'' if not des else str(x[des]),None if not sca else str(x[sca]),tipo,'DDT',ddt['id']); n+=1
-                st.success(f'DDT {ddt["id"]} creato. Righe: {n}')
+                    if c and l:
+                        descrizione='' if not des else str(x[des])
+                        scadenza=None if not sca else str(x[sca])
+                        righe.append({'ddt_id':ddt['id'],'codice':c,'descrizione':descrizione,'lotto':l,'scadenza':scadenza,'quantita':q,'origine':tipo})
+                        movs.append(movimento_row('CARICO_DDT',mag,c,l,q,descrizione,scadenza,tipo,'DDT',ddt['id']))
+                n1=batch_insert('ddt_righe', righe, size=1000)
+                n2=batch_insert('movimenti_magazzino', movs, size=1000)
+                st.cache_data.clear()
+                st.success(f'DDT {ddt["id"]} creato. Righe: {n1}. Movimenti: {n2}')
     with t2: st.dataframe(df('ddt','id',True),use_container_width=True); st.dataframe(df('ddt_righe','id',True),use_container_width=True)
 elif menu=='Scarico sala':
     st.title('📸 Scarico sala')
