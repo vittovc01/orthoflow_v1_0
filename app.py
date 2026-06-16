@@ -41,6 +41,41 @@ def ins_safe(table, data):
         st.warning(f'Avviso: impossibile salvare su {table}: {e}')
         return None
 def upsert(table, data, conflict): return sb().table(table).upsert(data, on_conflict=conflict).execute()
+def upd(table, row_id, data):
+    return sb().table(table).update(data).eq('id', row_id).execute()
+
+def dele(table, row_id):
+    return sb().table(table).delete().eq('id', row_id).execute()
+
+def cast_like(value, old):
+    if value == '':
+        return None
+    try:
+        if isinstance(old, int):
+            return int(float(value))
+        if isinstance(old, float):
+            return float(value)
+    except Exception:
+        return value
+    return value
+
+def agenti_opts():
+    nomi = []
+    try:
+        a = df('agenti', 'nome')
+        if not a.empty and 'nome' in a.columns:
+            nomi += [str(x).strip() for x in a['nome'].dropna().tolist() if str(x).strip()]
+    except Exception:
+        pass
+    try:
+        i = df('interventi', 'id', True)
+        if not i.empty and 'agente' in i.columns:
+            nomi += [str(x).strip() for x in i['agente'].dropna().tolist() if str(x).strip()]
+    except Exception:
+        pass
+    nomi = sorted(list(dict.fromkeys(nomi)))
+    return nomi or ['']
+
 
 def chunks(items, size=500):
     for i in range(0, len(items), size):
@@ -180,7 +215,7 @@ st.sidebar.caption('Gestionale ortopedico cloud')
 st.sidebar.success(f"{st.session_state.user} - {st.session_state.ruolo}")
 if st.sidebar.button('Esci'): st.session_state.clear(); st.rerun()
 admin=st.session_state.get('ruolo')=='Admin'
-menu_admin=['Dashboard','Gestione dati','Clienti','Magazzini','Inventario','Offerte','DDT carico / Loan','Scarico sala','Work Implant','Customer Connect','KPI e Fatturato','Anomalie']
+menu_admin=['Dashboard','Gestione dati','Agenti','Cartella clinica','Clienti','Magazzini','Inventario','Offerte','DDT carico / Loan','Scarico sala','Work Implant','Customer Connect','KPI e Fatturato','Anomalie']
 menu_collab=['Dashboard','Scarico sala']
 menu=st.sidebar.radio('Menu', menu_admin if admin else menu_collab)
 if 'quick_menu' in st.session_state:
@@ -242,18 +277,154 @@ if menu=='Dashboard':
 
 elif menu=='Gestione dati':
     st.title('🗄️ Gestione dati')
-    st.caption('Consultazione veloce delle principali tabelle operative')
+    st.caption('Modifica, elimina e scarica le principali tabelle operative.')
+
     if st.button('🔄 Aggiorna tabelle', use_container_width=True):
         st.cache_data.clear()
         st.rerun()
-    tab=st.selectbox('Tabella da visualizzare',['clienti','magazzini','giacenze','movimenti_magazzino','interventi','righe_intervento','offerte_header','offerte_clienti','offerte_prezzi','ddt','ddt_righe','anomalie'])
+
+    tab=st.selectbox(
+        'Tabella da gestire',
+        ['clienti','magazzini','agenti','cartelle_cliniche','giacenze','movimenti_magazzino','interventi','righe_intervento','offerte_header','offerte_clienti','offerte_prezzi','ddt','ddt_righe','anomalie']
+    )
     order_col=st.text_input('Ordina per colonna','id')
     desc=st.checkbox('Ordine decrescente',True)
     data=df(tab,order_col,desc)
+
     st.write(f'Righe visualizzate: {len(data)}')
-    st.dataframe(data,use_container_width=True,height=520)
+    st.dataframe(data,use_container_width=True,height=420)
+
     if not data.empty:
         st.download_button('⬇️ Scarica Excel', excel_bytes({tab:data}), file_name=f'{tab}.xlsx', use_container_width=True)
+
+    st.divider()
+    st.subheader('✏️ Modifica / 🗑️ Elimina record')
+
+    if data.empty:
+        st.info('Nessun dato presente in questa tabella.')
+    elif 'id' not in data.columns:
+        st.warning('Questa tabella non ha una colonna ID: modifica/elimina non disponibili.')
+    else:
+        ids=data['id'].dropna().tolist()
+        selected_id=st.selectbox('Seleziona ID record', ids)
+        row=data[data['id']==selected_id].iloc[0].to_dict()
+
+        cmod, cdel = st.tabs(['✏️ Modifica record','🗑️ Elimina record'])
+
+        with cmod:
+            st.caption('Modifica i campi e salva. Evita di cambiare campi tecnici se non sei sicuro.')
+            edit={}
+            for col,val in row.items():
+                if col=='id':
+                    st.text_input(col, str(val), disabled=True, key=f'{tab}_{selected_id}_{col}')
+                else:
+                    edit[col]=st.text_input(col, '' if pd.isna(val) else str(val), key=f'{tab}_{selected_id}_{col}')
+            if st.button('💾 Salva modifiche', use_container_width=True):
+                payload={}
+                for col,val in edit.items():
+                    old=row.get(col)
+                    payload[col]=cast_like(val, old)
+                try:
+                    upd(tab, selected_id, payload)
+                    st.cache_data.clear()
+                    st.success('Record modificato correttamente.')
+                    st.rerun()
+                except Exception as e:
+                    st.error(f'Errore modifica: {e}')
+
+        with cdel:
+            st.error('Attenzione: eliminazione definitiva dal database.')
+            conferma=st.checkbox(f'Confermo eliminazione ID {selected_id} dalla tabella {tab}')
+            if st.button('🗑️ Elimina definitivamente', use_container_width=True, disabled=not conferma):
+                try:
+                    dele(tab, selected_id)
+                    st.cache_data.clear()
+                    st.success('Record eliminato.')
+                    st.rerun()
+                except Exception as e:
+                    st.error(f'Errore eliminazione: {e}')
+
+elif menu=='Agenti':
+    st.title('👤 Agenti')
+    st.caption('Gestione agenti usati negli interventi.')
+    a=df('agenti','nome')
+    if a.empty:
+        st.info('Se la tabella agenti non esiste ancora in Supabase, crea una tabella chiamata agenti con colonne: id, nome, email, telefono, attivo.')
+    with st.form('nuovo_agente'):
+        nome=st.text_input('Nome agente')
+        email=st.text_input('Email')
+        telefono=st.text_input('Telefono')
+        attivo=st.checkbox('Attivo', True)
+        ok_ag=st.form_submit_button('Salva agente')
+    if ok_ag:
+        if not nome.strip():
+            st.warning('Inserisci il nome agente.')
+        else:
+            try:
+                ins('agenti',{'nome':nome.strip(),'email':email.strip(),'telefono':telefono.strip(),'attivo':attivo})
+                st.cache_data.clear()
+                st.success('Agente salvato.')
+                st.rerun()
+            except Exception as e:
+                st.error(f'Errore salvataggio agente. Probabilmente manca la tabella agenti in Supabase. Dettaglio: {e}')
+    st.dataframe(df('agenti','nome'),use_container_width=True,height=420)
+
+elif menu=='Cartella clinica':
+    st.title('📁 Cartella clinica')
+    st.caption('Gestione cartelle cliniche collegate agli interventi.')
+
+    t1,t2=st.tabs(['Nuova cartella','Cartelle presenti'])
+
+    with t1:
+        clienti=clienti_opts()
+        interventi=df('interventi','id',True)
+        with st.form('cartella_clinica'):
+            if clienti:
+                cs=st.selectbox('Struttura / cliente',clienti,format_func=lambda x:x['label'])
+                codice_cliente=cs['codice_cliente']
+                cliente=cs['descrizione']
+            else:
+                codice_cliente=st.text_input('Codice cliente')
+                cliente=st.text_input('Cliente / struttura')
+
+            if not interventi.empty and 'id' in interventi.columns:
+                intervento_id=st.selectbox('Intervento collegato',['']+[str(x) for x in interventi['id'].dropna().tolist()])
+            else:
+                intervento_id=st.text_input('Intervento collegato')
+
+            paziente=st.text_input('Paziente / riferimento interno')
+            numero_cartella=st.text_input('Numero cartella clinica')
+            data_cartella=st.date_input('Data cartella',date.today())
+            reparto=st.text_input('Reparto')
+            chirurgo=st.text_input('Chirurgo')
+            note=st.text_area('Note')
+            ok_cart=st.form_submit_button('Salva cartella clinica')
+
+        if ok_cart:
+            payload={
+                'codice_cliente':codice_cliente,
+                'cliente':cliente,
+                'intervento_id':None if not intervento_id else str(intervento_id),
+                'paziente':paziente,
+                'numero_cartella':numero_cartella,
+                'data_cartella':str(data_cartella),
+                'reparto':reparto,
+                'chirurgo':chirurgo,
+                'note':note
+            }
+            try:
+                ins('cartelle_cliniche',payload)
+                st.cache_data.clear()
+                st.success('Cartella clinica salvata.')
+                st.rerun()
+            except Exception as e:
+                st.error(f'Errore salvataggio cartella clinica. Probabilmente manca la tabella cartelle_cliniche in Supabase. Dettaglio: {e}')
+
+    with t2:
+        dcart=df('cartelle_cliniche','id',True)
+        st.dataframe(dcart,use_container_width=True,height=520)
+        if not dcart.empty:
+            st.download_button('⬇️ Scarica cartelle cliniche Excel', excel_bytes({'cartelle_cliniche':dcart}), file_name='cartelle_cliniche.xlsx', use_container_width=True)
 
 elif menu=='Clienti':
     st.title('👥 Clienti')
@@ -382,7 +553,7 @@ elif menu=='Scarico sala':
                 meta=analyze_image(path,mode='scarico_sala'); rows=normalize_ai_items(meta); st.session_state['scarico_rows']=rows; st.success(f'Righe estratte: {len(rows)}')
     edited=st.data_editor(pd.DataFrame(st.session_state.get('scarico_rows',[])) if st.session_state.get('scarico_rows') else pd.DataFrame(columns=['codice','descrizione','lotto','scadenza','quantita','produttore']),num_rows='dynamic',use_container_width=True)
     with st.form('intervento'):
-        data_int=st.date_input('Data intervento',date.today()); cs=st.selectbox('Struttura',clienti,format_func=lambda x:x['label']) if clienti else {'codice_cliente':'','descrizione':''}; ml=st.selectbox('Scarica da giacenza',labels); mag=ml.split(' - ')[0]; agente=st.text_input('Agente',''); linea=st.selectbox('Linea',['TRAUMA','PROTESICA','CMF','SPINE','SPORTS','ALTRO']); ok=st.form_submit_button('Crea intervento e scarica')
+        data_int=st.date_input('Data intervento',date.today()); cs=st.selectbox('Struttura',clienti,format_func=lambda x:x['label']) if clienti else {'codice_cliente':'','descrizione':''}; ml=st.selectbox('Scarica da giacenza',labels); mag=ml.split(' - ')[0]; agenti=agenti_opts(); agente=st.selectbox('Agente', agenti) if agenti and agenti!=[''] else st.text_input('Agente',''); linea=st.selectbox('Linea',['TRAUMA','PROTESICA','CMF','SPINE','SPORTS','ALTRO']); ok=st.form_submit_button('Crea intervento e scarica')
     if ok:
         inter=ins('interventi',{'data_intervento':str(data_int),'codice_cliente':cs['codice_cliente'],'cliente':cs['descrizione'],'agente':agente,'linea':linea,'magazzino_scarico':mag}); fatt=0; n=0
         for _,x in edited.iterrows():
