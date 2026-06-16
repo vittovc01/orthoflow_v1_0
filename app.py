@@ -148,28 +148,84 @@ if 'user' not in st.session_state:
         else: st.sidebar.error('Credenziali errate')
     st.title('OrthoFlow 6.0 Cloud'); st.stop()
 st.sidebar.markdown('## 🏥 OrthoFlow 6.0')
+st.sidebar.caption('Gestionale ortopedico cloud')
 st.sidebar.success(f"{st.session_state.user} - {st.session_state.ruolo}")
 if st.sidebar.button('Esci'): st.session_state.clear(); st.rerun()
 admin=st.session_state.get('ruolo')=='Admin'
 menu_admin=['Dashboard','Gestione dati','Clienti','Magazzini','Inventario','Offerte','DDT carico / Loan','Scarico sala','Work Implant','Customer Connect','KPI e Fatturato','Anomalie']
 menu_collab=['Dashboard','Scarico sala']
 menu=st.sidebar.radio('Menu', menu_admin if admin else menu_collab)
+if 'quick_menu' in st.session_state:
+    menu=st.session_state.pop('quick_menu')
 
 if menu=='Dashboard':
     st.title('🏥 OrthoFlow 6.0 Cloud')
-    st.caption('Supabase nativo + inventario a movimenti + J&J Safe Match: 413.050S ≠ 413.050')
-    r=df('righe_intervento'); fatt=float(r['totale'].fillna(0).sum()) if not r.empty and 'totale' in r else 0
-    c1,c2,c3,c4,c5=st.columns(5); c1.metric('Clienti',len(df('clienti'))); c2.metric('Giacenze',len(df('giacenze'))); c3.metric('Interventi',len(df('interventi'))); c4.metric('Movimenti',len(df('movimenti_magazzino'))); c5.metric('Fatturato',f'€ {fatt:,.2f}')
+    st.caption('Dashboard operativa: accessi rapidi, KPI principali e controllo magazzino')
+
+    if st.button('🔄 Aggiorna dati', use_container_width=True):
+        st.cache_data.clear()
+        st.rerun()
+
+    r=df('righe_intervento')
+    clienti_df=df('clienti')
+    giacenze_df=df('giacenze')
+    interventi_df=df('interventi')
+    movimenti_df=df('movimenti_magazzino')
+    anomalie_df=df('anomalie')
+    fatt=float(r['totale'].fillna(0).sum()) if not r.empty and 'totale' in r else 0
+
+    c1,c2,c3,c4,c5=st.columns(5)
+    c1.metric('Clienti',len(clienti_df))
+    c2.metric('Giacenze',len(giacenze_df))
+    c3.metric('Interventi',len(interventi_df))
+    c4.metric('Movimenti',len(movimenti_df))
+    c5.metric('Fatturato',f'€ {fatt:,.2f}')
+
+    st.divider()
+    st.subheader('⚡ Azioni rapide')
+    q1,q2,q3,q4=st.columns(4)
+    if q1.button('📸 Scarico sala',use_container_width=True):
+        st.session_state.quick_menu='Scarico sala'
+        st.rerun()
+    if q2.button('📦 Inventario',use_container_width=True):
+        st.session_state.quick_menu='Inventario'
+        st.rerun()
+    if q3.button('💰 Offerte',use_container_width=True):
+        st.session_state.quick_menu='Offerte'
+        st.rerun()
+    if q4.button('🗄️ Gestione dati',use_container_width=True):
+        st.session_state.quick_menu='Gestione dati'
+        st.rerun()
+
+    st.divider()
+    a1,a2=st.columns(2)
+    with a1:
+        st.subheader('⚠️ Anomalie aperte')
+        if not anomalie_df.empty:
+            st.dataframe(anomalie_df.head(10),use_container_width=True,height=280)
+        else:
+            st.success('Nessuna anomalia presente')
+    with a2:
+        st.subheader('📦 Ultime giacenze')
+        if not giacenze_df.empty:
+            st.dataframe(giacenze_df.head(10),use_container_width=True,height=280)
+        else:
+            st.info('Nessuna giacenza presente')
 
 elif menu=='Gestione dati':
     st.title('🗄️ Gestione dati')
-    t1,t2,t3=st.tabs(['Clienti','Giacenze','Interventi'])
-    with t1:
-        st.dataframe(df('clienti','descrizione'),use_container_width=True)
-    with t2:
-        st.dataframe(df('giacenze','updated_at',True),use_container_width=True)
-    with t3:
-        st.dataframe(df('interventi','id',True),use_container_width=True)
+    st.caption('Consultazione veloce delle principali tabelle operative')
+    if st.button('🔄 Aggiorna tabelle', use_container_width=True):
+        st.cache_data.clear()
+        st.rerun()
+    tab=st.selectbox('Tabella da visualizzare',['clienti','magazzini','giacenze','movimenti_magazzino','interventi','righe_intervento','offerte_header','offerte_clienti','offerte_prezzi','ddt','ddt_righe','anomalie'])
+    order_col=st.text_input('Ordina per colonna','id')
+    desc=st.checkbox('Ordine decrescente',True)
+    data=df(tab,order_col,desc)
+    st.write(f'Righe visualizzate: {len(data)}')
+    st.dataframe(data,use_container_width=True,height=520)
+    if not data.empty:
+        st.download_button('⬇️ Scarica Excel', excel_bytes({tab:data}), file_name=f'{tab}.xlsx', use_container_width=True)
 
 elif menu=='Clienti':
     st.title('👥 Clienti')
