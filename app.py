@@ -34,6 +34,26 @@ def df(table, order='id', desc=False):
 def ins(table, data): return sb().table(table).insert(data).execute().data[0]
 def upsert(table, data, conflict): return sb().table(table).upsert(data, on_conflict=conflict).execute()
 
+def chunks(items, size=500):
+    for i in range(0, len(items), size):
+        yield items[i:i+size]
+
+def batch_insert(table, rows, size=500):
+    rows = [r for r in rows if r]
+    done = 0
+    for ch in chunks(rows, size):
+        sb().table(table).insert(ch).execute()
+        done += len(ch)
+    return done
+
+def batch_upsert(table, rows, conflict, size=500):
+    rows = [r for r in rows if r]
+    done = 0
+    for ch in chunks(rows, size):
+        sb().table(table).upsert(ch, on_conflict=conflict).execute()
+        done += len(ch)
+    return done
+
 def norm(d): d=d.copy(); d.columns=[str(c).strip() for c in d.columns]; return d
 def money(v):
     if pd.isna(v): return None
@@ -82,17 +102,34 @@ def mags():
 def clienti_opts():
     d=df('clienti','descrizione')
     return [{'label':str(r.descrizione),'codice_cliente':str(r.codice_cliente),'descrizione':str(r.descrizione)} for r in d.itertuples()] if not d.empty else []
+@st.cache_data(ttl=60)
+def price_map(codice_cliente, linea):
+    links = sb().table('offerte_clienti').select('offerta_id').eq('codice_cliente', codice_cliente).execute().data or []
+    ids = [int(x['offerta_id']) for x in links if x.get('offerta_id') is not None]
+    if not ids:
+        return {}
+
+    heads = []
+    for oid in ids:
+        h = sb().table('offerte_header').select('id,linea').eq('id', oid).execute().data or []
+        if h and str(h[0].get('linea','')).upper() == str(linea).upper():
+            heads.append(oid)
+
+    out = {}
+    for oid in heads:
+        start = 0
+        step = 1000
+        while True:
+            rows = sb().table('offerte_prezzi').select('codice,prezzo').eq('offerta_id', oid).range(start, start + step - 1).execute().data or []
+            for p in rows:
+                out[ncode(p.get('codice'))] = float(p.get('prezzo') or 0)
+            if len(rows) < step:
+                break
+            start += step
+    return out
+
 def prezzo_per(codice_cliente,codice,linea):
-    target=ncode(codice)
-    heads=sb().table('offerte_header').select('id,linea').eq('linea',linea).execute().data or []
-    links=sb().table('offerte_clienti').select('offerta_id').eq('codice_cliente',codice_cliente).execute().data or []
-    ids={int(x['offerta_id']) for x in links if x.get('offerta_id') is not None}
-    for h in heads:
-        if int(h['id']) not in ids: continue
-        ps=sb().table('offerte_prezzi').select('codice,prezzo').eq('offerta_id',h['id']).execute().data or []
-        for p in ps:
-            if ncode(p.get('codice'))==target: return float(p.get('prezzo') or 0)
-    return None
+    return price_map(codice_cliente, linea).get(ncode(codice))
 def movimento(tipo, mag, codice, lotto, qta, descr='', scad=None, origine='CONTO DEPOSITO', ref_tipo='', ref_id='', note=''):
     return ins('movimenti_magazzino', {'tipo_movimento':tipo,'codice_magazzino':mag,'codice':codice,'descrizione':descr,'lotto':lotto,'scadenza':scad or None,'quantita':float(qta),'origine':origine,'riferimento_tipo':ref_tipo,'riferimento_id':str(ref_id or ''),'note':note,'utente':st.session_state.get('user','')})
 def disp(mag,codice,lotto):
@@ -130,11 +167,21 @@ elif menu=='Clienti':
             d=norm(pd.read_excel(f)); st.dataframe(d.head(30),use_container_width=True); cols=list(d.columns)
             cc=st.selectbox('Codice cliente',cols,index=idx(cols,['Codice','codice_cliente'])); de=st.selectbox('Descrizione',cols,index=idx(cols,['Descrizione','Cliente'],1 if len(cols)>1 else 0)); ci=st.selectbox('Città',['']+cols,index=idxo(cols,['Città','Citta'])); pr=st.selectbox('Provincia',['']+cols,index=idxo(cols,['Prov','Provincia'])); pv=st.selectbox('P.IVA',['']+cols,index=idxo(cols,['Partita Iva','PIVA','P.IVA']))
             if st.button('Importa clienti',use_container_width=True):
-                n=0
+                rows=[]
                 for _,x in d.iterrows():
                     cod=clean(x[cc])
-                    if cod: upsert('clienti',{'codice_cliente':cod,'descrizione':str(x[de]),'citta':'' if not ci else str(x[ci]),'provincia':'' if not pr else str(x[pr]),'piva':'' if not pv else str(x[pv])},'codice_cliente'); n+=1
-                st.success(f'Clienti importati: {n}')
+                    if cod:
+                        descr = '' if pd.isna(x[de]) else str(x[de])
+                        rows.append({
+                            'codice_cliente': cod,
+                            'descrizione': descr,
+                            'descrizione_cliente': descr,
+                            'citta': '' if not ci else str(x[ci]),
+                            'provincia': '' if not pr else str(x[pr]),
+                            'piva': '' if not pv else str(x[pv])
+                        })
+                n = batch_upsert('clienti', rows, 'codice_cliente', size=500)
+                st.success(f'Clienti importati/aggiornati: {n}')
     with t2: st.dataframe(df('clienti','descrizione'),use_container_width=True)
 elif menu=='Magazzini':
     st.title('🏬 Magazzini')
@@ -153,15 +200,21 @@ elif menu=='Inventario':
             cod=st.selectbox('Codice',cols,index=idx(cols,['Articolo','Codice'])); des=st.selectbox('Descrizione',['']+cols,index=idxo(cols,['Descr. articolo','Descrizione','Descr.'])); lot=st.selectbox('Lotto',cols,index=idx(cols,['Lotto','LOT'])); qty=st.selectbox('Quantità',cols,index=idx(cols,['Quantità','Quantita','Qta'])); sca=st.selectbox('Scadenza',['']+cols,index=idxo(cols,['Scadenza','EXP'])); only=st.checkbox('Solo quantità positive',True)
             if st.button('Importa giacenze',use_container_width=True):
                 n=0
-                for _,x in d.iterrows():
+                prog = st.progress(0)
+                total = len(d)
+                for i,(_,x) in enumerate(d.iterrows(), start=1):
                     c=clean(x[cod]); l=clean(x[lot]); q=money(x[qty]) or 0
-                    if not c or not l or (only and q<=0): continue
-                    movimento('CARICO_INIZIALE',mag,c,l,q,'' if not des else str(x[des]),None if not sca else str(x[sca]),origine,'IMPORT','TTKEYS'); n+=1
+                    if c and l and not (only and q<=0):
+                        movimento('CARICO_INIZIALE',mag,c,l,q,'' if not des else str(x[des]),None if not sca else str(x[sca]),origine,'IMPORT','TTKEYS')
+                        n+=1
+                    if i % 100 == 0 or i == total:
+                        prog.progress(min(i/total, 1.0))
                 st.success(f'Movimenti caricati: {n}')
     with t2: st.dataframe(df('giacenze','updated_at',True),use_container_width=True)
     with t3: st.dataframe(df('movimenti_magazzino','id',True),use_container_width=True)
 elif menu=='Offerte':
     st.title('💰 Offerte')
+    st.info('Import ottimizzato: i prezzi vengono caricati in blocchi da 500 righe. Il matching resta J&J Safe Match: 413.050S ≠ 413.050.')
     t1,t2,t3=st.tabs(['Crea','Import prezzi','Visualizza/Test'])
     with t1:
         with st.form('off'):
@@ -179,10 +232,18 @@ elif menu=='Offerte':
             if f:
                 d=norm(pd.read_excel(f)); st.dataframe(d.head(30),use_container_width=True); cols=list(d.columns); cod=st.selectbox('Codice',cols,index=idx(cols,['Codice Prodotto','Codice','Articolo'])); des=st.selectbox('Descrizione',['']+cols,index=idxo(cols,['Descrizione prodotto','Descrizione'])); pre=st.selectbox('Prezzo',cols,index=idx(cols,['Prezzo unitario offerto cifre e lettere','Prezzo','prezzo']))
                 if st.button('Importa prezzi',use_container_width=True):
-                    n=0
+                    rows=[]
                     for _,x in d.iterrows():
                         c=clean(x[cod]); p=money(x[pre])
-                        if c and p is not None: ins('offerte_prezzi',{'offerta_id':oid,'codice':c,'descrizione':'' if not des else str(x[des]),'prezzo':p}); n+=1
+                        if c and p is not None:
+                            rows.append({
+                                'offerta_id': oid,
+                                'codice': c,
+                                'descrizione': '' if not des else str(x[des]),
+                                'prezzo': p
+                            })
+                    n = batch_insert('offerte_prezzi', rows, size=500)
+                    price_map.clear()
                     st.success(f'Prezzi importati: {n}')
     with t3:
         st.dataframe(df('offerte_header','id',True),use_container_width=True); st.dataframe(df('offerte_clienti','id',True),use_container_width=True); st.dataframe(df('offerte_prezzi','id',True),use_container_width=True)
@@ -221,7 +282,11 @@ elif menu=='Scarico sala':
         for _,x in edited.iterrows():
             c=clean(x.get('codice','')); l=clean(x.get('lotto','')); q=money(x.get('quantita')) or 1; descr=str(x.get('descrizione','') or ''); prod=str(x.get('produttore','') or '')
             if not c or not l: continue
-            valid=validate_prod(prod); pr=prezzo_per(cs['codice_cliente'],c,linea) if valid=='Validato J&J' else None; tot=pr*q if pr is not None else None
+            valid=validate_prod(prod)
+            pr=prezzo_per(cs['codice_cliente'],c,linea)
+            tot=pr*q if pr is not None else None
+            if pr is None:
+                ins('anomalie',{'tipo':'PREZZO_NON_TROVATO','gravita':'Media','descrizione':f'Intervento {inter["id"]}: prezzo non trovato per cliente {cs["codice_cliente"]}, linea {linea}, codice {c}. Verifica offerta e S sterile/non sterile.','stato':'Aperta'})
             ins('righe_intervento',{'intervento_id':inter['id'],'codice':c,'descrizione':descr,'lotto':l,'scadenza':str(x.get('scadenza','') or '') or None,'quantita':q,'produttore':prod,'validazione':valid,'origine':'CONTO DEPOSITO','prezzo':pr,'totale':tot,'reintegro':True})
             if disp(mag,c,l)<q: ins('anomalie',{'tipo':'GIACENZA_INSUFFICIENTE','gravita':'Alta','descrizione':f'Intervento {inter["id"]}: {c} lotto {l} disponibile {disp(mag,c,l)} richiesta {q}','stato':'Aperta'})
             movimento('SCARICO_INTERVENTO',mag,c,l,-abs(q),descr,str(x.get('scadenza','') or '') or None,'CONTO DEPOSITO','INTERVENTO',inter['id']); fatt+=tot or 0; n+=1
