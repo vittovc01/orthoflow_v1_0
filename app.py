@@ -12,7 +12,7 @@ except Exception:
     analyze_image=None
     normalize_ai_items=lambda x: []
 
-st.set_page_config(page_title='OrthoFlow 6.2 Gestione Giacenze', layout='wide')
+st.set_page_config(page_title='OrthoFlow 6.0 Cloud', layout='wide')
 
 def secret(name, default=None):
     try:
@@ -28,11 +28,54 @@ def client():
     return create_client(str(url).rstrip('/'), str(key))
 
 def sb(): return client()
+@st.cache_data(ttl=120)
 def df(table, order='id', desc=False):
     try: return pd.DataFrame(sb().table(table).select('*').order(order, desc=desc).execute().data or [])
     except Exception as e: st.error(f'Errore {table}: {e}'); return pd.DataFrame()
 def ins(table, data): return sb().table(table).insert(data).execute().data[0]
+def ins_safe(table, data):
+    try:
+        res = sb().table(table).insert(data).execute().data
+        return res[0] if res else None
+    except Exception as e:
+        st.warning(f'Avviso: impossibile salvare su {table}: {e}')
+        return None
 def upsert(table, data, conflict): return sb().table(table).upsert(data, on_conflict=conflict).execute()
+def upd(table, row_id, data):
+    return sb().table(table).update(data).eq('id', row_id).execute()
+
+def dele(table, row_id):
+    return sb().table(table).delete().eq('id', row_id).execute()
+
+def cast_like(value, old):
+    if value == '':
+        return None
+    try:
+        if isinstance(old, int):
+            return int(float(value))
+        if isinstance(old, float):
+            return float(value)
+    except Exception:
+        return value
+    return value
+
+def agenti_opts():
+    nomi = []
+    try:
+        a = df('agenti', 'nome')
+        if not a.empty and 'nome' in a.columns:
+            nomi += [str(x).strip() for x in a['nome'].dropna().tolist() if str(x).strip()]
+    except Exception:
+        pass
+    try:
+        i = df('interventi', 'id', True)
+        if not i.empty and 'agente' in i.columns:
+            nomi += [str(x).strip() for x in i['agente'].dropna().tolist() if str(x).strip()]
+    except Exception:
+        pass
+    nomi = sorted(list(dict.fromkeys(nomi)))
+    return nomi or ['']
+
 
 def chunks(items, size=500):
     for i in range(0, len(items), size):
@@ -53,6 +96,34 @@ def batch_upsert(table, rows, conflict, size=500):
         sb().table(table).upsert(ch, on_conflict=conflict).execute()
         done += len(ch)
     return done
+
+
+def svuota_giacenza(codice_magazzino, origine=None):
+    q = sb().table("giacenze").delete().eq("codice_magazzino", codice_magazzino)
+    if origine:
+        q = q.eq("origine", origine)
+    return q.execute()
+
+def importa_giacenza_diretta(codice_magazzino, df_import, origine="CONTO DEPOSITO", batch_size=500):
+    rows = []
+    for _, r in df_import.iterrows():
+        codice = clean(r.get("codice", ""))
+        lotto = clean(r.get("lotto", ""))
+        qta = money(r.get("quantita")) or 0
+        if not codice or not lotto or qta <= 0:
+            continue
+        rows.append({
+            "codice_magazzino": codice_magazzino,
+            "codice": codice,
+            "descrizione": str(r.get("descrizione", "") or ""),
+            "lotto": lotto,
+            "scadenza": str(r.get("scadenza", "") or "") or None,
+            "quantita": qta,
+            "origine": origine,
+            "stato_record": "Attivo",
+        })
+    return batch_insert("giacenze", rows, size=batch_size)
+
 
 def norm(d): d=d.copy(); d.columns=[str(c).strip() for c in d.columns]; return d
 def money(v):
@@ -131,7 +202,28 @@ def price_map(codice_cliente, linea):
 def prezzo_per(codice_cliente,codice,linea):
     return price_map(codice_cliente, linea).get(ncode(codice))
 def movimento(tipo, mag, codice, lotto, qta, descr='', scad=None, origine='CONTO DEPOSITO', ref_tipo='', ref_id='', note=''):
-    return ins('movimenti_magazzino', {'tipo_movimento':tipo,'codice_magazzino':mag,'codice':codice,'descrizione':descr,'lotto':lotto,'scadenza':scad or None,'quantita':float(qta),'origine':origine,'riferimento_tipo':ref_tipo,'riferimento_id':str(ref_id or ''),'note':note,'utente':st.session_state.get('user','')})
+    return ins('movimenti_magazzino', movimento_row(tipo, mag, codice, lotto, qta, descr, scad, origine, ref_tipo, ref_id, note))
+
+def movimento_row(tipo, mag, codice, lotto, qta, descr='', scad=None, origine='CONTO DEPOSITO', ref_tipo='', ref_id='', note=''):
+    return {
+        'tipo_movimento':tipo,
+        'codice_magazzino':mag,
+        'codice':codice,
+        'descrizione':descr,
+        'lotto':lotto,
+        'scadenza':scad or None,
+        'quantita':float(qta),
+        'origine':origine,
+        'riferimento_tipo':ref_tipo,
+        'riferimento_id':str(ref_id or ''),
+        'note':note,
+        'utente':st.session_state.get('user','')
+    }
+
+@st.cache_data(show_spinner=False)
+def read_excel_cached(file_bytes, file_name):
+    import io
+    return norm(pd.read_excel(io.BytesIO(file_bytes)))
 def disp(mag,codice,lotto):
     rows=sb().table('giacenze').select('*').eq('codice_magazzino',mag).eq('lotto',lotto).execute().data or []
     return sum(float(r.get('quantita') or 0) for r in rows if ncode(r.get('codice'))==ncode(codice))
@@ -142,29 +234,233 @@ if 'user' not in st.session_state:
     with st.sidebar.form('login'):
         u=st.text_input('Utente','admin'); p=st.text_input('Password','admin',type='password'); ok=st.form_submit_button('Accedi')
     if ok:
-        if (u,p)==('admin','admin'): st.session_state.user=u; st.session_state.ruolo='Admin'; st.rerun()
+        if (u,p)==('admin','Mastrota09@'): st.session_state.user=u; st.session_state.ruolo='Admin'; st.rerun()
         elif (u,p)==('collaboratore','1234'): st.session_state.user=u; st.session_state.ruolo='Collaboratore'; st.rerun()
         else: st.sidebar.error('Credenziali errate')
-    st.title('OrthoFlow 6.2 Gestione Giacenze'); st.stop()
+    st.title('OrthoFlow 6.2 Full'); st.stop()
+st.sidebar.markdown('## 🏥 OrthoFlow 6.2 Full')
+st.sidebar.caption('Gestionale ortopedico cloud')
 st.sidebar.success(f"{st.session_state.user} - {st.session_state.ruolo}")
 if st.sidebar.button('Esci'): st.session_state.clear(); st.rerun()
 admin=st.session_state.get('ruolo')=='Admin'
-menu_admin=['Dashboard','Clienti','Magazzini','Inventario','Offerte','DDT carico / Loan','Scarico sala','Work Implant','Customer Connect','KPI e Fatturato','Anomalie']
+menu_admin=['Dashboard','Gestione dati','Agenti','Cartella clinica','Clienti','Magazzini','Inventario','Offerte','DDT carico / Loan','Scarico sala','Work Implant','Customer Connect','KPI e Fatturato','Anomalie']
 menu_collab=['Dashboard','Scarico sala']
 menu=st.sidebar.radio('Menu', menu_admin if admin else menu_collab)
+if 'quick_menu' in st.session_state:
+    menu=st.session_state.pop('quick_menu')
 
 if menu=='Dashboard':
-    st.title('🏥 OrthoFlow 6.2 Gestione Giacenze')
-    st.caption('Supabase nativo + gestione giacenze + J&J Safe Match: 413.050S ≠ 413.050')
-    r=df('righe_intervento'); fatt=float(r['totale'].fillna(0).sum()) if not r.empty and 'totale' in r else 0
-    c1,c2,c3,c4,c5=st.columns(5); c1.metric('Clienti',len(df('clienti'))); c2.metric('Giacenze',len(df('giacenze'))); c3.metric('Interventi',len(df('interventi'))); c4.metric('Movimenti',len(df('movimenti_magazzino'))); c5.metric('Fatturato',f'€ {fatt:,.2f}')
+    st.title('🏥 OrthoFlow 6.2 Full + Gestione Giacenze')
+    st.caption('Dashboard operativa: accessi rapidi, KPI principali e controllo magazzino')
+
+    if st.button('🔄 Aggiorna dati', use_container_width=True):
+        st.cache_data.clear()
+        st.rerun()
+
+    r=df('righe_intervento')
+    clienti_df=df('clienti')
+    giacenze_df=df('giacenze')
+    interventi_df=df('interventi')
+    movimenti_df=df('movimenti_magazzino')
+    anomalie_df=df('anomalie')
+    fatt=float(r['totale'].fillna(0).sum()) if not r.empty and 'totale' in r else 0
+
+    c1,c2,c3,c4,c5=st.columns(5)
+    c1.metric('Clienti',len(clienti_df))
+    c2.metric('Giacenze',len(giacenze_df))
+    c3.metric('Interventi',len(interventi_df))
+    c4.metric('Movimenti',len(movimenti_df))
+    c5.metric('Fatturato',f'€ {fatt:,.2f}')
+
+    st.divider()
+    st.subheader('⚡ Azioni rapide')
+    q1,q2,q3,q4=st.columns(4)
+    if q1.button('📸 Scarico sala',use_container_width=True):
+        st.session_state.quick_menu='Scarico sala'
+        st.rerun()
+    if q2.button('📦 Inventario',use_container_width=True):
+        st.session_state.quick_menu='Inventario'
+        st.rerun()
+    if q3.button('💰 Offerte',use_container_width=True):
+        st.session_state.quick_menu='Offerte'
+        st.rerun()
+    if q4.button('🗄️ Gestione dati',use_container_width=True):
+        st.session_state.quick_menu='Gestione dati'
+        st.rerun()
+
+    st.divider()
+    a1,a2=st.columns(2)
+    with a1:
+        st.subheader('⚠️ Anomalie aperte')
+        if not anomalie_df.empty:
+            st.dataframe(anomalie_df.head(10),use_container_width=True,height=280)
+        else:
+            st.success('Nessuna anomalia presente')
+    with a2:
+        st.subheader('📦 Ultime giacenze')
+        if not giacenze_df.empty:
+            st.dataframe(giacenze_df.head(10),use_container_width=True,height=280)
+        else:
+            st.info('Nessuna giacenza presente')
+
+elif menu=='Gestione dati':
+    st.title('🗄️ Gestione dati')
+    st.caption('Modifica, elimina e scarica le principali tabelle operative.')
+
+    if st.button('🔄 Aggiorna tabelle', use_container_width=True):
+        st.cache_data.clear()
+        st.rerun()
+
+    tab=st.selectbox(
+        'Tabella da gestire',
+        ['clienti','magazzini','agenti','cartelle_cliniche','giacenze','movimenti_magazzino','interventi','righe_intervento','offerte_header','offerte_clienti','offerte_prezzi','ddt','ddt_righe','anomalie']
+    )
+    order_col=st.text_input('Ordina per colonna','id')
+    desc=st.checkbox('Ordine decrescente',True)
+    data=df(tab,order_col,desc)
+
+    st.write(f'Righe visualizzate: {len(data)}')
+    st.dataframe(data,use_container_width=True,height=420)
+
+    if not data.empty:
+        st.download_button('⬇️ Scarica Excel', excel_bytes({tab:data}), file_name=f'{tab}.xlsx', use_container_width=True)
+
+    st.divider()
+    st.subheader('✏️ Modifica / 🗑️ Elimina record')
+
+    if data.empty:
+        st.info('Nessun dato presente in questa tabella.')
+    elif 'id' not in data.columns:
+        st.warning('Questa tabella non ha una colonna ID: modifica/elimina non disponibili.')
+    else:
+        ids=data['id'].dropna().tolist()
+        selected_id=st.selectbox('Seleziona ID record', ids)
+        row=data[data['id']==selected_id].iloc[0].to_dict()
+
+        cmod, cdel = st.tabs(['✏️ Modifica record','🗑️ Elimina record'])
+
+        with cmod:
+            st.caption('Modifica i campi e salva. Evita di cambiare campi tecnici se non sei sicuro.')
+            edit={}
+            for col,val in row.items():
+                if col=='id':
+                    st.text_input(col, str(val), disabled=True, key=f'{tab}_{selected_id}_{col}')
+                else:
+                    edit[col]=st.text_input(col, '' if pd.isna(val) else str(val), key=f'{tab}_{selected_id}_{col}')
+            if st.button('💾 Salva modifiche', use_container_width=True):
+                payload={}
+                for col,val in edit.items():
+                    old=row.get(col)
+                    payload[col]=cast_like(val, old)
+                try:
+                    upd(tab, selected_id, payload)
+                    st.cache_data.clear()
+                    st.success('Record modificato correttamente.')
+                    st.rerun()
+                except Exception as e:
+                    st.error(f'Errore modifica: {e}')
+
+        with cdel:
+            st.error('Attenzione: eliminazione definitiva dal database.')
+            conferma=st.checkbox(f'Confermo eliminazione ID {selected_id} dalla tabella {tab}')
+            if st.button('🗑️ Elimina definitivamente', use_container_width=True, disabled=not conferma):
+                try:
+                    dele(tab, selected_id)
+                    st.cache_data.clear()
+                    st.success('Record eliminato.')
+                    st.rerun()
+                except Exception as e:
+                    st.error(f'Errore eliminazione: {e}')
+
+elif menu=='Agenti':
+    st.title('👤 Agenti')
+    st.caption('Gestione agenti usati negli interventi.')
+    a=df('agenti','nome')
+    if a.empty:
+        st.info('Se la tabella agenti non esiste ancora in Supabase, crea una tabella chiamata agenti con colonne: id, nome, email, telefono, attivo.')
+    with st.form('nuovo_agente'):
+        nome=st.text_input('Nome agente')
+        email=st.text_input('Email')
+        telefono=st.text_input('Telefono')
+        attivo=st.checkbox('Attivo', True)
+        ok_ag=st.form_submit_button('Salva agente')
+    if ok_ag:
+        if not nome.strip():
+            st.warning('Inserisci il nome agente.')
+        else:
+            try:
+                ins('agenti',{'nome':nome.strip(),'email':email.strip(),'telefono':telefono.strip(),'attivo':attivo})
+                st.cache_data.clear()
+                st.success('Agente salvato.')
+                st.rerun()
+            except Exception as e:
+                st.error(f'Errore salvataggio agente. Probabilmente manca la tabella agenti in Supabase. Dettaglio: {e}')
+    st.dataframe(df('agenti','nome'),use_container_width=True,height=420)
+
+elif menu=='Cartella clinica':
+    st.title('📁 Cartella clinica')
+    st.caption('Gestione cartelle cliniche collegate agli interventi.')
+
+    t1,t2=st.tabs(['Nuova cartella','Cartelle presenti'])
+
+    with t1:
+        clienti=clienti_opts()
+        interventi=df('interventi','id',True)
+        with st.form('cartella_clinica'):
+            if clienti:
+                cs=st.selectbox('Struttura / cliente',clienti,format_func=lambda x:x['label'])
+                codice_cliente=cs['codice_cliente']
+                cliente=cs['descrizione']
+            else:
+                codice_cliente=st.text_input('Codice cliente')
+                cliente=st.text_input('Cliente / struttura')
+
+            if not interventi.empty and 'id' in interventi.columns:
+                intervento_id=st.selectbox('Intervento collegato',['']+[str(x) for x in interventi['id'].dropna().tolist()])
+            else:
+                intervento_id=st.text_input('Intervento collegato')
+
+            paziente=st.text_input('Paziente / riferimento interno')
+            numero_cartella=st.text_input('Numero cartella clinica')
+            data_cartella=st.date_input('Data cartella',date.today())
+            reparto=st.text_input('Reparto')
+            chirurgo=st.text_input('Chirurgo')
+            note=st.text_area('Note')
+            ok_cart=st.form_submit_button('Salva cartella clinica')
+
+        if ok_cart:
+            payload={
+                'codice_cliente':codice_cliente,
+                'cliente':cliente,
+                'intervento_id':None if not intervento_id else str(intervento_id),
+                'paziente':paziente,
+                'numero_cartella':numero_cartella,
+                'data_cartella':str(data_cartella),
+                'reparto':reparto,
+                'chirurgo':chirurgo,
+                'note':note
+            }
+            try:
+                ins('cartelle_cliniche',payload)
+                st.cache_data.clear()
+                st.success('Cartella clinica salvata.')
+                st.rerun()
+            except Exception as e:
+                st.error(f'Errore salvataggio cartella clinica. Probabilmente manca la tabella cartelle_cliniche in Supabase. Dettaglio: {e}')
+
+    with t2:
+        dcart=df('cartelle_cliniche','id',True)
+        st.dataframe(dcart,use_container_width=True,height=520)
+        if not dcart.empty:
+            st.download_button('⬇️ Scarica cartelle cliniche Excel', excel_bytes({'cartelle_cliniche':dcart}), file_name='cartelle_cliniche.xlsx', use_container_width=True)
+
 elif menu=='Clienti':
     st.title('👥 Clienti')
     t1,t2=st.tabs(['Import ANAGRA','Clienti presenti'])
     with t1:
         f=st.file_uploader('ANAGRA Excel',type=['xlsx','xls'])
         if f:
-            d=norm(pd.read_excel(f)); st.dataframe(d.head(30),use_container_width=True); cols=list(d.columns)
+            d=read_excel_cached(f.getvalue(), f.name); st.dataframe(d.head(30),use_container_width=True); cols=list(d.columns)
             cc=st.selectbox('Codice cliente',cols,index=idx(cols,['Codice','codice_cliente'])); de=st.selectbox('Descrizione',cols,index=idx(cols,['Descrizione','Cliente'],1 if len(cols)>1 else 0)); ci=st.selectbox('Città',['']+cols,index=idxo(cols,['Città','Citta'])); pr=st.selectbox('Provincia',['']+cols,index=idxo(cols,['Prov','Provincia'])); pv=st.selectbox('P.IVA',['']+cols,index=idxo(cols,['Partita Iva','PIVA','P.IVA']))
             if st.button('Importa clienti',use_container_width=True):
                 rows=[]
@@ -191,71 +487,71 @@ elif menu=='Magazzini':
     st.dataframe(mags(),use_container_width=True)
 elif menu=='Inventario':
     st.title('📦 Inventario')
-    st.info('Versione 6.2: puoi svuotare o sostituire una giacenza completa senza cancellare codice per codice.')
+    st.info('Versione 6.2 Full: puoi sostituire o svuotare una giacenza completa senza cancellare codice per codice.')
     t1,t2,t3,t4=st.tabs(['Import TTKEYS','Giacenze','Movimenti','Gestione giacenze'])
     with t1:
         m=mags(); labels=[f'{r.codice_magazzino} - {r.nome_magazzino}' for r in m.itertuples()] if not m.empty else ['MAG1 - Magazzino 1']; ml=st.selectbox('Magazzino',labels); mag=ml.split(' - ')[0]; origine=st.selectbox('Origine',['CONTO DEPOSITO','LOAN / CONTO VISIONE'])
         f=st.file_uploader('TTKEYS / giacenze',type=['xlsx','xls'])
         if f:
-            d=norm(pd.read_excel(f)); st.dataframe(d.head(30),use_container_width=True); cols=list(d.columns)
+            d=read_excel_cached(f.getvalue(), f.name); st.dataframe(d.head(30),use_container_width=True); cols=list(d.columns)
             cod=st.selectbox('Codice',cols,index=idx(cols,['Articolo','Codice'])); des=st.selectbox('Descrizione',['']+cols,index=idxo(cols,['Descr. articolo','Descrizione','Descr.'])); lot=st.selectbox('Lotto',cols,index=idx(cols,['Lotto','LOT'])); qty=st.selectbox('Quantità',cols,index=idx(cols,['Quantità','Quantita','Qta'])); sca=st.selectbox('Scadenza',['']+cols,index=idxo(cols,['Scadenza','EXP'])); only=st.checkbox('Solo quantità positive',True)
             if st.button('Importa giacenze',use_container_width=True):
-                n=0
+                rows=[]
                 prog = st.progress(0)
                 total = len(d)
                 for i,(_,x) in enumerate(d.iterrows(), start=1):
                     c=clean(x[cod]); l=clean(x[lot]); q=money(x[qty]) or 0
                     if c and l and not (only and q<=0):
-                        movimento('CARICO_INIZIALE',mag,c,l,q,'' if not des else str(x[des]),None if not sca else str(x[sca]),origine,'IMPORT','TTKEYS')
-                        n+=1
-                    if i % 100 == 0 or i == total:
+                        rows.append(movimento_row('CARICO_INIZIALE',mag,c,l,q,'' if not des else str(x[des]),None if not sca else str(x[sca]),origine,'IMPORT','TTKEYS'))
+                    if i % 500 == 0 or i == total:
                         prog.progress(min(i/total, 1.0))
-                st.success(f'Movimenti caricati: {n}')
+                n=batch_insert('movimenti_magazzino', rows, size=1000)
+                st.cache_data.clear()
+                st.success(f'Movimenti caricati in blocco: {n}')
     with t2: st.dataframe(df('giacenze','updated_at',True),use_container_width=True)
     with t3: st.dataframe(df('movimenti_magazzino','id',True),use_container_width=True)
 
     with t4:
         st.subheader("Gestione giacenze complete")
-        st.warning("Questa funzione modifica solo la tabella giacenze. Non cancella interventi, DDT o storico movimenti già registrati.")
+        st.warning("Modifica solo la tabella giacenze. Non cancella interventi, DDT, righe intervento o storico movimenti.")
 
-        mags = get_magazzini_options()
-        mag_labels = [f"{r.codice_magazzino} - {r.nome_magazzino}" for r in mags.itertuples()] if not mags.empty else ["MAG1 - Magazzino 1"]
-        mag_label = st.selectbox("Magazzino da gestire", mag_labels, key="gest_giac_mag")
-        mag = mag_label.split(" - ")[0]
+        m=mags()
+        labels=[f'{r.codice_magazzino} - {r.nome_magazzino}' for r in m.itertuples()] if not m.empty else ['MAG1 - Magazzino 1']
+        ml=st.selectbox("Magazzino da gestire", labels, key="gest_giac_mag")
+        mag=ml.split(" - ")[0]
 
-        origine_sel = st.selectbox("Origine da gestire", ["TUTTE", "CONTO DEPOSITO", "LOAN / CONTO VISIONE"], key="gest_giac_origine")
-        origine_filter = None if origine_sel == "TUTTE" else origine_sel
+        origine_sel=st.selectbox("Origine da gestire", ["TUTTE","CONTO DEPOSITO","LOAN / CONTO VISIONE"], key="gest_giac_orig")
+        origine_filter=None if origine_sel=="TUTTE" else origine_sel
 
-        current_q = sb().table("giacenze").select("*", count="exact").eq("codice_magazzino", mag)
+        q=sb().table("giacenze").select("*", count="exact").eq("codice_magazzino", mag)
         if origine_filter:
-            current_q = current_q.eq("origine", origine_filter)
-        current_count = current_q.limit(1).execute().count or 0
+            q=q.eq("origine", origine_filter)
+        current_count=q.limit(1).execute().count or 0
         st.metric("Righe giacenza attuali", current_count)
 
         st.divider()
-        st.subheader("🔄 Sostituisci giacenza da nuovo file")
-        st.write("Carica un nuovo TTKEYS: l'app svuota la giacenza selezionata e importa il nuovo file aggiornato.")
+        st.subheader("🔄 Sostituisci giacenza da nuovo TTKEYS")
+        fnew=st.file_uploader("Nuovo file giacenze / TTKEYS", type=["xlsx","xls"], key="replace_giac_file")
 
-        fnew = st.file_uploader("Nuovo file giacenze / TTKEYS", type=["xlsx", "xls"], key="replace_giacenze_file")
         if fnew:
-            dnew = norm(pd.read_excel(fnew))
+            dnew=read_excel_cached(fnew.getvalue(), fnew.name)
             st.write(f"Righe lette dal nuovo file: **{len(dnew)}**")
             st.dataframe(dnew.head(30), use_container_width=True)
 
-            cols = list(dnew.columns)
-            cod = st.selectbox("Colonna codice", cols, index=idx(cols, ["Articolo", "Codice", "Codice Prodotto"]), key="replace_cod")
-            des = st.selectbox("Colonna descrizione", [""] + cols, index=idx_opt(cols, ["Descr. articolo", "Descrizione", "Descr."]), key="replace_des")
-            lot = st.selectbox("Colonna lotto", cols, index=idx(cols, ["Lotto", "LOT", "Batch"]), key="replace_lot")
-            qty = st.selectbox("Colonna quantità", cols, index=idx(cols, ["Quantità", "Quantita", "Qta", "Qty"]), key="replace_qty")
-            sca = st.selectbox("Colonna scadenza", [""] + cols, index=idx_opt(cols, ["Scadenza", "Data scadenza", "EXP"]), key="replace_sca")
-            new_origine = st.selectbox("Origine nuovo file", ["CONTO DEPOSITO", "LOAN / CONTO VISIONE"], key="replace_origine")
-            conferma = st.text_input(f"Per confermare scrivi SOSTITUISCI {mag}", key="replace_confirm")
+            cols=list(dnew.columns)
+            cod=st.selectbox("Colonna codice", cols, index=idx(cols,["Articolo","Codice","Codice Prodotto"]), key="replace_cod")
+            des=st.selectbox("Colonna descrizione", [""]+cols, index=idxo(cols,["Descr. articolo","Descrizione","Descr."]), key="replace_des")
+            lot=st.selectbox("Colonna lotto", cols, index=idx(cols,["Lotto","LOT","Batch"]), key="replace_lot")
+            qty=st.selectbox("Colonna quantità", cols, index=idx(cols,["Quantità","Quantita","Qta","Qty"]), key="replace_qty")
+            sca=st.selectbox("Colonna scadenza", [""]+cols, index=idxo(cols,["Scadenza","Data scadenza","EXP"]), key="replace_sca")
+            new_origine=st.selectbox("Origine nuovo file", ["CONTO DEPOSITO","LOAN / CONTO VISIONE"], key="replace_origine")
 
+            conferma=st.text_input(f"Per confermare scrivi SOSTITUISCI {mag}", key="replace_confirm")
             if st.button("🔄 Sostituisci giacenza selezionata", use_container_width=True, key="replace_btn"):
                 if conferma != f"SOSTITUISCI {mag}":
                     st.error(f"Conferma non valida. Devi scrivere esattamente: SOSTITUISCI {mag}")
                 else:
-                    preview = pd.DataFrame({
+                    preview=pd.DataFrame({
                         "codice": dnew[cod].map(clean),
                         "descrizione": "" if not des else dnew[des].astype(str),
                         "lotto": dnew[lot].map(clean),
@@ -263,38 +559,31 @@ elif menu=='Inventario':
                         "quantita": dnew[qty],
                     })
                     svuota_giacenza(mag, origine_filter)
-                    n = importa_giacenza_diretta(mag, preview, new_origine, batch_size=500)
+                    n=importa_giacenza_diretta(mag, preview, new_origine, batch_size=500)
+                    st.cache_data.clear()
                     st.success(f"Giacenza {mag} sostituita. Nuove righe caricate: {n}")
 
         st.divider()
         st.subheader("🗑️ Svuota giacenza")
-        st.write("Elimina tutte le righe della giacenza selezionata. Non elimina storico interventi, DDT o movimenti.")
-        conferma_del = st.text_input(f"Per svuotare scrivi SVUOTA {mag}", key="delete_confirm")
+        conferma_del=st.text_input(f"Per svuotare scrivi SVUOTA {mag}", key="delete_confirm")
         if st.button("🗑️ Svuota giacenza selezionata", use_container_width=True, key="delete_giac_btn"):
             if conferma_del != f"SVUOTA {mag}":
                 st.error(f"Conferma non valida. Devi scrivere esattamente: SVUOTA {mag}")
             else:
                 svuota_giacenza(mag, origine_filter)
+                st.cache_data.clear()
                 st.success(f"Giacenza {mag} svuotata.")
 
         st.divider()
         st.subheader("📥 Esporta giacenza selezionata")
-        qexp = sb().table("giacenze").select("*").eq("codice_magazzino", mag)
+        qexp=sb().table("giacenze").select("*").eq("codice_magazzino", mag)
         if origine_filter:
-            qexp = qexp.eq("origine", origine_filter)
-        exp_df = pd.DataFrame(qexp.execute().data or [])
+            qexp=qexp.eq("origine", origine_filter)
+        exp_df=pd.DataFrame(qexp.execute().data or [])
         if exp_df.empty:
-            st.info("Nessuna giacenza da esportare per la selezione corrente.")
+            st.info("Nessuna giacenza da esportare.")
         else:
-            st.download_button(
-                "Scarica Excel giacenza selezionata",
-                excel_bytes({"Giacenza": exp_df}),
-                f"giacenza_{mag}.xlsx",
-                use_container_width=True
-            )
-
-
-
+            st.download_button("Scarica Excel giacenza selezionata", excel_bytes({"Giacenza":exp_df}), file_name=f"giacenza_{mag}.xlsx", use_container_width=True)
 elif menu=='Offerte':
     st.title('💰 Offerte')
     st.info('Import ottimizzato: i prezzi vengono caricati in blocchi da 500 righe. Il matching resta J&J Safe Match: 413.050S ≠ 413.050.')
@@ -313,7 +602,7 @@ elif menu=='Offerte':
         if not o.empty:
             sel=st.selectbox('Offerta',[f'{r.id} - {r.nome_offerta} ({r.linea})' for r in o.itertuples()]); oid=int(sel.split(' - ')[0]); f=st.file_uploader('Excel prezzi',type=['xlsx','xls'])
             if f:
-                d=norm(pd.read_excel(f)); st.dataframe(d.head(30),use_container_width=True); cols=list(d.columns); cod=st.selectbox('Codice',cols,index=idx(cols,['Codice Prodotto','Codice','Articolo'])); des=st.selectbox('Descrizione',['']+cols,index=idxo(cols,['Descrizione prodotto','Descrizione'])); pre=st.selectbox('Prezzo',cols,index=idx(cols,['Prezzo unitario offerto cifre e lettere','Prezzo','prezzo']))
+                d=read_excel_cached(f.getvalue(), f.name); st.dataframe(d.head(30),use_container_width=True); cols=list(d.columns); cod=st.selectbox('Codice',cols,index=idx(cols,['Codice Prodotto','Codice','Articolo'])); des=st.selectbox('Descrizione',['']+cols,index=idxo(cols,['Descrizione prodotto','Descrizione'])); pre=st.selectbox('Prezzo',cols,index=idx(cols,['Prezzo unitario offerto cifre e lettere','Prezzo','prezzo']))
                 if st.button('Importa prezzi',use_container_width=True):
                     rows=[]
                     for _,x in d.iterrows():
@@ -337,14 +626,22 @@ elif menu=='DDT carico / Loan':
         labels=[f'{r.codice_magazzino} - {r.nome_magazzino}' for r in mags().itertuples()]; ml=st.selectbox('Magazzino destinazione',labels); mag=ml.split(' - ')[0]; tipo=st.selectbox('Tipo',['CONTO DEPOSITO','LOAN / CONTO VISIONE'])
         f=st.file_uploader('Excel DDT',type=['xlsx','xls'])
         if f:
-            d=norm(pd.read_excel(f)); st.dataframe(d.head(30),use_container_width=True); cols=list(d.columns); cod=st.selectbox('Codice',cols,index=idx(cols,['Codice','Articolo','REF'])); lot=st.selectbox('Lotto',cols,index=idx(cols,['Lotto','LOT'])); qty=st.selectbox('Quantità',cols,index=idx(cols,['Quantità','Qta','Qty'])); des=st.selectbox('Descrizione',['']+cols,index=idxo(cols,['Descrizione','Descr.'])); sca=st.selectbox('Scadenza',['']+cols,index=idxo(cols,['Scadenza','EXP']))
+            d=read_excel_cached(f.getvalue(), f.name); st.dataframe(d.head(30),use_container_width=True); cols=list(d.columns); cod=st.selectbox('Codice',cols,index=idx(cols,['Codice','Articolo','REF'])); lot=st.selectbox('Lotto',cols,index=idx(cols,['Lotto','LOT'])); qty=st.selectbox('Quantità',cols,index=idx(cols,['Quantità','Qta','Qty'])); des=st.selectbox('Descrizione',['']+cols,index=idxo(cols,['Descrizione','Descr.'])); sca=st.selectbox('Scadenza',['']+cols,index=idxo(cols,['Scadenza','EXP']))
             num=st.text_input('Numero DDT',''); cli=st.text_input('Cliente/destinazione','')
             if st.button('Crea DDT e carica magazzino',use_container_width=True):
-                ddt=ins('ddt',{'numero_ddt':num,'data_ddt':str(date.today()),'tipo_ddt':tipo,'cliente':cli,'codice_magazzino_destinazione':mag}); n=0
+                ddt=ins('ddt',{'numero_ddt':num,'data_ddt':str(date.today()),'tipo_ddt':tipo,'cliente':cli,'codice_magazzino_destinazione':mag})
+                righe=[]; movs=[]
                 for _,x in d.iterrows():
                     c=clean(x[cod]); l=clean(x[lot]); q=money(x[qty]) or 1
-                    if c and l: ins('ddt_righe',{'ddt_id':ddt['id'],'codice':c,'descrizione':'' if not des else str(x[des]),'lotto':l,'scadenza':None if not sca else str(x[sca]),'quantita':q,'origine':tipo}); movimento('CARICO_DDT',mag,c,l,q,'' if not des else str(x[des]),None if not sca else str(x[sca]),tipo,'DDT',ddt['id']); n+=1
-                st.success(f'DDT {ddt["id"]} creato. Righe: {n}')
+                    if c and l:
+                        descrizione='' if not des else str(x[des])
+                        scadenza=None if not sca else str(x[sca])
+                        righe.append({'ddt_id':ddt['id'],'codice':c,'descrizione':descrizione,'lotto':l,'scadenza':scadenza,'quantita':q,'origine':tipo})
+                        movs.append(movimento_row('CARICO_DDT',mag,c,l,q,descrizione,scadenza,tipo,'DDT',ddt['id']))
+                n1=batch_insert('ddt_righe', righe, size=1000)
+                n2=batch_insert('movimenti_magazzino', movs, size=1000)
+                st.cache_data.clear()
+                st.success(f'DDT {ddt["id"]} creato. Righe: {n1}. Movimenti: {n2}')
     with t2: st.dataframe(df('ddt','id',True),use_container_width=True); st.dataframe(df('ddt_righe','id',True),use_container_width=True)
 elif menu=='Scarico sala':
     st.title('📸 Scarico sala')
@@ -359,7 +656,7 @@ elif menu=='Scarico sala':
                 meta=analyze_image(path,mode='scarico_sala'); rows=normalize_ai_items(meta); st.session_state['scarico_rows']=rows; st.success(f'Righe estratte: {len(rows)}')
     edited=st.data_editor(pd.DataFrame(st.session_state.get('scarico_rows',[])) if st.session_state.get('scarico_rows') else pd.DataFrame(columns=['codice','descrizione','lotto','scadenza','quantita','produttore']),num_rows='dynamic',use_container_width=True)
     with st.form('intervento'):
-        data_int=st.date_input('Data intervento',date.today()); cs=st.selectbox('Struttura',clienti,format_func=lambda x:x['label']) if clienti else {'codice_cliente':'','descrizione':''}; ml=st.selectbox('Scarica da giacenza',labels); mag=ml.split(' - ')[0]; agente=st.text_input('Agente',''); linea=st.selectbox('Linea',['TRAUMA','PROTESICA','CMF','SPINE','SPORTS','ALTRO']); ok=st.form_submit_button('Crea intervento e scarica')
+        data_int=st.date_input('Data intervento',date.today()); cs=st.selectbox('Struttura',clienti,format_func=lambda x:x['label']) if clienti else {'codice_cliente':'','descrizione':''}; ml=st.selectbox('Scarica da giacenza',labels); mag=ml.split(' - ')[0]; agenti=agenti_opts(); agente=st.selectbox('Agente', agenti) if agenti and agenti!=[''] else st.text_input('Agente',''); linea=st.selectbox('Linea',['TRAUMA','PROTESICA','CMF','SPINE','SPORTS','ALTRO']); ok=st.form_submit_button('Crea intervento e scarica')
     if ok:
         inter=ins('interventi',{'data_intervento':str(data_int),'codice_cliente':cs['codice_cliente'],'cliente':cs['descrizione'],'agente':agente,'linea':linea,'magazzino_scarico':mag}); fatt=0; n=0
         for _,x in edited.iterrows():
@@ -369,9 +666,9 @@ elif menu=='Scarico sala':
             pr=prezzo_per(cs['codice_cliente'],c,linea)
             tot=pr*q if pr is not None else None
             if pr is None:
-                ins('anomalie',{'tipo':'PREZZO_NON_TROVATO','gravita':'Media','descrizione':f'Intervento {inter["id"]}: prezzo non trovato per cliente {cs["codice_cliente"]}, linea {linea}, codice {c}. Verifica offerta e S sterile/non sterile.','stato':'Aperta'})
+                ins_safe('anomalie',{'tipo':'PREZZO_NON_TROVATO','gravita':'Media','descrizione':f'Intervento {inter["id"]}: prezzo non trovato per cliente {cs["codice_cliente"]}, linea {linea}, codice {c}. Verifica offerta e S sterile/non sterile.','stato':'Aperta'})
             ins('righe_intervento',{'intervento_id':inter['id'],'codice':c,'descrizione':descr,'lotto':l,'scadenza':str(x.get('scadenza','') or '') or None,'quantita':q,'produttore':prod,'validazione':valid,'origine':'CONTO DEPOSITO','prezzo':pr,'totale':tot,'reintegro':True})
-            if disp(mag,c,l)<q: ins('anomalie',{'tipo':'GIACENZA_INSUFFICIENTE','gravita':'Alta','descrizione':f'Intervento {inter["id"]}: {c} lotto {l} disponibile {disp(mag,c,l)} richiesta {q}','stato':'Aperta'})
+            if disp(mag,c,l)<q: ins_safe('anomalie',{'tipo':'GIACENZA_INSUFFICIENTE','gravita':'Alta','descrizione':f'Intervento {inter["id"]}: {c} lotto {l} disponibile {disp(mag,c,l)} richiesta {q}','stato':'Aperta'})
             movimento('SCARICO_INTERVENTO',mag,c,l,-abs(q),descr,str(x.get('scadenza','') or '') or None,'CONTO DEPOSITO','INTERVENTO',inter['id']); fatt+=tot or 0; n+=1
         st.success(f'Intervento {inter["id"]} creato. Righe: {n}. Fatturato: € {fatt:,.2f}')
 elif menu=='Work Implant': st.title('📄 Work Implant'); st.dataframe(df('righe_intervento','id',True),use_container_width=True)
