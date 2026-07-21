@@ -125,6 +125,16 @@ def storage_signed_url(storage_path, bucket="orthoflow-impianti", expires=3600):
     except Exception:
         return None
 
+def storage_delete_file(storage_path, bucket="orthoflow-impianti"):
+    if not storage_path:
+        return True
+    try:
+        sb().storage.from_(bucket).remove([str(storage_path)])
+        return True
+    except Exception as e:
+        st.warning(f"Record eliminato, ma il file Storage non è stato rimosso: {e}")
+        return False
+
 def salva_file_locale(upload, categoria="impianti"):
     base = Path("uploads") / categoria
     base.mkdir(parents=True, exist_ok=True)
@@ -220,11 +230,41 @@ def excel_bytes(sheets):
     return bio.getvalue()
 
 def mags():
-    d=df('magazzini','nome_magazzino')
+    # Lettura tollerante: non ordinare su una colonna che potrebbe non esistere.
+    d=df('magazzini','id')
     if d.empty:
-        try: upsert('magazzini', {'codice_magazzino':'MAG1','nome_magazzino':'Magazzino 1','tipo':'INTERNO'}, 'codice_magazzino'); d=df('magazzini','nome_magazzino')
-        except Exception: pass
+        try:
+            upsert(
+                'magazzini',
+                {'codice_magazzino':'MAG1','nome_magazzino':'Magazzino 1','tipo':'INTERNO'},
+                'codice_magazzino'
+            )
+            st.cache_data.clear()
+            d=df('magazzini','id')
+        except Exception:
+            pass
     return d
+
+def magazzini_labels():
+    d = mags()
+    labels = []
+    if not d.empty:
+        for _, r in d.iterrows():
+            codice = clean(
+                r.get('codice_magazzino',
+                r.get('codice',
+                r.get('magazzino', '')))
+            )
+            nome = str(
+                r.get('nome_magazzino',
+                r.get('descrizione',
+                r.get('nome', '')))
+                or ''
+            ).strip()
+            if codice:
+                labels.append(f"{codice} - {nome or codice}")
+    # L'app resta utilizzabile anche se l'anagrafica è incompleta.
+    return labels or ['MAG1 - Magazzino 1']
 def clienti_opts():
     d=df('clienti','descrizione')
     return [{'label':str(r.descrizione),'codice_cliente':str(r.codice_cliente),'descrizione':str(r.descrizione)} for r in d.itertuples()] if not d.empty else []
@@ -292,20 +332,20 @@ if 'user' not in st.session_state:
         if (u,p)==('admin','Mastrota09@'): st.session_state.user=u; st.session_state.ruolo='Admin'; st.rerun()
         elif (u,p)==('collaboratore','1234'): st.session_state.user=u; st.session_state.ruolo='Collaboratore'; st.rerun()
         else: st.sidebar.error('Credenziali errate')
-    st.title('OrthoFlow 7.0 Enterprise'); st.stop()
-st.sidebar.markdown('## 🏥 OrthoFlow 7.0')
+    st.title('OrthoFlow 7.0.1 Enterprise'); st.stop()
+st.sidebar.markdown('## 🏥 OrthoFlow 7.0.1')
 st.sidebar.caption('Gestionale ortopedico cloud')
 st.sidebar.success(f"{st.session_state.user} - {st.session_state.ruolo}")
 if st.sidebar.button('Esci'): st.session_state.clear(); st.rerun()
 admin=st.session_state.get('ruolo')=='Admin'
-menu_admin=['Dashboard','Gestione dati','Agenti','Cartella clinica','Clienti','Magazzini','Inventario','Offerte','DDT carico / Loan','Scarico sala','Archivio impianti','Work Implant','Customer Connect','KPI e Fatturato','Anomalie']
+menu_admin=['Dashboard','Gestione dati','Agenti','Cartella clinica','Clienti','Magazzini','Inventario','Offerte','DDT carico / Loan','Scarico sala','Work Implant','Customer Connect','KPI e Fatturato','Anomalie']
 menu_collab=['Dashboard','Scarico sala']
 menu=st.sidebar.radio('Menu', menu_admin if admin else menu_collab)
 if 'quick_menu' in st.session_state:
     menu=st.session_state.pop('quick_menu')
 
 if menu=='Dashboard':
-    st.title('🏥 OrthoFlow 7.0 Enterprise')
+    st.title('🏥 OrthoFlow 7.0.1 Enterprise')
     st.caption('OrthoFlow Enterprise: Supabase, Storage, inventario, documenti, ordini e chiusure')
 
     if st.button('🔄 Aggiorna dati', use_container_width=True):
@@ -368,7 +408,7 @@ elif menu=='Gestione dati':
 
     tab=st.selectbox(
         'Tabella da gestire',
-        ['clienti','magazzini','agenti','cartelle_cliniche','giacenze','movimenti_magazzino','interventi','righe_intervento','offerte_header','offerte_clienti','offerte_prezzi','ddt','ddt_righe','anomalie']
+        ['clienti','magazzini','agenti','cartelle_cliniche','giacenze','movimenti_magazzino','interventi','righe_intervento','documenti_impianto','offerte_header','offerte_clienti','offerte_prezzi','ddt','ddt_righe','ordini','ordini_righe','chiusure','chiusure_righe','anomalie']
     )
     order_col=st.text_input('Ordina per colonna','id')
     desc=st.checkbox('Ordine decrescente',True)
@@ -376,6 +416,23 @@ elif menu=='Gestione dati':
 
     st.write(f'Righe visualizzate: {len(data)}')
     st.dataframe(data,use_container_width=True,height=420)
+
+    if tab == 'documenti_impianto' and not data.empty and 'id' in data.columns:
+        st.subheader('📎 Anteprima archivio impianti')
+        doc_ids = data['id'].dropna().tolist()
+        doc_id = st.selectbox('Seleziona documento da aprire', doc_ids, key='gestione_documento_preview')
+        doc_row = data[data['id'] == doc_id].iloc[0].to_dict()
+        st.write(f"**Intervento:** {doc_row.get('intervento_id','')}")
+        st.write(f"**Cartella clinica:** {doc_row.get('cartella_clinica','')}")
+        st.write(f"**Cliente/struttura:** {doc_row.get('cliente','')}")
+        st.write(f"**Agente:** {doc_row.get('agente','')}")
+        st.write(f"**Nome file:** {doc_row.get('nome_file','')}")
+        storage_path = doc_row.get('storage_path','')
+        signed = storage_signed_url(storage_path) if storage_path else None
+        if signed:
+            st.link_button('📂 Apri documento originale', signed, use_container_width=True)
+        else:
+            st.warning('File non disponibile su Supabase Storage oppure percorso non registrato.')
 
     if not data.empty:
         st.download_button('⬇️ Scarica Excel', excel_bytes({tab:data}), file_name=f'{tab}.xlsx', use_container_width=True)
@@ -420,9 +477,11 @@ elif menu=='Gestione dati':
             conferma=st.checkbox(f'Confermo eliminazione ID {selected_id} dalla tabella {tab}')
             if st.button('🗑️ Elimina definitivamente', use_container_width=True, disabled=not conferma):
                 try:
+                    if tab == 'documenti_impianto':
+                        storage_delete_file(row.get('storage_path',''), row.get('storage_bucket','orthoflow-impianti') or 'orthoflow-impianti')
                     dele(tab, selected_id)
                     st.cache_data.clear()
-                    st.success('Record eliminato.')
+                    st.success('Record eliminato definitivamente.')
                     st.rerun()
                 except Exception as e:
                     st.error(f'Errore eliminazione: {e}')
@@ -579,7 +638,7 @@ elif menu=='Inventario':
     st.title('📦 Inventario')
     t1,t2,t3=st.tabs(['Import TTKEYS','Giacenze','Movimenti'])
     with t1:
-        m=mags(); labels=[f'{r.codice_magazzino} - {r.nome_magazzino}' for r in m.itertuples()] if not m.empty else ['MAG1 - Magazzino 1']; ml=st.selectbox('Magazzino',labels); mag=ml.split(' - ')[0]; origine=st.selectbox('Origine',['CONTO DEPOSITO','LOAN / CONTO VISIONE'])
+        m=mags(); labels=magazzini_labels(); ml=st.selectbox('Magazzino',labels); mag=ml.split(' - ')[0]; origine=st.selectbox('Origine',['CONTO DEPOSITO','LOAN / CONTO VISIONE'])
         f=st.file_uploader('TTKEYS / giacenze',type=['xlsx','xls'])
         if f:
             d=read_excel_cached(f.getvalue(), f.name); st.dataframe(d.head(30),use_container_width=True); cols=list(d.columns)
@@ -638,7 +697,7 @@ elif menu=='DDT carico / Loan':
     st.title('🚚 DDT carico / Loan')
     t1,t2=st.tabs(['Import Excel','Storico'])
     with t1:
-        labels=[f'{r.codice_magazzino} - {r.nome_magazzino}' for r in mags().itertuples()]; ml=st.selectbox('Magazzino destinazione',labels); mag=ml.split(' - ')[0]; tipo=st.selectbox('Tipo',['CONTO DEPOSITO','LOAN / CONTO VISIONE'])
+        labels=magazzini_labels(); ml=st.selectbox('Magazzino destinazione',labels); mag=ml.split(' - ')[0]; tipo=st.selectbox('Tipo',['CONTO DEPOSITO','LOAN / CONTO VISIONE'])
         f=st.file_uploader('Excel DDT',type=['xlsx','xls'])
         if f:
             d=read_excel_cached(f.getvalue(), f.name); st.dataframe(d.head(30),use_container_width=True); cols=list(d.columns); cod=st.selectbox('Codice',cols,index=idx(cols,['Codice','Articolo','REF'])); lot=st.selectbox('Lotto',cols,index=idx(cols,['Lotto','LOT'])); qty=st.selectbox('Quantità',cols,index=idx(cols,['Quantità','Qta','Qty'])); des=st.selectbox('Descrizione',['']+cols,index=idxo(cols,['Descrizione','Descr.'])); sca=st.selectbox('Scadenza',['']+cols,index=idxo(cols,['Scadenza','EXP']))
@@ -660,7 +719,7 @@ elif menu=='DDT carico / Loan':
     with t2: st.dataframe(df('ddt','id',True),use_container_width=True); st.dataframe(df('ddt_righe','id',True),use_container_width=True)
 elif menu=='Scarico sala':
     st.title('📸 Scarico sala')
-    clienti=clienti_opts(); labels=[f'{r.codice_magazzino} - {r.nome_magazzino}' for r in mags().itertuples()]
+    clienti=clienti_opts(); labels=magazzini_labels()
     rows=[]
     up=st.file_uploader('Foto scarico sala',type=['jpg','jpeg','png'])
     if up:
@@ -692,45 +751,6 @@ elif menu=='Scarico sala':
             if disp(mag,c,l)<q: ins_safe('anomalie',{'tipo':'GIACENZA_INSUFFICIENTE','gravita':'Alta','descrizione':f'Intervento {inter["id"]}: {c} lotto {l} disponibile {disp(mag,c,l)} richiesta {q}','stato':'Aperta'})
             movimento('SCARICO_INTERVENTO',mag,c,l,-abs(q),descr,str(x.get('scadenza','') or '') or None,'CONTO DEPOSITO','INTERVENTO',inter['id']); fatt+=tot or 0; n+=1
         st.success(f'Intervento {inter["id"]} creato. Righe: {n}. Fatturato: € {fatt:,.2f}')
-
-elif menu=='Archivio impianti':
-    st.title('🗂️ Archivio impianti')
-    docs=df('documenti_impianto','id',True)
-    if docs.empty:
-        st.info('Nessun documento impianto archiviato.')
-    else:
-        c1,c2,c3,c4=st.columns(4)
-        filtro_cliente=c1.text_input('Filtra cliente / struttura')
-        filtro_agente=c2.text_input('Filtra agente')
-        filtro_intervento=c3.text_input('Filtra ID intervento')
-        filtro_cartella=c4.text_input('Filtra cartella clinica')
-        view=docs.copy()
-        if filtro_cliente and 'cliente' in view.columns:
-            view=view[view['cliente'].astype(str).str.contains(filtro_cliente,case=False,na=False)]
-        if filtro_agente and 'agente' in view.columns:
-            view=view[view['agente'].astype(str).str.contains(filtro_agente,case=False,na=False)]
-        if filtro_intervento and 'intervento_id' in view.columns:
-            view=view[view['intervento_id'].astype(str).str.contains(filtro_intervento,case=False,na=False)]
-        if filtro_cartella and 'cartella_clinica' in view.columns:
-            view=view[view['cartella_clinica'].astype(str).str.contains(filtro_cartella,case=False,na=False)]
-        st.dataframe(view,use_container_width=True,height=420)
-        if not view.empty:
-            st.download_button('⬇️ Scarica elenco documenti Excel', excel_bytes({'documenti_impianto':view}), file_name='documenti_impianto.xlsx', use_container_width=True)
-            ids=view['id'].dropna().tolist() if 'id' in view.columns else []
-            if ids:
-                selected=st.selectbox('Seleziona ID documento', ids)
-                row=view[view['id']==selected].iloc[0].to_dict()
-                st.write(f"**Intervento:** {row.get('intervento_id','')}")
-                st.write(f"**Cartella clinica:** {row.get('cartella_clinica','')}")
-                st.write(f"**Cliente:** {row.get('cliente','')}")
-                st.write(f"**Agente:** {row.get('agente','')}")
-                st.write(f"**File:** {row.get('nome_file','')}")
-                sp=row.get('storage_path','')
-                signed = storage_signed_url(sp) if sp else None
-                if signed:
-                    st.link_button("📎 Apri documento da Storage", signed, use_container_width=True)
-                else:
-                    st.warning('Documento non disponibile. Verifica Supabase Storage.')
 
 elif menu=='Work Implant': st.title('📄 Work Implant'); st.dataframe(df('righe_intervento','id',True),use_container_width=True)
 elif menu=='Customer Connect':
