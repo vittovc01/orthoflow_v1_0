@@ -97,6 +97,34 @@ def batch_upsert(table, rows, conflict, size=500):
         done += len(ch)
     return done
 
+def svuota_tabella(tab):
+    all_ids = sb().table(tab).select("id").execute().data or []
+    ids = [x["id"] for x in all_ids if "id" in x]
+    for chunk_ids in chunks(ids, 500):
+        sb().table(tab).delete().in_("id", chunk_ids).execute()
+    return len(ids)
+
+def storage_upload_file(local_path, storage_path, bucket="orthoflow-impianti"):
+    try:
+        data = Path(local_path).read_bytes()
+        try:
+            sb().storage.from_(bucket).upload(storage_path, data, file_options={"upsert": "true"})
+        except Exception:
+            sb().storage.from_(bucket).update(storage_path, data, file_options={"upsert": "true"})
+        return True
+    except Exception as e:
+        st.warning(f"Storage non disponibile: {e}")
+        return False
+
+def storage_signed_url(storage_path, bucket="orthoflow-impianti", expires=3600):
+    try:
+        res = sb().storage.from_(bucket).create_signed_url(storage_path, expires)
+        if isinstance(res, dict):
+            return res.get("signedURL") or res.get("signedUrl") or res.get("signed_url")
+        return getattr(res, "signed_url", None) or getattr(res, "signedURL", None)
+    except Exception:
+        return None
+
 def salva_file_locale(upload, categoria="impianti"):
     base = Path("uploads") / categoria
     base.mkdir(parents=True, exist_ok=True)
@@ -106,7 +134,12 @@ def salva_file_locale(upload, categoria="impianti"):
     return str(p)
 
 def salva_documento_impianto(intervento_id, file_path, nome_file, tipo_file, codice_cliente="", cliente="", agente="", data_intervento=None, cartella_clinica="", note=""):
-    payload = {
+    year = pd.Timestamp.now().strftime("%Y")
+    month = pd.Timestamp.now().strftime("%m")
+    safe_name = str(nome_file or Path(file_path).name).replace("/", "_").replace("\\", "_")
+    storage_path = f"impianti/{year}/{month}/intervento_{intervento_id}_{pd.Timestamp.now().strftime('%Y%m%d_%H%M%S')}_{safe_name}"
+    uploaded = storage_upload_file(file_path, storage_path)
+    return ins_safe("documenti_impianto", {
         "intervento_id": str(intervento_id or ""),
         "data_intervento": str(data_intervento) if data_intervento else None,
         "codice_cliente": codice_cliente or "",
@@ -116,10 +149,36 @@ def salva_documento_impianto(intervento_id, file_path, nome_file, tipo_file, cod
         "nome_file": nome_file or "",
         "tipo_file": tipo_file or "",
         "percorso_file": file_path or "",
+        "storage_bucket": "orthoflow-impianti" if uploaded else "",
+        "storage_path": storage_path if uploaded else "",
         "note": note or "",
-    }
-    return ins_safe("documenti_impianto", payload)
+    })
 
+def svuota_giacenza(codice_magazzino, origine=None):
+    q = sb().table("giacenze").delete().eq("codice_magazzino", codice_magazzino)
+    if origine:
+        q = q.eq("origine", origine)
+    return q.execute()
+
+def importa_giacenza_diretta(codice_magazzino, df_import, origine="CONTO DEPOSITO", batch_size=500):
+    rows = []
+    for _, r in df_import.iterrows():
+        codice = clean(r.get("codice", ""))
+        lotto = clean(r.get("lotto", ""))
+        qta = money(r.get("quantita")) or 0
+        if not codice or not lotto or qta <= 0:
+            continue
+        rows.append({
+            "codice_magazzino": codice_magazzino,
+            "codice": codice,
+            "descrizione": str(r.get("descrizione", "") or ""),
+            "lotto": lotto,
+            "scadenza": str(r.get("scadenza", "") or "") or None,
+            "quantita": qta,
+            "origine": origine,
+            "stato_record": "Attivo",
+        })
+    return batch_insert("giacenze", rows, size=batch_size)
 
 def norm(d): d=d.copy(); d.columns=[str(c).strip() for c in d.columns]; return d
 def money(v):
@@ -233,8 +292,8 @@ if 'user' not in st.session_state:
         if (u,p)==('admin','Mastrota09@'): st.session_state.user=u; st.session_state.ruolo='Admin'; st.rerun()
         elif (u,p)==('collaboratore','1234'): st.session_state.user=u; st.session_state.ruolo='Collaboratore'; st.rerun()
         else: st.sidebar.error('Credenziali errate')
-    st.title('OrthoFlow 6.3.1 Full'); st.stop()
-st.sidebar.markdown('## 🏥 OrthoFlow 6.3.1 Full')
+    st.title('OrthoFlow 7.0 Enterprise'); st.stop()
+st.sidebar.markdown('## 🏥 OrthoFlow 7.0')
 st.sidebar.caption('Gestionale ortopedico cloud')
 st.sidebar.success(f"{st.session_state.user} - {st.session_state.ruolo}")
 if st.sidebar.button('Esci'): st.session_state.clear(); st.rerun()
@@ -246,8 +305,8 @@ if 'quick_menu' in st.session_state:
     menu=st.session_state.pop('quick_menu')
 
 if menu=='Dashboard':
-    st.title('🏥 OrthoFlow 6.3.1 Full + Cartella Clinica')
-    st.caption('Dashboard operativa: accessi rapidi, KPI principali e controllo magazzino')
+    st.title('🏥 OrthoFlow 7.0 Enterprise')
+    st.caption('OrthoFlow Enterprise: Supabase, Storage, inventario, documenti, ordini e chiusure')
 
     if st.button('🔄 Aggiorna dati', use_container_width=True):
         st.cache_data.clear()
@@ -367,6 +426,41 @@ elif menu=='Gestione dati':
                     st.rerun()
                 except Exception as e:
                     st.error(f'Errore eliminazione: {e}')
+
+
+    st.divider()
+    st.subheader("🛠️ Amministrazione Database")
+    st.warning("Prima di cancellare, scarica il backup Excel della tabella.")
+
+    cma, cmb = st.columns(2)
+    with cma:
+        conf_mass = st.text_input(f"Per svuotare la tabella scrivi SVUOTA {tab}", key=f"mass_empty_{tab}")
+        if st.button(f"🗑️ Svuota tutta la tabella {tab}", use_container_width=True, key=f"btn_mass_empty_{tab}"):
+            if conf_mass != f"SVUOTA {tab}":
+                st.error(f"Conferma non valida. Scrivi esattamente: SVUOTA {tab}")
+            else:
+                n_del = svuota_tabella(tab)
+                st.cache_data.clear()
+                st.success(f"Tabella {tab} svuotata. Righe eliminate: {n_del}")
+                st.rerun()
+
+    with cmb:
+        st.caption("Reset operativo: non cancella clienti, offerte e magazzini.")
+        conf_reset = st.text_input("Per reset operativo scrivi RESET OPERATIVO", key="reset_operativo_confirm")
+        if st.button("⚠️ Reset operativo", use_container_width=True):
+            if conf_reset != "RESET OPERATIVO":
+                st.error("Conferma non valida. Scrivi esattamente: RESET OPERATIVO")
+            else:
+                total = 0
+                for rt in ["giacenze","movimenti_magazzino","interventi","righe_intervento","ddt","ddt_righe","anomalie","documenti_impianto"]:
+                    try:
+                        total += svuota_tabella(rt)
+                    except Exception as sub_e:
+                        st.warning(f"Tabella {rt} non svuotata: {sub_e}")
+                st.cache_data.clear()
+                st.success(f"Reset operativo completato. Righe eliminate totali: {total}")
+                st.rerun()
+
 
 elif menu=='Agenti':
     st.title('👤 Agenti')
@@ -626,19 +720,17 @@ elif menu=='Archivio impianti':
             if ids:
                 selected=st.selectbox('Seleziona ID documento', ids)
                 row=view[view['id']==selected].iloc[0].to_dict()
-                p=row.get('percorso_file','')
                 st.write(f"**Intervento:** {row.get('intervento_id','')}")
                 st.write(f"**Cartella clinica:** {row.get('cartella_clinica','')}")
                 st.write(f"**Cliente:** {row.get('cliente','')}")
                 st.write(f"**Agente:** {row.get('agente','')}")
                 st.write(f"**File:** {row.get('nome_file','')}")
-                if p and Path(str(p)).exists():
-                    data=Path(str(p)).read_bytes()
-                    st.download_button('📎 Scarica documento originale', data, file_name=row.get('nome_file') or Path(str(p)).name, use_container_width=True)
-                    if str(row.get('tipo_file','')).startswith('image'):
-                        st.image(str(p), use_container_width=True)
+                sp=row.get('storage_path','')
+                signed = storage_signed_url(sp) if sp else None
+                if signed:
+                    st.link_button("📎 Apri documento da Storage", signed, use_container_width=True)
                 else:
-                    st.warning('File non disponibile dopo reboot. Per renderlo permanente serve Supabase Storage.')
+                    st.warning('Documento non disponibile. Verifica Supabase Storage.')
 
 elif menu=='Work Implant': st.title('📄 Work Implant'); st.dataframe(df('righe_intervento','id',True),use_container_width=True)
 elif menu=='Customer Connect':
