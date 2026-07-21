@@ -1,4 +1,4 @@
-import os, re
+import os, re, hashlib, hmac, secrets
 from datetime import date
 from pathlib import Path
 import pandas as pd
@@ -12,7 +12,7 @@ except Exception:
     analyze_image=None
     normalize_ai_items=lambda x: []
 
-st.set_page_config(page_title='OrthoFlow 6.0 Cloud', layout='wide')
+st.set_page_config(page_title='OrthoFlow 7.1 Enterprise', layout='wide')
 
 def secret(name, default=None):
     try:
@@ -28,11 +28,102 @@ def client():
     return create_client(str(url).rstrip('/'), str(key))
 
 def sb(): return client()
+
+def password_hash(password, salt=None):
+    """PBKDF2-HMAC-SHA256: le password non vengono salvate in chiaro."""
+    salt = salt or secrets.token_hex(16)
+    digest = hashlib.pbkdf2_hmac(
+        "sha256",
+        str(password).encode("utf-8"),
+        salt.encode("utf-8"),
+        210_000,
+    ).hex()
+    return salt, digest
+
+def password_verify(password, salt, expected_hash):
+    try:
+        _, actual_hash = password_hash(password, salt)
+        return hmac.compare_digest(actual_hash, str(expected_hash or ""))
+    except Exception:
+        return False
+
+def audit_log(azione, tabella="", record_id="", dettaglio=""):
+    payload = {
+        "utente": st.session_state.get("user", ""),
+        "ruolo": st.session_state.get("ruolo", ""),
+        "agente": st.session_state.get("agente_nome", ""),
+        "azione": str(azione or ""),
+        "tabella": str(tabella or ""),
+        "record_id": str(record_id or ""),
+        "dettaglio": str(dettaglio or ""),
+    }
+    try:
+        sb().table("audit_log").insert(payload).execute()
+    except Exception:
+        pass
+
+def load_user(username):
+    try:
+        rows = (
+            sb().table("utenti_app")
+            .select("*")
+            .eq("username", str(username).strip())
+            .limit(1)
+            .execute()
+            .data
+            or []
+        )
+        return rows[0] if rows else None
+    except Exception:
+        return None
+
+def login_user(username, password):
+    row = load_user(username)
+    if not row or not bool(row.get("attivo", True)):
+        return None
+    if not password_verify(password, row.get("password_salt"), row.get("password_hash")):
+        return None
+    return row
+
+def current_role():
+    return str(st.session_state.get("ruolo", "")).strip()
+
+def current_agent():
+    return str(st.session_state.get("agente_nome", "")).strip()
+
+def is_admin():
+    return current_role() == "Admin"
+
+def agent_filter_dataframe(data):
+    """Impedisce a un agente di vedere righe intestate ad altri agenti."""
+    if data is None or data.empty or current_role() != "Agente":
+        return data
+    agente = current_agent()
+    if not agente:
+        return data.iloc[0:0]
+    if "agente" in data.columns:
+        return data[data["agente"].astype(str).str.casefold() == agente.casefold()]
+    return data
+
+def safe_agenti_opts():
+    if current_role() == "Agente":
+        return [current_agent()] if current_agent() else [""]
+    return agenti_opts()
+
 @st.cache_data(ttl=120)
 def df(table, order='id', desc=False):
-    try: return pd.DataFrame(sb().table(table).select('*').order(order, desc=desc).execute().data or [])
-    except Exception as e: st.error(f'Errore {table}: {e}'); return pd.DataFrame()
-def ins(table, data): return sb().table(table).insert(data).execute().data[0]
+    try:
+        data = pd.DataFrame(
+            sb().table(table).select('*').order(order, desc=desc).execute().data or []
+        )
+        return agent_filter_dataframe(data)
+    except Exception as e:
+        st.error(f'Errore {table}: {e}')
+        return pd.DataFrame()
+def ins(table, data):
+    row = sb().table(table).insert(data).execute().data[0]
+    audit_log("CREAZIONE", table, row.get("id",""), "Nuovo record")
+    return row
 def ins_safe(table, data):
     try:
         res = sb().table(table).insert(data).execute().data
@@ -42,10 +133,14 @@ def ins_safe(table, data):
         return None
 def upsert(table, data, conflict): return sb().table(table).upsert(data, on_conflict=conflict).execute()
 def upd(table, row_id, data):
-    return sb().table(table).update(data).eq('id', row_id).execute()
+    res = sb().table(table).update(data).eq('id', row_id).execute()
+    audit_log("MODIFICA", table, row_id, ", ".join(data.keys()))
+    return res
 
 def dele(table, row_id):
-    return sb().table(table).delete().eq('id', row_id).execute()
+    res = sb().table(table).delete().eq('id', row_id).execute()
+    audit_log("ELIMINAZIONE", table, row_id, "Record eliminato")
+    return res
 
 def cast_like(value, old):
     if value == '':
@@ -325,28 +420,76 @@ def disp(mag,codice,lotto):
 
 # Login
 if 'user' not in st.session_state:
-    st.sidebar.title('OrthoFlow 6.0')
+    st.sidebar.title('OrthoFlow 7.1')
+    st.sidebar.caption('Accesso protetto')
     with st.sidebar.form('login'):
-        u=st.text_input('Utente','admin'); p=st.text_input('Password','admin',type='password'); ok=st.form_submit_button('Accedi')
+        u=st.text_input('Utente')
+        p=st.text_input('Password',type='password')
+        ok=st.form_submit_button('Accedi', use_container_width=True)
     if ok:
-        if (u,p)==('admin','Mastrota09@'): st.session_state.user=u; st.session_state.ruolo='Admin'; st.rerun()
-        elif (u,p)==('collaboratore','1234'): st.session_state.user=u; st.session_state.ruolo='Collaboratore'; st.rerun()
-        else: st.sidebar.error('Credenziali errate')
-    st.title('OrthoFlow 7.0.1 Enterprise'); st.stop()
-st.sidebar.markdown('## 🏥 OrthoFlow 7.0.1')
+        auth = login_user(u, p)
+        if auth:
+            st.session_state.user = auth.get("username", u)
+            st.session_state.ruolo = auth.get("ruolo", "Agente")
+            st.session_state.agente_nome = auth.get("agente_nome", "") or ""
+            st.session_state.utente_id = auth.get("id")
+            try:
+                sb().table("utenti_app").update({"ultimo_accesso":"now()"}).eq("id", auth.get("id")).execute()
+            except Exception:
+                pass
+            audit_log("LOGIN", "utenti_app", auth.get("id",""), "Accesso eseguito")
+            st.rerun()
+        # Accesso di emergenza mantenuto per non bloccare l'amministratore
+        elif (u,p)==('admin','Mastrota09@'):
+            st.session_state.user=u
+            st.session_state.ruolo='Admin'
+            st.session_state.agente_nome=''
+            st.session_state.utente_id=''
+            audit_log("LOGIN_EMERGENZA", "utenti_app", "", "Accesso admin fallback")
+            st.rerun()
+        else:
+            st.sidebar.error('Credenziali errate o utente disattivato')
+    st.title('OrthoFlow 7.1 Enterprise')
+    st.info('Inserisci le credenziali fornite dall’amministratore.')
+    st.stop()
+
+st.sidebar.markdown('## 🏥 OrthoFlow 7.1')
 st.sidebar.caption('Gestionale ortopedico cloud')
-st.sidebar.success(f"{st.session_state.user} - {st.session_state.ruolo}")
-if st.sidebar.button('Esci'): st.session_state.clear(); st.rerun()
-admin=st.session_state.get('ruolo')=='Admin'
-menu_admin=['Dashboard','Gestione dati','Agenti','Cartella clinica','Clienti','Magazzini','Inventario','Offerte','DDT carico / Loan','Scarico sala','Work Implant','Customer Connect','KPI e Fatturato','Anomalie']
-menu_collab=['Dashboard','Scarico sala']
-menu=st.sidebar.radio('Menu', menu_admin if admin else menu_collab)
+label_accesso = f"{st.session_state.user} - {st.session_state.ruolo}"
+if current_agent():
+    label_accesso += f" - {current_agent()}"
+st.sidebar.success(label_accesso)
+
+if st.sidebar.button('Esci', use_container_width=True):
+    audit_log("LOGOUT", "utenti_app", st.session_state.get("utente_id",""), "Uscita")
+    st.session_state.clear()
+    st.rerun()
+
+admin = is_admin()
+menu_admin=['Dashboard','Gestione dati','Agenti','Cartella clinica','Clienti','Magazzini','Inventario','Offerte','DDT carico / Loan','Scarico sala','Archivio impianti','Work Implant','Customer Connect','KPI e Fatturato','Anomalie','Audit Log']
+menu_magazzino=['Dashboard','Inventario','DDT carico / Loan','Scarico sala','Archivio impianti','Customer Connect','Anomalie']
+menu_amministrazione=['Dashboard','Cartella clinica','Clienti','Offerte','Archivio impianti','Work Implant','Customer Connect','KPI e Fatturato','Anomalie']
+menu_agente=['Dashboard','Cartella clinica','Scarico sala','Archivio impianti','Customer Connect','Anomalie']
+ruolo = current_role()
+if ruolo == 'Admin':
+    menu_items = menu_admin
+elif ruolo == 'Magazzino':
+    menu_items = menu_magazzino
+elif ruolo == 'Amministrazione':
+    menu_items = menu_amministrazione
+else:
+    menu_items = menu_agente
+menu=st.sidebar.radio('Menu', menu_items)
 if 'quick_menu' in st.session_state:
-    menu=st.session_state.pop('quick_menu')
+    qm = st.session_state.pop('quick_menu')
+    if qm in menu_items:
+        menu=qm
 
 if menu=='Dashboard':
-    st.title('🏥 OrthoFlow 7.0.1 Enterprise')
-    st.caption('OrthoFlow Enterprise: Supabase, Storage, inventario, documenti, ordini e chiusure')
+    st.title('🏥 OrthoFlow 7.1 Enterprise')
+    st.caption('Dashboard personalizzata in base al ruolo e all’agente collegato.')
+    if current_role() == 'Agente':
+        st.info(f"Area personale agente: {current_agent() or st.session_state.get('user','')}. I dati con campo agente vengono filtrati automaticamente.")
 
     if st.button('🔄 Aggiorna dati', use_container_width=True):
         st.cache_data.clear()
@@ -408,7 +551,7 @@ elif menu=='Gestione dati':
 
     tab=st.selectbox(
         'Tabella da gestire',
-        ['clienti','magazzini','agenti','cartelle_cliniche','giacenze','movimenti_magazzino','interventi','righe_intervento','documenti_impianto','offerte_header','offerte_clienti','offerte_prezzi','ddt','ddt_righe','ordini','ordini_righe','chiusure','chiusure_righe','anomalie']
+        ['clienti','magazzini','agenti','cartelle_cliniche','giacenze','movimenti_magazzino','interventi','righe_intervento','documenti_impianto','offerte_header','offerte_clienti','offerte_prezzi','ddt','ddt_righe','ordini','ordini_righe','chiusure','chiusure_righe','utenti_app','audit_log','anomalie']
     )
     order_col=st.text_input('Ordina per colonna','id')
     desc=st.checkbox('Ordine decrescente',True)
@@ -522,29 +665,94 @@ elif menu=='Gestione dati':
 
 
 elif menu=='Agenti':
-    st.title('👤 Agenti')
-    st.caption('Gestione agenti usati negli interventi.')
-    a=df('agenti','nome')
-    if a.empty:
-        st.info('Se la tabella agenti non esiste ancora in Supabase, crea una tabella chiamata agenti con colonne: id, nome, email, telefono, attivo.')
-    with st.form('nuovo_agente'):
-        nome=st.text_input('Nome agente')
-        email=st.text_input('Email')
-        telefono=st.text_input('Telefono')
-        attivo=st.checkbox('Attivo', True)
-        ok_ag=st.form_submit_button('Salva agente')
-    if ok_ag:
-        if not nome.strip():
-            st.warning('Inserisci il nome agente.')
+    st.title('👤 Agenti e accessi')
+    st.caption('Crea l’agente e assegna username, password e permessi. Le password sono salvate come hash, mai in chiaro.')
+
+    t_ag, t_user = st.tabs(['Anagrafica agenti','Accessi e password'])
+
+    with t_ag:
+        a=df('agenti','nome')
+        with st.form('nuovo_agente'):
+            nome=st.text_input('Nome agente')
+            email=st.text_input('Email')
+            telefono=st.text_input('Telefono')
+            attivo=st.checkbox('Attivo', True)
+            ok_ag=st.form_submit_button('Salva agente')
+        if ok_ag:
+            if not nome.strip():
+                st.warning('Inserisci il nome agente.')
+            else:
+                try:
+                    ins('agenti',{'nome':nome.strip(),'email':email.strip(),'telefono':telefono.strip(),'attivo':attivo})
+                    st.cache_data.clear()
+                    st.success('Agente salvato.')
+                    st.rerun()
+                except Exception as e:
+                    st.error(f'Errore salvataggio agente: {e}')
+        st.dataframe(df('agenti','nome'),use_container_width=True,height=360)
+
+    with t_user:
+        agenti_df=df('agenti','nome')
+        agenti_nomi=agenti_df['nome'].dropna().astype(str).tolist() if not agenti_df.empty and 'nome' in agenti_df.columns else []
+        with st.form('nuovo_accesso'):
+            username=st.text_input('Username')
+            password=st.text_input('Password assegnata da te',type='password')
+            password2=st.text_input('Ripeti password',type='password')
+            ruolo_utente=st.selectbox('Ruolo',['Agente','Magazzino','Amministrazione','Admin'])
+            agente_nome=st.selectbox('Agente collegato',['']+agenti_nomi, disabled=ruolo_utente!='Agente')
+            attivo_user=st.checkbox('Accesso attivo',True)
+            salva_user=st.form_submit_button('Crea accesso',use_container_width=True)
+        if salva_user:
+            if not username.strip() or len(password)<8:
+                st.error('Inserisci username e una password di almeno 8 caratteri.')
+            elif password != password2:
+                st.error('Le due password non coincidono.')
+            elif ruolo_utente=='Agente' and not agente_nome:
+                st.error('Collega l’accesso a un agente.')
+            else:
+                try:
+                    salt, phash=password_hash(password)
+                    sb().table('utenti_app').insert({
+                        'username':username.strip(),
+                        'password_salt':salt,
+                        'password_hash':phash,
+                        'ruolo':ruolo_utente,
+                        'agente_nome':agente_nome if ruolo_utente=='Agente' else '',
+                        'attivo':attivo_user
+                    }).execute()
+                    audit_log('CREAZIONE_ACCESSO','utenti_app',username.strip(),ruolo_utente)
+                    st.cache_data.clear()
+                    st.success('Accesso creato. Comunica username e password all’utente.')
+                    st.rerun()
+                except Exception as e:
+                    st.error(f'Impossibile creare accesso: {e}')
+
+        users=df('utenti_app','username')
+        if users.empty:
+            st.info('Nessun accesso registrato nella tabella utenti_app.')
         else:
-            try:
-                ins('agenti',{'nome':nome.strip(),'email':email.strip(),'telefono':telefono.strip(),'attivo':attivo})
-                st.cache_data.clear()
-                st.success('Agente salvato.')
-                st.rerun()
-            except Exception as e:
-                st.error(f'Errore salvataggio agente. Probabilmente manca la tabella agenti in Supabase. Dettaglio: {e}')
-    st.dataframe(df('agenti','nome'),use_container_width=True,height=420)
+            cols_show=[c for c in ['id','username','ruolo','agente_nome','attivo','ultimo_accesso','created_at'] if c in users.columns]
+            st.dataframe(users[cols_show],use_container_width=True,height=320)
+            ids=users['id'].dropna().tolist()
+            uid=st.selectbox('Utente da gestire',ids)
+            urow=users[users['id']==uid].iloc[0].to_dict()
+            c1,c2=st.columns(2)
+            with c1:
+                nuovo_stato=st.checkbox('Utente attivo',bool(urow.get('attivo',True)),key=f'attivo_{uid}')
+                if st.button('Salva stato accesso',use_container_width=True):
+                    upd('utenti_app',uid,{'attivo':nuovo_stato})
+                    st.cache_data.clear()
+                    st.success('Stato aggiornato.')
+                    st.rerun()
+            with c2:
+                nuova_password=st.text_input('Nuova password',type='password',key=f'pwd_{uid}')
+                if st.button('Reimposta password',use_container_width=True):
+                    if len(nuova_password)<8:
+                        st.error('Password di almeno 8 caratteri.')
+                    else:
+                        salt,phash=password_hash(nuova_password)
+                        upd('utenti_app',uid,{'password_salt':salt,'password_hash':phash})
+                        st.success('Password reimpostata.')
 
 elif menu=='Cartella clinica':
     st.title('📁 Cartella clinica')
@@ -734,7 +942,7 @@ elif menu=='Scarico sala':
                 meta=analyze_image(path,mode='scarico_sala'); rows=normalize_ai_items(meta); st.session_state['scarico_rows']=rows; st.success(f'Righe estratte: {len(rows)}')
     edited=st.data_editor(pd.DataFrame(st.session_state.get('scarico_rows',[])) if st.session_state.get('scarico_rows') else pd.DataFrame(columns=['codice','descrizione','lotto','scadenza','quantita','produttore']),num_rows='dynamic',use_container_width=True)
     with st.form('intervento'):
-        data_int=st.date_input('Data intervento',date.today()); cs=st.selectbox('Struttura',clienti,format_func=lambda x:x['label']) if clienti else {'codice_cliente':'','descrizione':''}; cartella_clinica=st.text_input('Numero cartella clinica',''); ml=st.selectbox('Scarica da giacenza',labels); mag=ml.split(' - ')[0]; agenti=agenti_opts(); agente=st.selectbox('Agente', agenti) if agenti and agenti!=[''] else st.text_input('Agente',''); linea=st.selectbox('Linea',['TRAUMA','PROTESICA','CMF','SPINE','SPORTS','ALTRO']); ok=st.form_submit_button('Crea intervento e scarica')
+        data_int=st.date_input('Data intervento',date.today()); cs=st.selectbox('Struttura',clienti,format_func=lambda x:x['label']) if clienti else {'codice_cliente':'','descrizione':''}; cartella_clinica=st.text_input('Numero cartella clinica',''); ml=st.selectbox('Scarica da giacenza',labels); mag=ml.split(' - ')[0]; agenti=safe_agenti_opts(); agente=st.selectbox('Agente', agenti) if agenti and agenti!=[''] else st.text_input('Agente',''); linea=st.selectbox('Linea',['TRAUMA','PROTESICA','CMF','SPINE','SPORTS','ALTRO']); ok=st.form_submit_button('Crea intervento e scarica')
     if ok:
         inter=ins('interventi',{'data_intervento':str(data_int),'codice_cliente':cs['codice_cliente'],'cliente':cs['descrizione'],'cartella_clinica':cartella_clinica,'agente':agente,'linea':linea,'magazzino_scarico':mag}); fatt=0; n=0
         if st.session_state.get("scarico_file_path"):
@@ -752,10 +960,75 @@ elif menu=='Scarico sala':
             movimento('SCARICO_INTERVENTO',mag,c,l,-abs(q),descr,str(x.get('scadenza','') or '') or None,'CONTO DEPOSITO','INTERVENTO',inter['id']); fatt+=tot or 0; n+=1
         st.success(f'Intervento {inter["id"]} creato. Righe: {n}. Fatturato: € {fatt:,.2f}')
 
+
+elif menu=='Archivio impianti':
+    st.title('🗂️ Archivio impianti')
+    st.caption('Consultazione rapida dei documenti originali. Modifica ed eliminazione restano disponibili anche in Gestione dati.')
+    docs=df('documenti_impianto','id',True)
+    if docs.empty:
+        st.info('Nessun documento impianto archiviato.')
+    else:
+        c1,c2,c3,c4=st.columns(4)
+        filtro_cliente=c1.text_input('Cliente / struttura')
+        filtro_agente=c2.text_input('Agente', value=current_agent() if current_role()=='Agente' else '')
+        filtro_intervento=c3.text_input('ID intervento')
+        filtro_cartella=c4.text_input('Cartella clinica')
+        view=docs.copy()
+        if filtro_cliente and 'cliente' in view.columns:
+            view=view[view['cliente'].astype(str).str.contains(filtro_cliente,case=False,na=False)]
+        if filtro_agente and 'agente' in view.columns:
+            view=view[view['agente'].astype(str).str.contains(filtro_agente,case=False,na=False)]
+        if filtro_intervento and 'intervento_id' in view.columns:
+            view=view[view['intervento_id'].astype(str).str.contains(filtro_intervento,case=False,na=False)]
+        if filtro_cartella and 'cartella_clinica' in view.columns:
+            view=view[view['cartella_clinica'].astype(str).str.contains(filtro_cartella,case=False,na=False)]
+        st.dataframe(view,use_container_width=True,height=420)
+        if not view.empty and 'id' in view.columns:
+            st.download_button(
+                '⬇️ Esporta elenco Excel',
+                excel_bytes({'documenti_impianto':view}),
+                file_name='archivio_impianti.xlsx',
+                use_container_width=True
+            )
+            selected=st.selectbox('Documento da aprire', view['id'].dropna().tolist())
+            row=view[view['id']==selected].iloc[0].to_dict()
+            st.write(f"**Intervento:** {row.get('intervento_id','')}")
+            st.write(f"**Cartella clinica:** {row.get('cartella_clinica','')}")
+            st.write(f"**Cliente:** {row.get('cliente','')}")
+            st.write(f"**Agente:** {row.get('agente','')}")
+            st.write(f"**File:** {row.get('nome_file','')}")
+            signed=storage_signed_url(row.get('storage_path','')) if row.get('storage_path') else None
+            if signed:
+                st.link_button('📎 Apri documento originale', signed, use_container_width=True)
+            else:
+                st.warning('File non disponibile in Supabase Storage.')
+
 elif menu=='Work Implant': st.title('📄 Work Implant'); st.dataframe(df('righe_intervento','id',True),use_container_width=True)
 elif menu=='Customer Connect':
     st.title('🔁 Customer Connect'); r=df('righe_intervento')
     if not r.empty: st.dataframe(r.groupby('codice',as_index=False)['quantita'].sum(),use_container_width=True)
 elif menu=='KPI e Fatturato':
     st.title('📊 KPI e Fatturato'); r=df('righe_intervento'); st.metric('Fatturato teorico', f"€ {float(r['totale'].fillna(0).sum()) if not r.empty and 'totale' in r else 0:,.2f}"); st.dataframe(r,use_container_width=True)
+
+elif menu=='Audit Log':
+    st.title('🧾 Audit Log')
+    st.caption('Cronologia di accessi, creazioni, modifiche ed eliminazioni.')
+    logs=df('audit_log','id',True)
+    if logs.empty:
+        st.info('Nessuna attività registrata.')
+    else:
+        c1,c2,c3=st.columns(3)
+        fu=c1.text_input('Filtra utente')
+        fa=c2.text_input('Filtra azione')
+        ft=c3.text_input('Filtra tabella')
+        view=logs.copy()
+        if fu and 'utente' in view.columns:
+            view=view[view['utente'].astype(str).str.contains(fu,case=False,na=False)]
+        if fa and 'azione' in view.columns:
+            view=view[view['azione'].astype(str).str.contains(fa,case=False,na=False)]
+        if ft and 'tabella' in view.columns:
+            view=view[view['tabella'].astype(str).str.contains(ft,case=False,na=False)]
+        st.dataframe(view,use_container_width=True,height=520)
+        st.download_button('⬇️ Esporta Audit Excel',excel_bytes({'audit_log':view}),file_name='audit_log.xlsx',use_container_width=True)
+
 elif menu=='Anomalie': st.title('⚠️ Anomalie'); st.dataframe(df('anomalie','id',True),use_container_width=True)
