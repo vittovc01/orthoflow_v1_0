@@ -12,7 +12,78 @@ except Exception:
     analyze_image=None
     normalize_ai_items=lambda x: []
 
-st.set_page_config(page_title='OrthoFlow 7.1 Enterprise', layout='wide')
+st.set_page_config(page_title='OrthoFlow 7.2 Enterprise', layout='wide')
+
+
+st.markdown("""
+<style>
+:root {
+    --of-primary: #176b57;
+    --of-primary-soft: rgba(23,107,87,.10);
+    --of-border: rgba(49,51,63,.13);
+}
+[data-testid="stAppViewContainer"] {
+    background: linear-gradient(180deg, rgba(23,107,87,.035) 0, transparent 260px);
+}
+[data-testid="stSidebar"] {
+    border-right: 1px solid var(--of-border);
+}
+[data-testid="stSidebar"] > div:first-child {
+    padding-top: 1.4rem;
+}
+.block-container {
+    max-width: 1500px;
+    padding-top: 1.6rem;
+    padding-bottom: 3rem;
+}
+h1, h2, h3 { letter-spacing: -.025em; }
+h1 { font-weight: 760 !important; }
+[data-testid="stMetric"] {
+    background: var(--of-primary-soft);
+    border: 1px solid rgba(23,107,87,.16);
+    border-radius: 18px;
+    padding: 16px 18px;
+    min-height: 112px;
+}
+[data-testid="stMetricLabel"] { font-weight: 650; }
+[data-testid="stMetricValue"] { font-weight: 760; }
+.stButton > button, .stDownloadButton > button, .stLinkButton > a {
+    border-radius: 12px !important;
+    min-height: 42px;
+    font-weight: 650;
+}
+div[data-baseweb="select"] > div,
+.stTextInput input,
+.stNumberInput input,
+.stTextArea textarea,
+.stDateInput input {
+    border-radius: 12px !important;
+}
+[data-testid="stDataFrame"] {
+    border: 1px solid var(--of-border);
+    border-radius: 16px;
+    overflow: hidden;
+}
+[data-testid="stExpander"] {
+    border-radius: 14px !important;
+    border-color: var(--of-border) !important;
+}
+.of-hero {
+    padding: 20px 22px;
+    border: 1px solid rgba(23,107,87,.17);
+    border-radius: 20px;
+    background: linear-gradient(135deg, rgba(23,107,87,.14), rgba(23,107,87,.035));
+    margin-bottom: 18px;
+}
+.of-hero h2 { margin: 0 0 4px 0; }
+.of-muted { opacity: .72; }
+@media (max-width: 760px) {
+    .block-container { padding: 1rem .8rem 2rem; }
+    [data-testid="stMetric"] { min-height: 96px; padding: 13px; }
+    .of-hero { padding: 16px; }
+}
+</style>
+""", unsafe_allow_html=True)
 
 def secret(name, default=None):
     try:
@@ -418,6 +489,80 @@ def disp(mag,codice,lotto):
     rows=sb().table('giacenze').select('*').eq('codice_magazzino',mag).eq('lotto',lotto).execute().data or []
     return sum(float(r.get('quantita') or 0) for r in rows if ncode(r.get('codice'))==ncode(codice))
 
+
+def revenue_dataset():
+    """Unisce righe intervento e interventi per costruire KPI temporali e per agente/cliente."""
+    righe = df('righe_intervento','id',True)
+    interventi = df('interventi','id',True)
+    if righe.empty:
+        return pd.DataFrame()
+    out = righe.copy()
+    if 'totale' not in out.columns:
+        out['totale'] = 0.0
+    out['totale'] = pd.to_numeric(out['totale'], errors='coerce').fillna(0.0)
+    if 'quantita' in out.columns:
+        out['quantita'] = pd.to_numeric(out['quantita'], errors='coerce').fillna(0.0)
+    if not interventi.empty and 'intervento_id' in out.columns and 'id' in interventi.columns:
+        cols = [c for c in ['id','data_intervento','cliente','codice_cliente','agente','linea','magazzino_scarico'] if c in interventi.columns]
+        meta = interventi[cols].copy().rename(columns={'id':'intervento_id'})
+        out['intervento_id'] = out['intervento_id'].astype(str)
+        meta['intervento_id'] = meta['intervento_id'].astype(str)
+        # Evita colonne duplicate già presenti nelle righe.
+        duplicate_meta = [c for c in meta.columns if c != 'intervento_id' and c in out.columns]
+        meta = meta.drop(columns=duplicate_meta, errors='ignore')
+        out = out.merge(meta, on='intervento_id', how='left')
+    if 'data_intervento' in out.columns:
+        out['data_intervento'] = pd.to_datetime(out['data_intervento'], errors='coerce')
+    else:
+        out['data_intervento'] = pd.NaT
+    # Sicurezza supplementare per gli agenti: filtra anche le righe unite agli interventi.
+    if current_role() == 'Agente' and 'agente' in out.columns:
+        out = out[out['agente'].astype(str).str.casefold() == current_agent().casefold()]
+    return out
+
+def euro(value):
+    try:
+        return f"€ {float(value):,.2f}".replace(',', 'X').replace('.', ',').replace('X', '.')
+    except Exception:
+        return '€ 0,00'
+
+def render_revenue_charts(data, key_prefix='rev'):
+    if data.empty or data['data_intervento'].isna().all():
+        st.info('Servono interventi con data e righe valorizzate per visualizzare i grafici.')
+        return
+    valid = data.dropna(subset=['data_intervento']).copy()
+    valid['mese'] = valid['data_intervento'].dt.to_period('M').dt.to_timestamp()
+    mensile = valid.groupby('mese', as_index=False)['totale'].sum().sort_values('mese')
+    mensile['Media mobile 3 mesi'] = mensile['totale'].rolling(3, min_periods=1).mean()
+
+    st.subheader('Andamento del fatturato')
+    st.caption('Passa il mouse sui grafici per consultare valori e periodi; usa il menu del grafico per espandere o scaricare.')
+    st.line_chart(
+        mensile.set_index('mese')[['totale','Media mobile 3 mesi']],
+        use_container_width=True,
+        height=360
+    )
+
+    c1, c2 = st.columns(2)
+    with c1:
+        st.subheader('Fatturato per cliente')
+        if 'cliente' in valid.columns:
+            top_clienti = (valid.assign(cliente=valid['cliente'].fillna('Non assegnato').replace('', 'Non assegnato'))
+                           .groupby('cliente', as_index=False)['totale'].sum()
+                           .sort_values('totale', ascending=False).head(10))
+            st.bar_chart(top_clienti.set_index('cliente')['totale'], use_container_width=True, height=340)
+        else:
+            st.info('Campo cliente non disponibile.')
+    with c2:
+        st.subheader('Fatturato per agente')
+        if 'agente' in valid.columns:
+            top_agenti = (valid.assign(agente=valid['agente'].fillna('Non assegnato').replace('', 'Non assegnato'))
+                          .groupby('agente', as_index=False)['totale'].sum()
+                          .sort_values('totale', ascending=False).head(10))
+            st.bar_chart(top_agenti.set_index('agente')['totale'], use_container_width=True, height=340)
+        else:
+            st.info('Campo agente non disponibile.')
+
 # Login
 if 'user' not in st.session_state:
     st.sidebar.title('OrthoFlow 7.1')
@@ -449,11 +594,11 @@ if 'user' not in st.session_state:
             st.rerun()
         else:
             st.sidebar.error('Credenziali errate o utente disattivato')
-    st.title('OrthoFlow 7.1 Enterprise')
+    st.title('OrthoFlow 7.2 Enterprise')
     st.info('Inserisci le credenziali fornite dall’amministratore.')
     st.stop()
 
-st.sidebar.markdown('## 🏥 OrthoFlow 7.1')
+st.sidebar.markdown('## 🏥 OrthoFlow 7.2')
 st.sidebar.caption('Gestionale ortopedico cloud')
 label_accesso = f"{st.session_state.user} - {st.session_state.ruolo}"
 if current_agent():
@@ -486,60 +631,82 @@ if 'quick_menu' in st.session_state:
         menu=qm
 
 if menu=='Dashboard':
-    st.title('🏥 OrthoFlow 7.1 Enterprise')
-    st.caption('Dashboard personalizzata in base al ruolo e all’agente collegato.')
-    if current_role() == 'Agente':
-        st.info(f"Area personale agente: {current_agent() or st.session_state.get('user','')}. I dati con campo agente vengono filtrati automaticamente.")
+    nome_area = current_agent() if current_role() == 'Agente' else st.session_state.get('user','')
+    st.markdown(
+        f"""<div class="of-hero"><h2>OrthoFlow 7.2 Enterprise</h2>
+        <div class="of-muted">Benvenuto, {nome_area}. Panoramica operativa aggiornata del sistema.</div></div>""",
+        unsafe_allow_html=True
+    )
 
-    if st.button('🔄 Aggiorna dati', use_container_width=True):
-        st.cache_data.clear()
-        st.rerun()
+    top_a, top_b = st.columns([4,1])
+    with top_a:
+        st.caption(f"Profilo attivo: {current_role()}" + (f" · Agente: {current_agent()}" if current_agent() else ""))
+    with top_b:
+        if st.button('🔄 Aggiorna', use_container_width=True):
+            st.cache_data.clear()
+            st.rerun()
 
-    r=df('righe_intervento')
+    revenue = revenue_dataset()
     clienti_df=df('clienti')
     giacenze_df=df('giacenze')
     interventi_df=df('interventi')
     movimenti_df=df('movimenti_magazzino')
     anomalie_df=df('anomalie')
-    fatt=float(r['totale'].fillna(0).sum()) if not r.empty and 'totale' in r else 0
+    fatt=float(revenue['totale'].sum()) if not revenue.empty else 0.0
+    valore_medio=float(revenue.groupby('intervento_id')['totale'].sum().mean()) if not revenue.empty and 'intervento_id' in revenue.columns else 0.0
+    anomalie_aperte = len(anomalie_df[anomalie_df['stato'].astype(str).str.casefold()!='risolta']) if not anomalie_df.empty and 'stato' in anomalie_df.columns else len(anomalie_df)
 
-    c1,c2,c3,c4,c5=st.columns(5)
-    c1.metric('Clienti',len(clienti_df))
-    c2.metric('Giacenze',len(giacenze_df))
-    c3.metric('Interventi',len(interventi_df))
-    c4.metric('Movimenti',len(movimenti_df))
-    c5.metric('Fatturato',f'€ {fatt:,.2f}')
+    c1,c2,c3,c4,c5,c6=st.columns(6)
+    c1.metric('Fatturato', euro(fatt))
+    c2.metric('Interventi',len(interventi_df))
+    c3.metric('Valore medio',euro(valore_medio))
+    c4.metric('Giacenze',len(giacenze_df))
+    c5.metric('Clienti',len(clienti_df))
+    c6.metric('Anomalie aperte',anomalie_aperte)
+
+    if not revenue.empty and not revenue['data_intervento'].isna().all():
+        today = pd.Timestamp.today().normalize()
+        mese_corrente = revenue[revenue['data_intervento'].dt.to_period('M') == today.to_period('M')]['totale'].sum()
+        mese_prec = (today - pd.offsets.MonthBegin(1)).to_period('M')
+        valore_prec = revenue[revenue['data_intervento'].dt.to_period('M') == mese_prec]['totale'].sum()
+        delta = ((mese_corrente-valore_prec)/valore_prec*100) if valore_prec else None
+        st.metric('Fatturato mese corrente', euro(mese_corrente), None if delta is None else f'{delta:+.1f}% sul mese precedente')
 
     st.divider()
     st.subheader('⚡ Azioni rapide')
-    q1,q2,q3,q4=st.columns(4)
-    if q1.button('📸 Scarico sala',use_container_width=True):
-        st.session_state.quick_menu='Scarico sala'
-        st.rerun()
-    if q2.button('📦 Inventario',use_container_width=True):
-        st.session_state.quick_menu='Inventario'
-        st.rerun()
-    if q3.button('💰 Offerte',use_container_width=True):
-        st.session_state.quick_menu='Offerte'
-        st.rerun()
-    if q4.button('🗄️ Gestione dati',use_container_width=True):
-        st.session_state.quick_menu='Gestione dati'
-        st.rerun()
+    allowed = set(menu_items)
+    action_defs = [
+        ('📸 Scarico sala','Scarico sala'),
+        ('📦 Inventario','Inventario'),
+        ('💰 Offerte','Offerte'),
+        ('🗂️ Archivio','Archivio impianti'),
+        ('📊 KPI','KPI e Fatturato'),
+        ('🗄️ Gestione dati','Gestione dati'),
+    ]
+    visible_actions = [x for x in action_defs if x[1] in allowed]
+    action_cols = st.columns(min(len(visible_actions), 6)) if visible_actions else []
+    for col, (label, target) in zip(action_cols, visible_actions):
+        if col.button(label, use_container_width=True):
+            st.session_state.quick_menu=target
+            st.rerun()
+
+    st.divider()
+    render_revenue_charts(revenue, 'dash')
 
     st.divider()
     a1,a2=st.columns(2)
     with a1:
-        st.subheader('⚠️ Anomalie aperte')
+        st.subheader('⚠️ Anomalie recenti')
         if not anomalie_df.empty:
-            st.dataframe(anomalie_df.head(10),use_container_width=True,height=280)
+            st.dataframe(anomalie_df.head(10),use_container_width=True,height=300,hide_index=True)
         else:
             st.success('Nessuna anomalia presente')
     with a2:
-        st.subheader('📦 Ultime giacenze')
-        if not giacenze_df.empty:
-            st.dataframe(giacenze_df.head(10),use_container_width=True,height=280)
+        st.subheader('📦 Movimenti recenti')
+        if not movimenti_df.empty:
+            st.dataframe(movimenti_df.head(10),use_container_width=True,height=300,hide_index=True)
         else:
-            st.info('Nessuna giacenza presente')
+            st.info('Nessun movimento presente')
 
 elif menu=='Gestione dati':
     st.title('🗄️ Gestione dati')
@@ -1008,7 +1175,71 @@ elif menu=='Customer Connect':
     st.title('🔁 Customer Connect'); r=df('righe_intervento')
     if not r.empty: st.dataframe(r.groupby('codice',as_index=False)['quantita'].sum(),use_container_width=True)
 elif menu=='KPI e Fatturato':
-    st.title('📊 KPI e Fatturato'); r=df('righe_intervento'); st.metric('Fatturato teorico', f"€ {float(r['totale'].fillna(0).sum()) if not r.empty and 'totale' in r else 0:,.2f}"); st.dataframe(r,use_container_width=True)
+    st.title('📊 KPI e Fatturato')
+    st.caption('Analisi interattiva del fatturato teorico prodotto dagli interventi.')
+    revenue = revenue_dataset()
+    if revenue.empty:
+        st.info('Non sono ancora presenti righe intervento valorizzate.')
+    else:
+        min_data = revenue['data_intervento'].dropna().min()
+        max_data = revenue['data_intervento'].dropna().max()
+        f1,f2,f3,f4 = st.columns(4)
+        with f1:
+            data_da = st.date_input('Dal', value=(min_data.date() if pd.notna(min_data) else date.today()), key='kpi_da')
+        with f2:
+            data_a = st.date_input('Al', value=(max_data.date() if pd.notna(max_data) else date.today()), key='kpi_a')
+        with f3:
+            agenti_kpi = ['Tutti'] + sorted(revenue['agente'].dropna().astype(str).unique().tolist()) if 'agente' in revenue.columns else ['Tutti']
+            agente_kpi = st.selectbox('Agente', agenti_kpi, key='kpi_agente')
+        with f4:
+            linee_kpi = ['Tutte'] + sorted(revenue['linea'].dropna().astype(str).unique().tolist()) if 'linea' in revenue.columns else ['Tutte']
+            linea_kpi = st.selectbox('Linea', linee_kpi, key='kpi_linea')
+
+        view = revenue.copy()
+        if 'data_intervento' in view.columns:
+            view = view[(view['data_intervento'].dt.date >= data_da) & (view['data_intervento'].dt.date <= data_a)]
+        if agente_kpi != 'Tutti' and 'agente' in view.columns:
+            view = view[view['agente'].astype(str) == agente_kpi]
+        if linea_kpi != 'Tutte' and 'linea' in view.columns:
+            view = view[view['linea'].astype(str) == linea_kpi]
+
+        totale = float(view['totale'].sum()) if not view.empty else 0.0
+        interventi_n = view['intervento_id'].nunique() if not view.empty and 'intervento_id' in view.columns else 0
+        pezzi = float(view['quantita'].sum()) if not view.empty and 'quantita' in view.columns else 0.0
+        media = totale/interventi_n if interventi_n else 0.0
+        prodotti = view['codice'].nunique() if not view.empty and 'codice' in view.columns else 0
+
+        k1,k2,k3,k4,k5=st.columns(5)
+        k1.metric('Fatturato filtrato',euro(totale))
+        k2.metric('Interventi',interventi_n)
+        k3.metric('Valore medio/intervento',euro(media))
+        k4.metric('Quantità impiantata',f'{pezzi:,.0f}')
+        k5.metric('Codici distinti',prodotti)
+
+        st.divider()
+        render_revenue_charts(view, 'kpi')
+
+        st.divider()
+        c1,c2=st.columns(2)
+        with c1:
+            st.subheader('Top prodotti per fatturato')
+            if not view.empty and 'codice' in view.columns:
+                prod = view.groupby('codice',as_index=False).agg(Fatturato=('totale','sum'), Quantità=('quantita','sum') if 'quantita' in view.columns else ('totale','size')).sort_values('Fatturato',ascending=False).head(20)
+                st.dataframe(prod,use_container_width=True,hide_index=True,height=420)
+        with c2:
+            st.subheader('Dettaglio interventi')
+            if not view.empty and 'intervento_id' in view.columns:
+                agg_map={'totale':'sum'}
+                dettaglio=view.groupby('intervento_id',as_index=False).agg(agg_map).sort_values('totale',ascending=False)
+                dettaglio=dettaglio.rename(columns={'totale':'Fatturato'})
+                st.dataframe(dettaglio,use_container_width=True,hide_index=True,height=420)
+
+        st.download_button(
+            '⬇️ Esporta analisi fatturato Excel',
+            excel_bytes({'fatturato_filtrato':view}),
+            file_name='analisi_fatturato.xlsx',
+            use_container_width=True
+        )
 
 elif menu=='Audit Log':
     st.title('🧾 Audit Log')
