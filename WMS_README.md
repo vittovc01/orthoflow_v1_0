@@ -26,6 +26,10 @@ Il primo utilizzo di un GTIN/DataMatrix può richiedere l'associazione al codice
 
 I dati estratti automaticamente (GTIN, lotto e scadenza) devono essere confermati dall'operatore durante la fase pilota.
 
+## Deploy Streamlit
+
+Il modulo si trova in `pages/01_WMS.py`. Dopo il merge su `main`, Streamlit Community Cloud rileva il commit e ricostruisce l'app usando il nuovo `requirements.txt`. Lo scanner live richiede HTTPS e l'autorizzazione della fotocamera sul telefono.
+
 ## Sicurezza
 
 Le tabelle WMS e le funzioni RPC sono accessibili tramite la service key dell'app. Non esporre mai `SUPABASE_SERVICE_KEY` nel repository o nel browser.
