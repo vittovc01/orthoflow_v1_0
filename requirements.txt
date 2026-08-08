@@ -2,6 +2,7 @@ streamlit>=1.39
 pandas>=2.0
 supabase>=2.0
 openpyxl>=3.1
+XlsxWriter>=3.2
 xlrd>=2.0
 qrcode[pil]>=7.4
 streamlit-qrcode-scanner==0.1.2
