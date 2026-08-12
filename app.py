@@ -2,7 +2,7 @@ import streamlit as st
 
 # OrthoFlow Control Tower router.
 # The former monolithic app is preserved in core_app.py and remains the
-# authenticated operational module. Navigation is now grouped and role-aware.
+# authenticated operational module. Navigation is grouped and role-aware.
 
 logged_in = bool(st.session_state.get("user"))
 role = str(st.session_state.get("ruolo", "")).strip()
@@ -41,6 +41,12 @@ shelf_page = st.Page(
     icon="📚",
     url_path="gestione-scaffale",
 )
+ddt_mobile_page = st.Page(
+    "pages/04_DDT_Carico.py",
+    title="DDT Carico Mobile",
+    icon="🚚",
+    url_path="ddt-carico-mobile",
+)
 operations_page = st.Page(
     "core_app.py",
     title="Gestionale",
@@ -56,7 +62,7 @@ else:
         "OPERATIVITÀ": [operations_page],
     }
     if role in {"Admin", "Magazzino"}:
-        pages["LOGISTICA & MAGAZZINO"] = [wms_page, shelf_page, qr_page]
+        pages["LOGISTICA & MAGAZZINO"] = [ddt_mobile_page, wms_page, shelf_page, qr_page]
     nav = st.navigation(pages, position="sidebar", expanded=True)
 
 nav.run()
