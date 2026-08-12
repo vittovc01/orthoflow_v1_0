@@ -1,38 +1,40 @@
-# OCR AI Setup - OrthoFlow v0.6
+# OCR AI Setup — OrthoFlow Control Tower
 
-Questa versione integra OCR AI tramite OpenAI Vision.
+OrthoFlow usa OpenAI Responses API con input immagine e output strutturato per precompilare lo scarico sala.
 
-## Variabili ambiente
+## Streamlit Community Cloud
 
-Imposta:
+Apri **Manage app → Settings → Secrets** e aggiungi:
 
-```env
-OPENAI_API_KEY=sk-...
-OPENAI_VISION_MODEL=gpt-4.1-mini
-ENABLE_AI_OCR=true
+```toml
+OPENAI_API_KEY = "sk-..."
+OPENAI_VISION_MODEL = "gpt-5-mini"
+ENABLE_AI_OCR = true
 ```
 
-## Cosa fa
+Non salvare mai la chiave API nel repository GitHub.
 
-### Scarichi sala
-- Legge foto scarico sala
-- Estrae codice REF
-- Estrae lotto LOT
-- Estrae scadenza
-- Estrae produttore
-- Riconosce J&J / DePuy Synthes / Synthes
-- Esclude Smith & Nephew e altri competitor
-- Genera righe intervento
-- Genera Work Implant
-- Prepara Customer Connect, escludendo Loan
+## Scarico sala
 
-### DDT
-- Legge DDT foto
-- Estrae numero DDT, data, cliente, motivo trasporto
-- Riconosce Conto Visione / Loan
-- Carica materiale in magazzino o in Loan tracking
-- Se Loan viene impiantato entra nel WI ma non nel reintegro
+L'OCR AI prova a estrarre:
 
-## Nota
+- struttura/clinica;
+- numero cartella clinica;
+- data intervento;
+- chirurgo;
+- codice REF esatto;
+- lotto LOT;
+- scadenza;
+- descrizione;
+- produttore;
+- quantità;
+- sterile/non sterile;
+- livello di confidenza e warning.
 
-La validazione umana resta obbligatoria prima del salvataggio: l'app mostra le righe AI in tabella modificabile.
+Il codice Johnson viene mantenuto esattamente come letto: per esempio `413.050S` resta distinto da `413.050`.
+
+Le immagini vengono inviate con dettaglio alto. La chiamata Responses API usa `store=False`. L'output AI è solo una precompilazione: prima dello scarico definitivo l'operatore deve verificare codice, lotto, scadenza e quantità nella tabella modificabile.
+
+## Privacy
+
+Le immagini di sala possono contenere dati sanitari o identificativi. Prima dell'uso in produzione verificare che il trattamento, i contratti, i consensi e le impostazioni di conservazione/residenza dati siano adeguati alle policy aziendali e agli obblighi applicabili.
