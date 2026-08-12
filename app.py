@@ -42,7 +42,7 @@ shelf_page = st.Page(
     url_path="gestione-scaffale",
 )
 ddt_mobile_page = st.Page(
-    "pages/04_DDT_Carico.py",
+    "pages/04_DDT_Carico_v2.py",
     title="DDT Carico Mobile",
     icon="🚚",
     url_path="ddt-carico-mobile",
