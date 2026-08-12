@@ -6,3 +6,5 @@ XlsxWriter>=3.2
 xlrd>=2.0
 qrcode[pil]>=7.4
 streamlit-qrcode-scanner==0.1.2
+openai>=1.99.0
+python-dotenv>=1.0
