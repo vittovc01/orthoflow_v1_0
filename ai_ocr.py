@@ -1,15 +1,11 @@
-
 import os
 import json
 import base64
 from pathlib import Path
 from typing import List, Dict, Any
+
 from dotenv import load_dotenv
 from openai import OpenAI
-try:
-    import streamlit as st
-except Exception:
-    st = None
 
 load_dotenv()
 
@@ -26,11 +22,29 @@ def _secret(name: str, default: str = "") -> str:
         pass
     return str(os.getenv(name, default) or default)
 
+
 def _flag(name: str, default: str = "false") -> bool:
     return _secret(name, default).strip().lower() in {"1", "true", "yes", "y", "on"}
 
+
+def ai_status() -> Dict[str, Any]:
+    missing = []
+    if not _secret("OPENAI_API_KEY"):
+        missing.append("OPENAI_API_KEY")
+    if not _flag("ENABLE_AI_OCR", "false"):
+        missing.append("ENABLE_AI_OCR=true")
+    return {
+        "enabled": not missing,
+        "missing": missing,
+        "model": _secret("OPENAI_VISION_MODEL", "gpt-5-mini"),
+    }
+
+
+def ai_enabled() -> bool:
+    return bool(ai_status()["enabled"])
+
+
 def _responses_json_schema_format(schema_obj: dict) -> dict:
-    """Converte il formato stile Chat Completions nel formato Responses API."""
     js = schema_obj.get("json_schema", {})
     return {
         "type": "json_schema",
@@ -41,6 +55,21 @@ def _responses_json_schema_format(schema_obj: dict) -> dict:
 
 
 SUPPORTED_IMAGE_EXT = {".jpg", ".jpeg", ".png", ".webp"}
+
+ITEM_PROPERTIES = {
+    "code": {"type": ["string", "null"]},
+    "lot": {"type": ["string", "null"]},
+    "expiry": {"type": ["string", "null"]},
+    "description": {"type": ["string", "null"]},
+    "quantity": {"type": "number"},
+    "manufacturer": {"type": ["string", "null"]},
+    "is_jnj_depuy_synthes": {"type": "boolean"},
+    "is_sterile": {"type": "boolean"},
+    "source_text": {"type": ["string", "null"]},
+    "confidence": {"type": "number"},
+    "warning": {"type": ["string", "null"]},
+}
+ITEM_REQUIRED = list(ITEM_PROPERTIES.keys())
 
 SCARICO_SALA_SCHEMA = {
     "type": "json_schema",
@@ -60,35 +89,19 @@ SCARICO_SALA_SCHEMA = {
                     "type": "array",
                     "items": {
                         "type": "object",
-                        "properties": {
-                            "code": {"type": ["string", "null"]},
-                            "lot": {"type": ["string", "null"]},
-                            "expiry": {"type": ["string", "null"]},
-                            "description": {"type": ["string", "null"]},
-                            "quantity": {"type": "number"},
-                            "manufacturer": {"type": ["string", "null"]},
-                            "is_jnj_depuy_synthes": {"type": "boolean"},
-                            "is_sterile": {"type": "boolean"},
-                            "source_text": {"type": ["string", "null"]},
-                            "confidence": {"type": "number"},
-                            "warning": {"type": ["string", "null"]}
-                        },
-                        "required": [
-                            "code", "lot", "expiry", "description", "quantity",
-                            "manufacturer", "is_jnj_depuy_synthes", "is_sterile",
-                            "source_text", "confidence", "warning"
-                        ],
-                        "additionalProperties": False
-                    }
-                }
+                        "properties": ITEM_PROPERTIES,
+                        "required": ITEM_REQUIRED,
+                        "additionalProperties": False,
+                    },
+                },
             },
             "required": [
                 "document_type", "clinic_name", "clinical_record", "procedure_date",
                 "surgeon", "confidence", "items"
             ],
-            "additionalProperties": False
-        }
-    }
+            "additionalProperties": False,
+        },
+    },
 }
 
 DDT_SCHEMA = {
@@ -111,117 +124,113 @@ DDT_SCHEMA = {
                     "type": "array",
                     "items": {
                         "type": "object",
-                        "properties": {
-                            "code": {"type": ["string", "null"]},
-                            "lot": {"type": ["string", "null"]},
-                            "expiry": {"type": ["string", "null"]},
-                            "description": {"type": ["string", "null"]},
-                            "quantity": {"type": "number"},
-                            "manufacturer": {"type": ["string", "null"]},
-                            "is_sterile": {"type": "boolean"},
-                            "source_text": {"type": ["string", "null"]},
-                            "confidence": {"type": "number"},
-                            "warning": {"type": ["string", "null"]}
-                        },
-                        "required": [
-                            "code", "lot", "expiry", "description", "quantity",
-                            "manufacturer", "is_sterile", "source_text", "confidence", "warning"
-                        ],
-                        "additionalProperties": False
-                    }
-                }
+                        "properties": ITEM_PROPERTIES,
+                        "required": ITEM_REQUIRED,
+                        "additionalProperties": False,
+                    },
+                },
             },
             "required": [
                 "document_type", "ddt_number", "ddt_date", "customer", "destination",
                 "transport_reason", "is_loan_or_conto_visione", "confidence", "items"
             ],
-            "additionalProperties": False
-        }
-    }
+            "additionalProperties": False,
+        },
+    },
 }
 
-def ai_enabled() -> bool:
-    return _flag("ENABLE_AI_OCR", "false") and bool(_secret("OPENAI_API_KEY", ""))
 
 def image_to_data_url(path: str) -> str:
     p = Path(path)
-    mime = "image/jpeg"
-    if p.suffix.lower() == ".png":
-        mime = "image/png"
-    elif p.suffix.lower() == ".webp":
-        mime = "image/webp"
+    suffix = p.suffix.lower()
+    mime = {
+        ".png": "image/png",
+        ".webp": "image/webp",
+        ".jpg": "image/jpeg",
+        ".jpeg": "image/jpeg",
+    }.get(suffix, "image/jpeg")
     data = base64.b64encode(p.read_bytes()).decode("utf-8")
     return f"data:{mime};base64,{data}"
 
-def analyze_image(path: str, mode: str = "scarico_sala") -> Dict[str, Any]:
-    if not ai_enabled():
-        raise RuntimeError("AI OCR non abilitato. Imposta OPENAI_API_KEY e ENABLE_AI_OCR=true.")
 
-    model = _secret("OPENAI_VISION_MODEL", "gpt-4.1-mini")
-    client = OpenAI(api_key=_secret("OPENAI_API_KEY"))
-
+def _instructions(mode: str) -> str:
     if mode == "ddt":
-        schema = DDT_SCHEMA
-        instructions = """
-Sei un motore OCR specializzato su DDT Johnson & Johnson / DePuy Synthes.
-Estrai testata documento e righe materiali. Identifica se il DDT è 'CONTO VISIONE', 'CONTO DEPOSITO', 'LOAN', 'IN/OUT'.
-Per ogni etichetta e per ogni riga estrai codice prodotto, lotto, scadenza, descrizione, quantità. Non fermarti alle prime righe: analizza tutta l'immagine.
-Il codice REF va mantenuto esatto: punti e S finale sono parte del codice.
-Non inventare dati. Se ci sono più etichette, restituisci una riga per ogni etichetta visibile. Se un campo non è leggibile usa null e warning.
+        return """
+Sei il modulo di visione documentale di OrthoFlow Control Tower, specializzato in DDT e documenti logistici Johnson & Johnson / DePuy Synthes.
+Analizza TUTTA l'immagine, inclusi intestazione, tabelle, etichette e righe in basso.
+Estrai numero/data DDT, cliente, destinazione, causale e se si tratta di CONTO VISIONE, CONTO DEPOSITO, LOAN, IN o OUT.
+Per ogni materiale estrai REF/codice, LOT/lotto, scadenza, descrizione, quantità e produttore.
+Il codice REF deve essere IDENTICO a quello stampato: punti, zeri e S finale sono significativi. 413.050S è diverso da 413.050.
+Non dedurre o inventare valori. Se un campo è incerto usa null e compila warning. Una confezione/etichetta visibile normalmente vale quantità 1 salvo indicazione esplicita diversa.
 """
-    else:
-        schema = SCARICO_SALA_SCHEMA
-        instructions = """
-Sei un motore OCR specializzato su scarichi sala operatoria ortopedici.
-Leggi anche il nome della clinica/struttura in alto nel modulo. Leggi etichette DePuy Synthes / Johnson & Johnson / Synthes e identifica REF/codice, LOT/lotto, scadenza, descrizione, produttore.
-ATTENZIONE: il codice REF deve essere restituito ESATTAMENTE come stampato, includendo punti e soprattutto la S finale se presente.
-La S finale indica sterile; senza S indica non sterile. Non aggiungere mai S e non rimuovere mai S.
-Esempio: 413.050S è diverso da 413.050.
-Accetta come J&J solo Johnson & Johnson, J&J, DePuy Synthes, Synthes.
-Se trovi Smith & Nephew, Stryker, Zimmer Biomet o altri produttori, is_jnj_depuy_synthes=false.
-Non inventare dati. Se ci sono più etichette, restituisci una riga per ogni etichetta visibile. Se un campo non è leggibile usa null e warning.
-La quantità normalmente è 1 per etichetta, ma se sono presenti più etichette uguali puoi mantenere righe separate o sommare solo se chiarissimo.
+    return """
+Sei il modulo di visione documentale di OrthoFlow Control Tower, specializzato negli scarichi di sala operatoria ortopedica.
+Analizza TUTTA l'immagine ad alta attenzione: modulo, foglio di scarico, etichette adesive e confezioni visibili.
+Estrai, quando realmente leggibili, struttura/clinica, numero cartella clinica, data intervento e chirurgo.
+Per OGNI etichetta o confezione materiale estrai REF/codice, LOT/lotto, scadenza, descrizione, quantità e produttore.
+REGOLE CRITICHE:
+- Il REF va restituito ESATTAMENTE come stampato. Mantieni punti, zeri iniziali e soprattutto la S finale.
+- 413.050S e 413.050 sono due codici diversi. Non aggiungere e non togliere mai la S.
+- Considera Johnson & Johnson / J&J / DePuy Synthes / Synthes come J&J. Non classificare altri produttori come J&J.
+- Non ricostruire un lotto o una scadenza se non sono leggibili.
+- Una singola etichetta normalmente corrisponde a quantità 1; somma solo se la quantità è chiaramente esplicita.
+- Se una parte è poco leggibile, abbassa confidence e scrivi una warning invece di inventare.
+- source_text deve riportare una breve trascrizione della zona da cui hai ricavato la riga, utile per il controllo umano.
+L'output serve come precompilazione: l'operatore verificherà sempre i dati prima dello scarico definitivo.
 """
 
-    data_url = image_to_data_url(path)
 
-    input_payload = [
-        {
-            "role": "system",
-            "content": instructions,
-        },
-        {
-            "role": "user",
-            "content": [
-                {"type": "input_text", "text": "Analizza questa immagine e restituisci esclusivamente JSON conforme allo schema."},
-                {"type": "input_image", "image_url": data_url},
-            ],
-        },
-    ]
+def analyze_image(path: str, mode: str = "scarico_sala") -> Dict[str, Any]:
+    status = ai_status()
+    if not status["enabled"]:
+        raise RuntimeError(
+            "AI OCR non abilitato. Configura nei Secrets: OPENAI_API_KEY e ENABLE_AI_OCR=true."
+        )
 
-    # OpenAI Python recente: Responses API usa text={"format": ...}.
-    try:
-        response = client.responses.create(
-            model=model,
-            input=input_payload,
-            text={"format": _responses_json_schema_format(schema)},
-        )
-    except TypeError:
-        # Fallback per versioni SDK compatibili con response_format.
-        response = client.responses.create(
-            model=model,
-            input=input_payload,
-            response_format=schema,
-        )
+    p = Path(path)
+    if not p.exists():
+        raise FileNotFoundError(f"Immagine non trovata: {path}")
+    if p.suffix.lower() not in SUPPORTED_IMAGE_EXT:
+        raise ValueError("Formato immagine non supportato per OCR AI.")
+
+    model = status["model"]
+    client = OpenAI(api_key=_secret("OPENAI_API_KEY"))
+    schema = DDT_SCHEMA if mode == "ddt" else SCARICO_SALA_SCHEMA
+
+    response = client.responses.create(
+        model=model,
+        store=False,
+        input=[
+            {
+                "role": "system",
+                "content": _instructions(mode),
+            },
+            {
+                "role": "user",
+                "content": [
+                    {
+                        "type": "input_text",
+                        "text": "Analizza il documento. Restituisci esclusivamente i dati conformi allo schema strutturato.",
+                    },
+                    {
+                        "type": "input_image",
+                        "image_url": image_to_data_url(path),
+                        "detail": "high",
+                    },
+                ],
+            },
+        ],
+        text={"format": _responses_json_schema_format(schema)},
+    )
 
     text = getattr(response, "output_text", None)
     if not text:
-        # Fallback prudente se output_text non è popolato.
         try:
             text = response.output[0].content[0].text
-        except Exception:
-            text = str(response)
+        except Exception as exc:
+            raise RuntimeError("La risposta OCR AI non contiene output utilizzabile.") from exc
     return json.loads(text)
+
 
 def normalize_ai_items(result: Dict[str, Any]) -> List[Dict[str, Any]]:
     out = []
@@ -238,8 +247,8 @@ def normalize_ai_items(result: Dict[str, Any]) -> List[Dict[str, Any]]:
             "produttore": manufacturer,
             "is_jnj": bool(it.get("is_jnj_depuy_synthes", False)),
             "is_sterile": bool(it.get("is_sterile", str(code).upper().endswith("S"))),
-            "confidence": it.get("confidence") or 0,
+            "confidence": float(it.get("confidence") or 0),
             "warning": it.get("warning") or "",
-            "source_text": it.get("source_text") or ""
+            "source_text": it.get("source_text") or "",
         })
     return out
