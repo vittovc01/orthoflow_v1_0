@@ -36,40 +36,28 @@ if role() not in {'Admin','Magazzino'}: st.error('Area riservata ad Admin e Maga
 
 
 def gs1_date(yymmdd):
-    try:
-        return pd.to_datetime(yymmdd,format='%y%m%d',errors='raise').date().isoformat()
-    except Exception:
-        return ''
+    try: return pd.to_datetime(yymmdd,format='%y%m%d',errors='raise').date().isoformat()
+    except Exception: return ''
 
 
 def normalize_scan(raw):
     text=str(raw or '')
-    text=text.replace('\\u001d','\x1d').replace('<GS>','\x1d').replace('[GS]','\x1d')
-    text=text.strip()
+    text=text.replace('\\u001d','\x1d').replace('<GS>','\x1d').replace('[GS]','\x1d').strip()
     for prefix in (']d2',']D2',']C1',']c1'):
         if text.startswith(prefix): text=text[len(prefix):]
     return text
 
 
 def parse_gs1(raw):
-    """Parser GS1 per DataMatrix J&J: AI 01 GTIN, 17 scadenza, 10 lotto, 21 seriale."""
     text=normalize_scan(raw)
     out={'raw':text,'gtin':'','lotto':'','scadenza':'','seriale':''}
-    if not text:
-        return out
-
-    # Formato human readable: (01)...(17)...(10)...
+    if not text: return out
     for ai,val in re.findall(r'\((01|10|17|21)\)(.*?)(?=\((?:01|10|17|21)\)|$)',text):
         val=val.strip().strip('\x1d')
         if ai=='01': out['gtin']=re.sub(r'\D','',val)[:14]
         elif ai=='17': out['scadenza']=gs1_date(re.sub(r'\D','',val)[:6])
         elif ai=='10': out['lotto']=val
         elif ai=='21': out['seriale']=val
-
-    if out['gtin'] and (out['lotto'] or out['scadenza']):
-        return out
-
-    # Tokenizzazione tramite FNC1/Group Separator.
     parts=[p for p in text.split('\x1d') if p]
     for part in parts:
         cursor=0
@@ -82,7 +70,6 @@ def parse_gs1(raw):
                 if candidate.isdigit(): out['scadenza']=gs1_date(candidate); cursor+=8; continue
             if part.startswith('10',cursor):
                 value=part[cursor+2:]
-                # Se il lotto non è ultimo e compare un AI fisso valido, troncalo lì.
                 cut=len(value)
                 m17=re.search(r'17\d{6}',value)
                 if m17: cut=min(cut,m17.start())
@@ -92,42 +79,50 @@ def parse_gs1(raw):
             if part.startswith('21',cursor):
                 out['seriale']=part[cursor+2:].strip(); cursor=len(part); continue
             cursor+=1
-
-    # Fallback molto comune J&J: 01 + 14 GTIN + 17 + YYMMDD + 10 + LOTTO
     compact=text.replace('\x1d','')
     m=re.search(r'01(\d{14})',compact)
     if m and not out['gtin']: out['gtin']=m.group(1)
     m17=re.search(r'17(\d{6})',compact)
     if m17 and not out['scadenza']: out['scadenza']=gs1_date(m17.group(1))
-
     if not out['lotto']:
-        # Lotto dopo AI 10: preferisci 10 successivo alla scadenza/GTIN per evitare falsi match nel GTIN.
-        start=0
-        if m17: start=m17.end()
-        elif m: start=m.end()
+        start=m17.end() if m17 else (m.end() if m else 0)
         pos=compact.find('10',start)
         if pos>=0:
             lot=compact[pos+2:]
-            # 21 può seguire il lotto; in GS1 dovrebbe esserci FNC1, ma alcuni browser lo perdono.
             serial_pos=lot.find('21')
             if serial_pos>0:
                 maybe_serial=lot[serial_pos+2:]
                 if maybe_serial: out['seriale']=maybe_serial; lot=lot[:serial_pos]
             out['lotto']=lot.strip()
-
     return out
 
 
 def mapping_for(parsed):
     try:
         q=sb().table('codici_prodotto_scan').select('*')
-        if parsed.get('gtin'):
-            rows=q.eq('gtin',parsed['gtin']).limit(1).execute().data or []
-        else:
-            rows=q.eq('codice_scansionato',parsed['raw']).limit(1).execute().data or []
+        rows=q.eq('gtin',parsed['gtin']).limit(1).execute().data or [] if parsed.get('gtin') else q.eq('codice_scansionato',parsed['raw']).limit(1).execute().data or []
         return rows[0] if rows else None
     except Exception:
         return None
+
+
+def save_mapping(parsed, codice_articolo, descrizione=''):
+    codice=clean(codice_articolo).upper()
+    if not codice or not parsed.get('gtin'):
+        return False
+    payload={
+        'codice_scansionato':clean(parsed.get('raw')),
+        'gtin':clean(parsed.get('gtin')),
+        'codice_articolo':codice,
+        'descrizione':clean(descrizione),
+        'attivo':True,
+    }
+    try:
+        sb().table('codici_prodotto_scan').upsert(payload,on_conflict='codice_scansionato').execute()
+        return True
+    except Exception as e:
+        st.error(f'Impossibile salvare associazione GTIN → codice Johnson: {e}')
+        return False
 
 
 def mags():
@@ -141,13 +136,13 @@ def mags():
     return labels or ['MAG1 - Magazzino 1']
 
 
-def add_scan(raw):
+def add_scan(raw, forced_code=''):
     p=parse_gs1(raw); m=mapping_for(p) or {}
-    new={'codice':clean(m.get('codice_articolo')),'descrizione':clean(m.get('descrizione')),'lotto':clean(p['lotto']),'scadenza':clean(p['scadenza']),'quantita':1.0,'produttore':'Johnson & Johnson / DePuy Synthes','gtin':clean(p['gtin']),'seriale':clean(p['seriale'])}
-    st.session_state['last_gs1_debug']=p
+    code=clean(m.get('codice_articolo') or forced_code).upper()
+    new={'codice':code,'descrizione':clean(m.get('descrizione')),'lotto':clean(p['lotto']),'scadenza':clean(p['scadenza']),'quantita':1.0,'produttore':'Johnson & Johnson / DePuy Synthes','gtin':clean(p['gtin']),'seriale':clean(p['seriale'])}
     rows=st.session_state.get('ddt_mobile_rows',[])
     for r in rows:
-        if r.get('gtin')==new['gtin'] and r.get('lotto')==new['lotto'] and r.get('scadenza')==new['scadenza'] and new['gtin']:
+        if r.get('codice')==new['codice'] and r.get('lotto')==new['lotto'] and r.get('scadenza')==new['scadenza'] and new['codice']:
             r['quantita']=float(r.get('quantita') or 0)+1
             st.session_state['ddt_mobile_rows']=rows
             return
@@ -162,7 +157,7 @@ def batch_insert(table,rows,size=500):
     return done
 
 st.title('🚚 DDT carico mobile')
-st.caption('Scanner GS1/DataMatrix Johnson + OCR AI del DDT. Il decoder legge AI 01 (GTIN), 17 (scadenza), 10 (lotto) e 21 (seriale).')
+st.caption('Scanner Johnson: mostra il codice articolo/REF (es. 413.030S), oltre a GTIN, lotto, scadenza e seriale.')
 
 c1,c2=st.columns(2)
 with c1:
@@ -176,30 +171,50 @@ with scan_tab:
     st.subheader('Scanner veloce Johnson')
     raw=''
     if qrcode_scanner is not None:
-        raw=qrcode_scanner(key='ddt_johnson_scanner_v2') or ''
-    manual=st.text_input('Valore scanner / test manuale',key='manual_gs1_v2')
+        raw=qrcode_scanner(key='ddt_johnson_scanner_v3') or ''
+    manual=st.text_input('Valore scanner / test manuale',key='manual_gs1_v3')
     raw=raw or manual
+    parsed=parse_gs1(raw) if raw else {'raw':'','gtin':'','lotto':'','scadenza':'','seriale':''}
+    mapped=mapping_for(parsed) if raw else None
+    codice_johnson=clean((mapped or {}).get('codice_articolo')).upper()
     if raw:
-        p=parse_gs1(raw)
         a,b,c,d=st.columns(4)
-        a.metric('GTIN',p['gtin'] or '—'); b.metric('Lotto',p['lotto'] or '—'); c.metric('Scadenza',p['scadenza'] or '—'); d.metric('Seriale',p['seriale'] or '—')
+        a.metric('Codice Johnson / REF',codice_johnson or 'DA ASSOCIARE')
+        b.metric('Lotto',parsed['lotto'] or '—')
+        c.metric('Scadenza',parsed['scadenza'] or '—')
+        d.metric('GTIN',parsed['gtin'] or '—')
+        if codice_johnson:
+            st.success(f'Prodotto riconosciuto: {codice_johnson}')
+        elif parsed.get('gtin'):
+            st.warning('GTIN letto correttamente, ma questo prodotto non è ancora associato al codice Johnson/REF.')
+            with st.form('associate_ref_form'):
+                ref=st.text_input('Codice Johnson / REF',placeholder='es. 413.030S').upper()
+                descr=st.text_input('Descrizione (opzionale)')
+                associate=st.form_submit_button('💾 Associa GTIN al codice Johnson',use_container_width=True)
+            if associate:
+                if not ref.strip(): st.error('Inserisci il codice Johnson/REF.')
+                elif save_mapping(parsed,ref,descr):
+                    st.success(f'Associazione salvata: {parsed["gtin"]} → {ref.strip().upper()}')
+                    st.rerun()
         with st.expander('Diagnostica lettura GS1'):
-            st.code(repr(p['raw']))
-            st.json(p)
+            st.code(repr(parsed['raw'])); st.json(parsed)
     x,y=st.columns(2)
-    if x.button('➕ Aggiungi scansione',use_container_width=True,disabled=not bool(raw)):
+    can_add=bool(raw and codice_johnson)
+    if x.button('➕ Aggiungi scansione',use_container_width=True,disabled=not can_add):
         add_scan(raw); st.rerun()
     if y.button('🧹 Svuota lista',use_container_width=True):
         st.session_state['ddt_mobile_rows']=[]; st.rerun()
+    if raw and not codice_johnson:
+        st.info('Per evitare carichi con solo GTIN, prima associa il prodotto al suo codice Johnson/REF. L’associazione viene ricordata per le scansioni successive.')
     sdf=pd.DataFrame(st.session_state.get('ddt_mobile_rows',[]))
-    sed=st.data_editor(sdf if not sdf.empty else pd.DataFrame(columns=['codice','descrizione','lotto','scadenza','quantita','produttore','gtin','seriale']),num_rows='dynamic',use_container_width=True,key='ddt_scan_editor_v2')
+    sed=st.data_editor(sdf if not sdf.empty else pd.DataFrame(columns=['codice','descrizione','lotto','scadenza','quantita','produttore','gtin','seriale']),num_rows='dynamic',use_container_width=True,key='ddt_scan_editor_v3')
     st.session_state['ddt_mobile_rows']=sed.to_dict('records')
 
 with photo_tab:
     status=ai_status()
     if status.get('enabled'): st.success(f"OCR AI attivo · {status.get('model','')}")
     else: st.warning('OCR AI non attivo: '+', '.join(status.get('missing',[])))
-    photo=st.file_uploader('Fotografa o carica il DDT',type=['jpg','jpeg','png','webp'],key='ddt_photo_v2')
+    photo=st.file_uploader('Fotografa o carica il DDT',type=['jpg','jpeg','png','webp'],key='ddt_photo_v3')
     if photo:
         import os
         os.makedirs('uploads/ddt',exist_ok=True)
@@ -213,7 +228,7 @@ with photo_tab:
                 st.success(f"Righe rilevate: {len(st.session_state['ddt_ai_rows'])}")
             except Exception as e: st.error(f'Errore OCR AI DDT: {e}')
     adf=pd.DataFrame(st.session_state.get('ddt_ai_rows',[]))
-    aed=st.data_editor(adf if not adf.empty else pd.DataFrame(columns=['codice','descrizione','lotto','scadenza','quantita','produttore']),num_rows='dynamic',use_container_width=True,key='ddt_ai_editor_v2')
+    aed=st.data_editor(adf if not adf.empty else pd.DataFrame(columns=['codice','descrizione','lotto','scadenza','quantita','produttore']),num_rows='dynamic',use_container_width=True,key='ddt_ai_editor_v3')
     st.session_state['ddt_ai_rows']=aed.to_dict('records')
 
 st.divider(); st.subheader('✅ Conferma DDT')
@@ -226,7 +241,7 @@ cliente=st.text_input('Cliente / destinazione',value=header.get('cliente',''))
 rows=st.session_state.get('ddt_mobile_rows',[]) if source=='Scanner Johnson' else st.session_state.get('ddt_ai_rows',[])
 preview=pd.DataFrame(rows)
 if not preview.empty: st.dataframe(preview,use_container_width=True,hide_index=True)
-confirm=st.checkbox('Ho verificato numero DDT, data, codice, lotto, scadenza e quantità.')
+confirm=st.checkbox('Ho verificato numero DDT, data, codice Johnson, lotto, scadenza e quantità.')
 if st.button('🚚 Crea DDT e carica magazzino',type='primary',use_container_width=True,disabled=not confirm or preview.empty):
     if not clean(num): st.error('Inserisci il numero DDT.')
     else:
@@ -234,7 +249,7 @@ if st.button('🚚 Crea DDT e carica magazzino',type='primary',use_container_wid
             ddt=(sb().table('ddt').insert({'numero_ddt':clean(num),'data_ddt':ddt_date.isoformat(),'tipo_ddt':tipo,'cliente':clean(cliente),'codice_magazzino_destinazione':mag}).execute().data or [])[0]
             righe=[]; movs=[]
             for r in rows:
-                c=clean(r.get('codice')); l=clean(r.get('lotto')); q=float(r.get('quantita') or 1)
+                c=clean(r.get('codice')).upper(); l=clean(r.get('lotto')); q=float(r.get('quantita') or 1)
                 if not c or not l or q<=0: continue
                 desc=clean(r.get('descrizione')); scad=clean(r.get('scadenza')) or None
                 righe.append({'ddt_id':ddt['id'],'codice':c,'descrizione':desc,'lotto':l,'scadenza':scad,'quantita':q,'origine':tipo})
