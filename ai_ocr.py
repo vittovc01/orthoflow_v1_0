@@ -69,7 +69,11 @@ def analyze_document(path: str, mode: str="scarico_sala") -> Dict[str,Any]:
     if p.suffix.lower() not in SUPPORTED_DOCUMENT_EXT: raise ValueError("Formato non supportato. Usa PDF, JPG, JPEG, PNG o WEBP.")
     client=OpenAI(api_key=_secret("OPENAI_API_KEY")); schema=DDT_SCHEMA if mode=="ddt" else SCARICO_SALA_SCHEMA
     if p.suffix.lower()==".pdf":
-        content=[{"type":"input_text","text":"Analizza tutte le pagine del PDF. Restituisci esclusivamente i dati conformi allo schema strutturato."},{"type":"input_file","filename":p.name,"file_data":base64.b64encode(p.read_bytes()).decode("utf-8")}]
+        pdf_b64=base64.b64encode(p.read_bytes()).decode("utf-8")
+        content=[
+            {"type":"input_text","text":"Analizza tutte le pagine del PDF. Restituisci esclusivamente i dati conformi allo schema strutturato."},
+            {"type":"input_file","filename":p.name,"file_data":f"data:application/pdf;base64,{pdf_b64}","detail":"high"}
+        ]
     else:
         content=[{"type":"input_text","text":"Analizza il documento. Restituisci esclusivamente i dati conformi allo schema strutturato."},{"type":"input_image","image_url":image_to_data_url(path),"detail":"high"}]
     response=client.responses.create(model=status["model"],store=False,input=[{"role":"system","content":_instructions(mode)},{"role":"user","content":content}],text={"format":_responses_json_schema_format(schema)})
