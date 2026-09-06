@@ -8,7 +8,7 @@ logged_in = bool(st.session_state.get("user"))
 role = str(st.session_state.get("ruolo", "")).strip()
 
 login_page = st.Page(
-    "core_app.py",
+    "pages/99_Login.py",
     title="OrthoFlow Control Tower",
     icon="🏥",
     url_path="login",
