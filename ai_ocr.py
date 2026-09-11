@@ -1,6 +1,8 @@
 import os
 import json
 import base64
+import calendar
+import re
 from pathlib import Path
 from typing import List, Dict, Any
 from dotenv import load_dotenv
@@ -52,7 +54,7 @@ def image_to_data_url(path):
 def _instructions(mode):
     if mode=="ddt":
         return """Sei il modulo documentale di OrthoFlow Control Tower per DDT Johnson & Johnson / DePuy Synthes. Analizza TUTTO il documento e TUTTE le pagine. Estrai numero e data DDT, cliente, destinazione, causale e ogni riga EFFETTIVAMENTE SPEDITA con REF/codice Johnson, lotto, scadenza, descrizione e quantità spedita. Il REF deve essere identico allo stampato: punti, zeri e S finale sono significativi. 413.050S è diverso da 413.050. IMPORTANTE: ignora completamente sezioni 'Prodotto non spedito', back order/non spedito e righe con quantità spedita zero. Non inventare valori; se incerto usa null/warning."""
-    return """Sei il modulo documentale di OrthoFlow Control Tower per scarichi di sala ortopedica. Analizza tutto il documento/immagine. Estrai struttura, cartella clinica, data, chirurgo e per ogni etichetta/materiale REF esatto, lotto, scadenza, descrizione, quantità e produttore. Mantieni punti, zeri e S finale. Non inventare valori; usa warning se incerto."""
+    return """Sei il modulo documentale di OrthoFlow Control Tower per scarichi di sala ortopedica. Analizza tutto il documento/immagine. Estrai struttura, cartella clinica, data, chirurgo e per ogni etichetta/materiale REF esatto, lotto, scadenza, descrizione, quantità e produttore. Mantieni punti, zeri e S finale. Per le scadenze restituisci preferibilmente YYYY-MM-DD; se sull'etichetta compare solo mese/anno, conserva mese e anno senza inventare un giorno. Non inventare valori; usa warning se incerto."""
 
 def _parse_response(response):
     text=getattr(response,"output_text",None)
@@ -82,9 +84,42 @@ def analyze_document(path: str, mode: str="scarico_sala") -> Dict[str,Any]:
 def analyze_image(path: str, mode: str="scarico_sala") -> Dict[str,Any]:
     return analyze_document(path,mode)
 
+def _normalize_expiry(value):
+    """Return a PostgreSQL DATE-safe ISO value. Month-only expiries use month-end."""
+    s=str(value or "").strip()
+    if not s: return ""
+    # Already complete ISO date.
+    if re.fullmatch(r"\d{4}-\d{2}-\d{2}",s): return s
+    # AI commonly returns YYYY-MM when the label only contains month/year.
+    m=re.fullmatch(r"(\d{4})[-/](\d{1,2})",s)
+    if m:
+        y,mo=int(m.group(1)),int(m.group(2))
+        if 1 <= mo <= 12:
+            return f"{y:04d}-{mo:02d}-{calendar.monthrange(y,mo)[1]:02d}"
+    # Also accept MM/YYYY or MM-YYYY.
+    m=re.fullmatch(r"(\d{1,2})[-/](\d{4})",s)
+    if m:
+        mo,y=int(m.group(1)),int(m.group(2))
+        if 1 <= mo <= 12:
+            return f"{y:04d}-{mo:02d}-{calendar.monthrange(y,mo)[1]:02d}"
+    # Common full Italian/European date.
+    m=re.fullmatch(r"(\d{1,2})[/-](\d{1,2})[/-](\d{4})",s)
+    if m:
+        d,mo,y=map(int,m.groups())
+        try:
+            import datetime
+            return datetime.date(y,mo,d).isoformat()
+        except ValueError: return ""
+    return ""
+
 def normalize_ai_items(result):
     out=[]
     for it in result.get("items",[]):
         code=(it.get("code") or "").strip(); manufacturer=(it.get("manufacturer") or "").strip()
-        out.append({"codice":code,"descrizione":it.get("description") or "","lotto":(it.get("lot") or "").strip(),"scadenza":it.get("expiry") or "","quantita":it.get("quantity") or 1,"produttore":manufacturer,"is_jnj":bool(it.get("is_jnj_depuy_synthes",False)),"is_sterile":bool(it.get("is_sterile",code.upper().endswith("S"))),"confidence":float(it.get("confidence") or 0),"warning":it.get("warning") or "","source_text":it.get("source_text") or ""})
+        raw_expiry=it.get("expiry") or ""
+        expiry=_normalize_expiry(raw_expiry)
+        warning=it.get("warning") or ""
+        if raw_expiry and not expiry:
+            warning=(warning+" · " if warning else "")+f"Scadenza da verificare: {raw_expiry}"
+        out.append({"codice":code,"descrizione":it.get("description") or "","lotto":(it.get("lot") or "").strip(),"scadenza":expiry,"quantita":it.get("quantity") or 1,"produttore":manufacturer,"is_jnj":bool(it.get("is_jnj_depuy_synthes",False)),"is_sterile":bool(it.get("is_sterile",code.upper().endswith("S"))),"confidence":float(it.get("confidence") or 0),"warning":warning,"source_text":it.get("source_text") or ""})
     return out
