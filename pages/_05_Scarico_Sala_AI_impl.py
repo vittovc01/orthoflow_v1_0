@@ -139,21 +139,58 @@ def ncode(v):
     return re.sub(r"[^A-Z0-9]", "", clean(v).upper())
 
 
-def price_for(customer_code, product_code, line):
+def offer_ids_for(customer_code, line):
+    """Return only offers linked to this customer and compatible with the selected line."""
     try:
         links = sb().table("offerte_clienti").select("offerta_id").eq("codice_cliente", customer_code).execute().data or []
+        ids = []
         for link in links:
             oid = link.get("offerta_id")
-            heads = sb().table("offerte_header").select("id,linea").eq("id", oid).execute().data or []
-            if not heads or clean(heads[0].get("linea")).upper() != clean(line).upper():
-                continue
-            prices = sb().table("offerte_prezzi").select("codice,prezzo").eq("offerta_id", oid).execute().data or []
-            for p in prices:
-                if ncode(p.get("codice")) == ncode(product_code):
+            heads = sb().table("offerte_header").select("id,linea").eq("id", oid).limit(1).execute().data or []
+            if heads and clean(heads[0].get("linea")).upper() == clean(line).upper():
+                ids.append(oid)
+        return ids
+    except Exception:
+        return []
+
+
+def price_for(customer_code, product_code, line):
+    """Lookup the single product directly in Supabase; avoids the 1,000-row API pagination limit."""
+    target = clean(product_code).upper()
+    if not target:
+        return None
+    try:
+        for oid in offer_ids_for(customer_code, line):
+            # Fast exact lookup first.
+            rows = (sb().table("offerte_prezzi")
+                    .select("codice,prezzo")
+                    .eq("offerta_id", oid)
+                    .eq("codice", target)
+                    .limit(1).execute().data or [])
+            if rows:
+                return float(rows[0].get("prezzo") or 0)
+
+            # Case-insensitive exact textual fallback.
+            rows = (sb().table("offerte_prezzi")
+                    .select("codice,prezzo")
+                    .eq("offerta_id", oid)
+                    .ilike("codice", target)
+                    .limit(20).execute().data or [])
+            for p in rows:
+                if ncode(p.get("codice")) == ncode(target):
                     return float(p.get("prezzo") or 0)
     except Exception:
         pass
     return None
+
+
+def manual_price_for(code):
+    key = f"manual_price_{ncode(code)}"
+    try:
+        val = float(st.session_state.get(key, 0) or 0)
+        return val if val > 0 else None
+    except Exception:
+        return None
 
 
 def available_qty(mag, code, lot):
@@ -183,6 +220,7 @@ def run_ai(path):
         st.session_state["scarico_file_path"] = path
         st.session_state["scarico_file_name"] = Path(path).name
         st.session_state["scarico_source"] = "AI"
+        st.session_state.pop("scarico_missing_prices", None)
         st.success(f"AI completata: {len(st.session_state['scarico_ai_rows'])} righe rilevate.")
         st.rerun()
     except Exception as e:
@@ -259,6 +297,18 @@ ai_surgeon = clean(meta.get("surgeon"))
 if ai_clinic or ai_record or ai_surgeon:
     st.caption("Dati precompilati dall'AI quando leggibili; restano sempre modificabili dall'operatore.")
 
+missing_prices = st.session_state.get("scarico_missing_prices", []) or []
+if missing_prices:
+    st.warning("Alcuni codici non hanno un prezzo nell'offerta collegata. Inserisci il prezzo manuale prima di confermare lo scarico.")
+    with st.expander("💶 Prezzi mancanti da inserire", expanded=True):
+        for item in missing_prices:
+            code = clean(item.get("codice"))
+            desc = clean(item.get("descrizione"))
+            cols = st.columns([2, 4, 2])
+            cols[0].markdown(f"**{code}**")
+            cols[1].caption(desc or "Descrizione non disponibile")
+            cols[2].number_input("Prezzo €", min_value=0.0, step=0.01, format="%.2f", key=f"manual_price_{ncode(code)}", label_visibility="collapsed")
+
 with st.form("scarico_ai_confirm"):
     if clients:
         default_idx = 0
@@ -301,10 +351,30 @@ if confirm:
     if not valid_rows:
         st.error("Nessuna riga valida: servono almeno codice e lotto.")
     else:
+        # PRE-FLIGHT: resolve every price before writing anything to the DB.
+        priced_rows = []
+        missing = []
+        customer_code = clean(selected_client.get("codice_cliente"))
+        for r, code, lot, qty in valid_rows:
+            price = price_for(customer_code, code, line)
+            source = "OFFERTA"
+            if price is None:
+                price = manual_price_for(code)
+                source = "MANUALE" if price is not None else "MANCANTE"
+            if price is None:
+                missing.append({"codice": code, "descrizione": clean(r.get("descrizione"))})
+            priced_rows.append((r, code, lot, qty, price, source))
+
+        if missing:
+            st.session_state["scarico_missing_prices"] = missing
+            st.error(f"Mancano {len(missing)} prezzi. Inseriscili nel riquadro 'Prezzi mancanti da inserire' e premi di nuovo Crea intervento.")
+            st.rerun()
+
+        st.session_state.pop("scarico_missing_prices", None)
         try:
             intervention_payload = {
                 "data_intervento": procedure_date.isoformat(),
-                "codice_cliente": clean(selected_client.get("codice_cliente")),
+                "codice_cliente": customer_code,
                 "cliente": clean(selected_client.get("descrizione")),
                 "cartella_clinica": clean(clinical_record),
                 "agente": clean(agent),
@@ -316,16 +386,15 @@ if confirm:
             total = 0.0
             inserted = 0
 
-            for r, code, lot, qty in valid_rows:
+            for r, code, lot, qty, price, price_source in priced_rows:
                 desc = clean(r.get("descrizione"))
                 expiry = clean(r.get("scadenza")) or None
                 manufacturer = clean(r.get("produttore"))
                 validation = "Validato J&J" if any(x in manufacturer.upper() for x in ["JOHNSON", "J&J", "DEPUY", "SYNTHES"]) else ("Marchio non letto" if not manufacturer else "Prodotto non J&J")
-                price = price_for(clean(selected_client.get("codice_cliente")), code, line)
-                line_total = price * qty if price is not None else None
+                line_total = float(price) * qty
 
-                if price is None:
-                    add_anomaly("PREZZO_NON_TROVATO", "Media", f"Intervento {intervention_id}: prezzo non trovato per {code}.")
+                if price_source == "MANUALE":
+                    add_anomaly("PREZZO_MANUALE", "Bassa", f"Intervento {intervention_id}: prezzo inserito manualmente per {code}: € {float(price):.2f}.")
                 if available_qty(mag, code, lot) < qty:
                     add_anomaly("GIACENZA_INSUFFICIENTE", "Alta", f"Intervento {intervention_id}: {code} lotto {lot}, quantità richiesta {qty}.")
 
@@ -339,7 +408,7 @@ if confirm:
                     "produttore": manufacturer,
                     "validazione": validation,
                     "origine": "CONTO DEPOSITO",
-                    "prezzo": price,
+                    "prezzo": float(price),
                     "totale": line_total,
                     "reintegro": True,
                 }).execute()
@@ -355,10 +424,10 @@ if confirm:
                     "origine": "CONTO DEPOSITO",
                     "riferimento_tipo": "INTERVENTO",
                     "riferimento_id": str(intervention_id),
-                    "note": f"Scarico Sala AI · chirurgo: {clean(surgeon)}",
+                    "note": f"Scarico Sala AI · chirurgo: {clean(surgeon)} · prezzo: {price_source}",
                     "utente": user(),
                 }).execute()
-                total += line_total or 0
+                total += line_total
                 inserted += 1
 
             local_path = st.session_state.get("scarico_file_path")
@@ -368,7 +437,7 @@ if confirm:
                     sb().table("documenti_impianto").insert({
                         "intervento_id": str(intervention_id),
                         "data_intervento": procedure_date.isoformat(),
-                        "codice_cliente": clean(selected_client.get("codice_cliente")),
+                        "codice_cliente": customer_code,
                         "cliente": clean(selected_client.get("descrizione")),
                         "agente": clean(agent),
                         "cartella_clinica": clean(clinical_record),
@@ -383,7 +452,7 @@ if confirm:
                     pass
 
             st.success(f"Intervento {intervention_id} creato. Materiali scaricati: {inserted}. Fatturato teorico: € {total:,.2f}")
-            for k in ["scarico_ai_rows", "scarico_ai_meta", "scarico_file_path", "scarico_file_name", "scarico_file_type", "scarico_source"]:
+            for k in ["scarico_ai_rows", "scarico_ai_meta", "scarico_file_path", "scarico_file_name", "scarico_file_type", "scarico_source", "scarico_missing_prices"]:
                 st.session_state.pop(k, None)
         except Exception as e:
             st.error(f"Scarico non completato: {e}")
