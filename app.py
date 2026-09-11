@@ -30,6 +30,13 @@ scarico_sala_ai_page = st.Page(
     url_path="scarico-sala-ai",
 )
 
+interventions_page = st.Page(
+    "pages/06_Gestione_Interventi.py",
+    title="Gestione Interventi",
+    icon="💶",
+    url_path="gestione-interventi",
+)
+
 wms_page = st.Page(
     "pages/01_WMS.py",
     title="Scanner & WMS",
@@ -68,6 +75,8 @@ else:
         "HOME": [control_tower],
         "OPERATIVITÀ": [operations_page, scarico_sala_ai_page],
     }
+    if role in {"Admin", "Amministrazione"}:
+        pages["AMMINISTRAZIONE"] = [interventions_page]
     if role in {"Admin", "Magazzino"}:
         pages["LOGISTICA & MAGAZZINO"] = [ddt_mobile_page, wms_page, shelf_page, qr_page]
     nav = st.navigation(pages, position="sidebar", expanded=True)
