@@ -62,14 +62,17 @@ if not anomalie.empty and 'risolta' in anomalie.columns: aperti=len(anomalie[~an
 c1,c2,c3,c4,c5=st.columns(5)
 c1.metric('Fatturato',euro(fatt)); c2.metric('Interventi',len(interventi)); c3.metric('Giacenze',len(giacenze) if role()!='Agente' else '—'); c4.metric('Anomalie aperte',aperti); c5.metric('Movimenti',len(movimenti) if role() in {'Admin','Magazzino'} else '—')
 
-st.markdown('<div class="ct-section">Accessi rapidi</div>',unsafe_allow_html=True)
+st.markdown('<div class="ct-section">Azioni rapide</div>',unsafe_allow_html=True)
 if role() in {'Admin','Magazzino'}:
-    a,b,c=st.columns(3)
-    a.page_link('pages/01_WMS.py',label='📦 Scanner & WMS',use_container_width=True)
-    b.page_link('pages/02_QR_Scaffali.py',label='🏷️ QR Scaffali',use_container_width=True)
-    c.page_link('pages/03_Gestione_Scaffale.py',label='📚 Gestione Scaffale',use_container_width=True)
+    a,b,c,d=st.columns(4)
+    a.page_link('pages/05_Scarico_Sala_AI.py',label='📸 Scarico Sala AI',use_container_width=True)
+    b.page_link('pages/04_DDT_Carico_v2.py',label='🚚 DDT Carico Mobile',use_container_width=True)
+    c.page_link('pages/01_WMS.py',label='📦 Scanner & WMS',use_container_width=True)
+    d.page_link('pages/03_Gestione_Scaffale.py',label='📚 Gestione Scaffale',use_container_width=True)
 else:
-    st.info('Usa la voce Gestionale nel menu laterale per Scarico sala, Cartella clinica e attività operative.')
+    a,b=st.columns(2)
+    a.page_link('pages/05_Scarico_Sala_AI.py',label='📸 Scarico Sala AI',use_container_width=True)
+    b.page_link('core_app.py',label='🏥 Gestionale',use_container_width=True)
 
 if role() in {'Admin','Magazzino'}:
     st.markdown('<div class="ct-section">Logistica in evidenza</div>',unsafe_allow_html=True)
