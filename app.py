@@ -23,6 +23,13 @@ control_tower = st.Page(
     default=logged_in,
 )
 
+scarico_sala_ai_page = st.Page(
+    "pages/05_Scarico_Sala_AI.py",
+    title="Scarico Sala AI",
+    icon="📸",
+    url_path="scarico-sala-ai",
+)
+
 wms_page = st.Page(
     "pages/01_WMS.py",
     title="Scanner & WMS",
@@ -59,7 +66,7 @@ if not logged_in:
 else:
     pages = {
         "HOME": [control_tower],
-        "OPERATIVITÀ": [operations_page],
+        "OPERATIVITÀ": [operations_page, scarico_sala_ai_page],
     }
     if role in {"Admin", "Magazzino"}:
         pages["LOGISTICA & MAGAZZINO"] = [ddt_mobile_page, wms_page, shelf_page, qr_page]
