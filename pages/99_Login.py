@@ -44,13 +44,22 @@ def load_user(username):
 
 
 def legacy_admin_ok(username, password):
-    """Mantiene compatibile l'accesso amministratore già presente nel gestionale storico."""
+    """Mantiene compatibile l'accesso amministratore del gestionale storico."""
     try:
-        source = Path('core_app.py').read_text(encoding='utf-8')
-        m = re.search(r"elif\s*\(u,p\)\s*==\s*\('([^']+)'\s*,\s*'([^']+)'\)", source)
-        if not m:
-            return False
-        return hmac.compare_digest(str(username).strip(), m.group(1)) and hmac.compare_digest(str(password), m.group(2))
+        # core_app.py ora e' solo un wrapper; le credenziali legacy restano
+        # nel file storico preservato per compatibilita'.
+        for candidate in ('core_app_legacy.py', 'core_app.py'):
+            p = Path(candidate)
+            if not p.exists():
+                continue
+            source = p.read_text(encoding='utf-8')
+            m = re.search(r"elif\s*\(u,p\)\s*==\s*\('([^']+)'\s*,\s*'([^']+)'\)", source)
+            if m:
+                return (
+                    hmac.compare_digest(str(username).strip(), m.group(1))
+                    and hmac.compare_digest(str(password), m.group(2))
+                )
+        return False
     except Exception:
         return False
 
