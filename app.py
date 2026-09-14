@@ -44,6 +44,13 @@ work_implant_page = st.Page(
     url_path="work-implant",
 )
 
+customer_connect_page = st.Page(
+    "pages/08_Customer_Connect.py",
+    title="Customer Connect",
+    icon="🔁",
+    url_path="customer-connect",
+)
+
 wms_page = st.Page(
     "pages/01_WMS.py",
     title="Scanner & WMS",
@@ -83,7 +90,9 @@ else:
         "OPERATIVITÀ": [operations_page, scarico_sala_ai_page],
     }
     if role in {"Admin", "Amministrazione"}:
-        pages["AMMINISTRAZIONE"] = [interventions_page, work_implant_page]
+        pages["AMMINISTRAZIONE"] = [interventions_page, work_implant_page, customer_connect_page]
+    elif role in {"Magazzino", "Agente"}:
+        pages["OPERATIVITÀ"].append(customer_connect_page)
     if role in {"Admin", "Magazzino"}:
         pages["LOGISTICA & MAGAZZINO"] = [ddt_mobile_page, wms_page, shelf_page, qr_page]
     nav = st.navigation(pages, position="sidebar", expanded=True)
