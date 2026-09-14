@@ -37,6 +37,13 @@ interventions_page = st.Page(
     url_path="gestione-interventi",
 )
 
+work_implant_page = st.Page(
+    "pages/07_Work_Implant.py",
+    title="Work Implant",
+    icon="📄",
+    url_path="work-implant",
+)
+
 wms_page = st.Page(
     "pages/01_WMS.py",
     title="Scanner & WMS",
@@ -76,7 +83,7 @@ else:
         "OPERATIVITÀ": [operations_page, scarico_sala_ai_page],
     }
     if role in {"Admin", "Amministrazione"}:
-        pages["AMMINISTRAZIONE"] = [interventions_page]
+        pages["AMMINISTRAZIONE"] = [interventions_page, work_implant_page]
     if role in {"Admin", "Magazzino"}:
         pages["LOGISTICA & MAGAZZINO"] = [ddt_mobile_page, wms_page, shelf_page, qr_page]
     nav = st.navigation(pages, position="sidebar", expanded=True)
