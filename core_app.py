@@ -9,6 +9,7 @@ from streamlit.delta_generator import DeltaGenerator
 
 SCARICO_AI_PAGE = "pages/05_Scarico_Sala_AI.py"
 WORK_IMPLANT_PAGE = "pages/07_Work_Implant.py"
+CUSTOMER_CONNECT_PAGE = "pages/08_Customer_Connect.py"
 
 # Handles legacy Dashboard quick-actions, which store the destination in
 # session_state and rerun before the legacy menu is rendered.
@@ -20,6 +21,10 @@ if quick_menu == "Scarico sala":
 if quick_menu == "Work Implant":
     st.session_state.pop("quick_menu", None)
     st.switch_page(WORK_IMPLANT_PAGE)
+    st.stop()
+if quick_menu == "Customer Connect":
+    st.session_state.pop("quick_menu", None)
+    st.switch_page(CUSTOMER_CONNECT_PAGE)
     st.stop()
 
 _original_radio = DeltaGenerator.radio
@@ -33,6 +38,9 @@ def _route_legacy_menu(value):
     if selected == "Work Implant":
         st.switch_page(WORK_IMPLANT_PAGE)
         st.stop()
+    if selected == "Customer Connect":
+        st.switch_page(CUSTOMER_CONNECT_PAGE)
+        st.stop()
 
 
 def _orthoflow_radio(self, label, *args, **kwargs):
@@ -42,11 +50,8 @@ def _orthoflow_radio(self, label, *args, **kwargs):
     return value
 
 
-# Patch the DeltaGenerator method used by st.sidebar.radio.
 DeltaGenerator.radio = _orthoflow_radio
 
-# Some Streamlit releases resolve radio through RadioMixin directly; patch it
-# too so the redirect behaves consistently after deploys/upgrades.
 _radio_mixin = None
 _original_mixin_radio = None
 try:
