@@ -8,3 +8,4 @@ qrcode[pil]>=7.4
 streamlit-qrcode-scanner==0.1.2
 openai>=1.99.0
 python-dotenv>=1.0
+pypdf>=5.0.0
