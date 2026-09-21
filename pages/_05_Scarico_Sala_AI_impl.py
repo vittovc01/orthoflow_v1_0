@@ -286,12 +286,18 @@ missing_prices = st.session_state.get("scarico_missing_prices", []) or []
 if missing_prices:
     st.warning("Alcuni codici non hanno un prezzo nell'offerta collegata. Inserisci il prezzo manuale prima di confermare lo scarico.")
     with st.expander("💶 Prezzi mancanti da inserire", expanded=True):
+        # One price input per unique code. The same REF can appear on multiple lots/rows.
+        seen_price_codes = set()
         for item in missing_prices:
             code = clean(item.get("codice"))
+            code_key = ncode(code)
+            if not code_key or code_key in seen_price_codes:
+                continue
+            seen_price_codes.add(code_key)
             cols = st.columns([2, 4, 2])
             cols[0].markdown(f"**{code}**")
             cols[1].caption(clean(item.get("descrizione")) or "Descrizione non disponibile")
-            cols[2].number_input("Prezzo €", min_value=0.0, step=0.01, format="%.2f", key=f"manual_price_{ncode(code)}", label_visibility="collapsed")
+            cols[2].number_input("Prezzo €", min_value=0.0, step=0.01, format="%.2f", key=f"manual_price_{code_key}", label_visibility="collapsed")
 
 stock_errors = st.session_state.get("scarico_stock_errors", []) or []
 if stock_errors:
