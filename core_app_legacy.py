@@ -1262,4 +1262,38 @@ elif menu=='Audit Log':
         st.dataframe(view,use_container_width=True,height=520)
         st.download_button('⬇️ Esporta Audit Excel',excel_bytes({'audit_log':view}),file_name='audit_log.xlsx',use_container_width=True)
 
-elif menu=='Anomalie': st.title('⚠️ Anomalie'); st.dataframe(df('anomalie','id',True),use_container_width=True)
+elif menu=='Anomalie':
+    st.title('⚠️ Anomalie')
+    anomalie = df('anomalie','id',True)
+    if anomalie.empty:
+        st.success('Nessuna anomalia presente')
+    else:
+        work = anomalie.copy()
+        if 'risolta' not in work.columns:
+            work['risolta'] = work.get('stato', pd.Series(index=work.index, dtype=str)).astype(str).str.casefold().eq('risolta')
+        else:
+            work['risolta'] = work['risolta'].fillna(False).astype(bool)
+        edited = st.data_editor(
+            work,
+            use_container_width=True,
+            hide_index=True,
+            disabled=[col for col in work.columns if col != 'risolta'],
+            column_config={'risolta': st.column_config.CheckboxColumn('Risolta', help='Spunta per chiudere o riaprire l’anomalia')},
+            key='anomalie_editor'
+        )
+        if st.button('💾 Salva anomalie', type='primary', use_container_width=True):
+            changed = 0
+            for idx, row in edited.iterrows():
+                before = bool(work.loc[idx, 'risolta'])
+                after = bool(row.get('risolta', False))
+                if before != after:
+                    payload = {'risolta': after, 'stato': 'Risolta' if after else 'Aperta'}
+                    sb().table('anomalie').update(payload).eq('id', int(row['id'])).execute()
+                    audit_log('ANOMALIA_RISOLTA' if after else 'ANOMALIA_RIAPERTA', 'anomalie', row['id'], row.get('descrizione',''))
+                    changed += 1
+            st.cache_data.clear()
+            if changed:
+                st.success(f'{changed} anomalie aggiornate.')
+            else:
+                st.info('Nessuna modifica da salvare.')
+            st.rerun()
