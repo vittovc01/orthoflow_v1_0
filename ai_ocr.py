@@ -79,7 +79,9 @@ def analyze_document(path: str, mode: str="scarico_sala") -> Dict[str,Any]:
     else:
         content=[{"type":"input_text","text":"Analizza il documento. Restituisci esclusivamente i dati conformi allo schema strutturato."},{"type":"input_image","image_url":image_to_data_url(path),"detail":"high"}]
     response=client.responses.create(model=status["model"],store=False,input=[{"role":"system","content":_instructions(mode)},{"role":"user","content":content}],text={"format":_responses_json_schema_format(schema)})
-    return _parse_response(response)
+    result=_parse_response(response)
+    if mode=='ddt': result=_ddt_text_fallback(path,result)
+    return result
 
 def analyze_image(path: str, mode: str="scarico_sala") -> Dict[str,Any]:
     return analyze_document(path,mode)
@@ -111,6 +113,34 @@ def _normalize_expiry(value):
             return datetime.date(y,mo,d).isoformat()
         except ValueError: return ""
     return ""
+
+def _ddt_text_fallback(path, result):
+    """Deterministic fallback for text-based J&J PDFs: enrich expiry/back-order fields when AI misses them."""
+    p=Path(path)
+    if p.suffix.lower() != ".pdf": return result
+    try:
+        import pypdf
+        text="\n".join((pg.extract_text() or "") for pg in pypdf.PdfReader(str(p)).pages)
+    except Exception:
+        return result
+    # Enrich expiries by matching REF, lot and printed expiry in the same product block.
+    for it in result.get("items",[]) or []:
+        code=re.escape(str(it.get("code") or "").strip()); lot=re.escape(str(it.get("lot") or "").strip())
+        if not code or not lot or it.get("expiry"): continue
+        m=re.search(code+r"[\\s\\S]{0,500}?Numero\\s*lotto:\\s*"+lot+r"[\\s\\S]{0,120}?Data\\s*scadenza:\\s*(\\d{1,2}/\\d{1,2}/(?:\\d{2}|\\d{4}))",text,re.I)
+        if m: it["expiry"]=m.group(1)
+    # Parse explicit 'Prodotto non spedito' section when structured AI omitted it.
+    if not result.get("back_orders"):
+        m=re.search(r"Prodotto\\s+non\\s+spedito([\\s\\S]*?)(?:Peso:|CESSIONARIO|$)",text,re.I)
+        if m:
+            bos=[]
+            for ln in m.group(1).splitlines():
+                mm=re.match(r"\\s*([0-9A-Z][0-9A-Z.]+S?)\\s+(.+?)\\s+(\\d+(?:[.,]\\d+)?)\\s+(\\d+(?:[.,]\\d+)?)\\s*$",ln.strip(),re.I)
+                if mm:
+                    qty=float(mm.group(4).replace(",","."))
+                    bos.append({"code":mm.group(1),"description":mm.group(2),"lot":None,"expiry":None,"quantity":qty,"manufacturer":"Johnson & Johnson / DePuy Synthes","is_jnj_depuy_synthes":True,"is_sterile":mm.group(1).upper().endswith("S"),"source_text":ln.strip(),"confidence":0.99,"warning":None})
+            result["back_orders"]=bos
+    return result
 
 def normalize_ai_items(result):
     out=[]
