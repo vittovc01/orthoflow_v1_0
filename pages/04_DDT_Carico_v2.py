@@ -246,8 +246,9 @@ with photo_tab:
                     'cliente': clean(meta.get('customer') or meta.get('destination')),
                 }
                 st.session_state['ddt_ai_rows'] = normalize_ai_items(meta)
+                st.session_state['ddt_ai_back_orders'] = normalize_ai_items({'items': meta.get('back_orders', [])})
                 st.session_state['ddt_source'] = 'Foto DDT AI'
-                st.success(f"Analisi completata: {len(st.session_state['ddt_ai_rows'])} righe spedite rilevate.")
+                st.success(f"Analisi completata: {len(st.session_state['ddt_ai_rows'])} righe spedite · {len(st.session_state['ddt_ai_back_orders'])} back order rilevati.")
             except Exception as e:
                 st.error(f'Errore OCR AI DDT: {e}')
     adf = pd.DataFrame(st.session_state.get('ddt_ai_rows', []))
@@ -256,6 +257,10 @@ with photo_tab:
         num_rows='dynamic', use_container_width=True, key='ddt_ai_editor_v4'
     )
     st.session_state['ddt_ai_rows'] = aed.to_dict('records')
+    bo_preview = pd.DataFrame(st.session_state.get('ddt_ai_back_orders', []))
+    if not bo_preview.empty:
+        st.warning(f'📌 Back order / prodotto non spedito rilevati: {len(bo_preview)}')
+        st.dataframe(bo_preview[['codice','descrizione','quantita']], use_container_width=True, hide_index=True)
 
 st.divider()
 st.subheader('✅ Conferma DDT')
@@ -290,10 +295,23 @@ if st.button('🚚 Crea DDT e carica magazzino', type='primary', use_container_w
                 'cliente': clean(cliente),
                 'codice_magazzino_destinazione': mag,
             }, rows)
+            # Registra i nuovi back order e riconcilia automaticamente quelli già aperti con gli articoli arrivati.
+            for bo in st.session_state.get('ddt_ai_back_orders', []) or []:
+                bc=clean(bo.get('codice')).upper()
+                try: bq=float(bo.get('quantita') or 0)
+                except Exception: bq=0
+                if bc and bq>0:
+                    sb().table('back_order').insert({'codice':bc,'descrizione':clean(bo.get('descrizione')),'quantita':bq,'quantita_ricevuta':0,'quantita_residua':bq,'numero_ddt_origine':clean(num),'data_ddt_origine':ddt_date.isoformat(),'cliente':clean(cliente),'stato':'APERTO'}).execute()
+            for rr in rows:
+                rc=clean(rr.get('codice')).upper()
+                try: rq=float(rr.get('quantita') or 0)
+                except Exception: rq=0
+                if rc and rq>0: sb().rpc('riconcilia_back_order',{'p_codice':rc,'p_quantita':rq,'p_numero_ddt':clean(num)}).execute()
             st.success(f"DDT {num} creato in modo atomico. Righe: {int(result.get('righe', 0))}. ID: {result.get('ddt_id', '')}.")
             st.session_state['ddt_mobile_rows'] = []
             st.session_state['ddt_ai_rows'] = []
             st.session_state['ddt_ai_header'] = {}
+            st.session_state['ddt_ai_back_orders'] = []
             st.cache_data.clear()
         except Exception as e:
             msg = str(e)
@@ -309,3 +327,19 @@ with history_tab:
         st.error(f'Errore storico DDT: {e}')
         hist = pd.DataFrame()
     st.dataframe(hist, use_container_width=True, hide_index=True)
+
+st.divider()
+st.subheader('📌 Back order')
+try:
+    bo_all=pd.DataFrame(sb().table('back_order').select('*').order('updated_at',desc=True).limit(1000).execute().data or [])
+except Exception as e:
+    st.error(f'Errore lettura back order: {e}'); bo_all=pd.DataFrame()
+if bo_all.empty:
+    st.info('Nessun back order registrato.')
+else:
+    aperti=bo_all[bo_all['stato'].isin(['APERTO','PARZIALE'])] if 'stato' in bo_all.columns else bo_all
+    st.metric('Back order aperti',len(aperti))
+    st.dataframe(aperti[['codice','descrizione','quantita','quantita_ricevuta','quantita_residua','numero_ddt_origine','data_ddt_origine','stato']],use_container_width=True,hide_index=True)
+    with st.expander('Storico back order evasi'):
+        evasi=bo_all[bo_all['stato']=='EVASO'] if 'stato' in bo_all.columns else pd.DataFrame()
+        st.dataframe(evasi,use_container_width=True,hide_index=True)
