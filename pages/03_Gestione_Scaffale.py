@@ -33,7 +33,10 @@ def shelves():
     try: return pd.DataFrame(sb().table('v_wms_scaffali').select('*').execute().data or [])
     except Exception as e: st.error(f'Errore scaffali: {e}'); return pd.DataFrame()
 
-def shelf_label(r): return f"{r['codice_magazzino']} · Corsia {r['corsia']} · Scaffale {r['scaffale']}"
+def shelf_label(r):
+    nome=str(r.get('nome_scaffale') or '').strip()
+    extra=f" · {nome}" if nome else ''
+    return f"{r['codice_magazzino']} · Corsia {r['corsia']} · Scaffale {r['scaffale']}{extra}"
 
 def locations_for(mag,corsia,scaffale):
     rows=(sb().table('ubicazioni_magazzino').select('*').eq('codice_magazzino',mag).eq('corsia',corsia).eq('scaffale',scaffale).eq('attiva',True).order('ripiano').order('posizione').execute().data or [])
@@ -87,8 +90,59 @@ st.title('📚 Gestione Scaffale')
 st.caption('Seleziona lo scaffale, scansiona il prodotto Johnson e indica solo ripiano/postazione. Il QR dello scaffale resta unico.')
 
 data=shelves()
+
+with st.expander('⚙️ Gestisci scaffali', expanded=data.empty):
+    st.caption('Crea nuovi scaffali, assegna un nome leggibile, aggiungi ripiani/postazioni o modifica quelli esistenti.')
+    mags=pd.DataFrame(sb().table('magazzini').select('*').eq('stato_record','Attivo').execute().data or [])
+    mag_opts=mags['codice_magazzino'].astype(str).tolist() if not mags.empty else ['MAG1']
+    tab_new,tab_edit=st.tabs(['➕ Nuovo scaffale / ubicazione','✏️ Modifica scaffale'])
+    with tab_new:
+        with st.form('new_shelf_location'):
+            nm=st.selectbox('Magazzino',mag_opts)
+            nc=st.text_input('Corsia',value='A')
+            ns=st.text_input('Codice scaffale',placeholder='Es. 02')
+            nn=st.text_input('Nome scaffale',placeholder='Es. Trauma Tibia')
+            nr=st.text_input('Ripiano',value='A')
+            np=st.text_input('Postazione',value='01')
+            create=st.form_submit_button('Crea / aggiungi ubicazione',use_container_width=True)
+        if create:
+            vals=[clean(x) for x in [nm,nc,ns,nr,np]]
+            if not all(vals): st.error('Magazzino, corsia, scaffale, ripiano e postazione sono obbligatori.')
+            else:
+                cm,cc,cs,cr,cp=vals; cu=f'{cm}-{cc}-{cs}-{cr}-{cp}'
+                exists=sb().table('ubicazioni_magazzino').select('id').eq('codice_ubicazione',cu).limit(1).execute().data or []
+                if exists: st.error('Questa ubicazione esiste già.')
+                else:
+                    magrow=mags[mags['codice_magazzino'].astype(str)==str(nm)]
+                    mid=int(magrow.iloc[0]['id']) if not magrow.empty else None
+                    sb().table('ubicazioni_magazzino').insert({'magazzino_id':mid,'codice_magazzino':cm,'codice_ubicazione':cu,'corsia':cc,'scaffale':cs,'nome_scaffale':str(nn).strip() or f'Scaffale {cs}','ripiano':cr,'posizione':cp,'descrizione':'','attiva':True}).execute()
+                    audit('CREA_UBICAZIONE_SCAFFALE',cu)
+                    st.success(f'Creata ubicazione {cu}.'); st.rerun()
+    with tab_edit:
+        if data.empty: st.info('Non ci sono ancora scaffali da modificare.')
+        else:
+            ei=st.selectbox('Scaffale',range(len(data)),format_func=lambda i:shelf_label(data.iloc[i]),key='edit_shelf')
+            er=data.iloc[ei]; em,ec,es=clean(er['codice_magazzino']),clean(er['corsia']),clean(er['scaffale'])
+            eloc=locations_for(em,ec,es)
+            with st.form('edit_shelf_form'):
+                new_name=st.text_input('Nome scaffale',value=str(er.get('nome_scaffale') or f'Scaffale {es}'))
+                add_r=st.text_input('Nuovo ripiano (opzionale)',placeholder='Es. B')
+                add_p=st.text_input('Nuova postazione (opzionale)',placeholder='Es. 01')
+                save_master=st.form_submit_button('Salva modifiche / aggiungi postazione',use_container_width=True)
+            if save_master:
+                sb().table('ubicazioni_magazzino').update({'nome_scaffale':new_name.strip() or f'Scaffale {es}'}).eq('codice_magazzino',em).eq('corsia',ec).eq('scaffale',es).execute()
+                if clean(add_r) and clean(add_p):
+                    cr,cp=clean(add_r),clean(add_p); cu=f'{em}-{ec}-{es}-{cr}-{cp}'
+                    exists=sb().table('ubicazioni_magazzino').select('id').eq('codice_ubicazione',cu).limit(1).execute().data or []
+                    if not exists:
+                        mid=int(eloc.iloc[0]['magazzino_id']) if not eloc.empty and pd.notna(eloc.iloc[0].get('magazzino_id')) else None
+                        sb().table('ubicazioni_magazzino').insert({'magazzino_id':mid,'codice_magazzino':em,'codice_ubicazione':cu,'corsia':ec,'scaffale':es,'nome_scaffale':new_name.strip() or f'Scaffale {es}','ripiano':cr,'posizione':cp,'descrizione':'','attiva':True}).execute()
+                audit('MODIFICA_SCAFFALE',f'{em}/{ec}/{es}; nome={new_name}')
+                st.success('Scaffale aggiornato.'); st.rerun()
+
+data=shelves()
 if data.empty:
-    st.info('Prima crea almeno uno scaffale/ubicazione nel WMS.'); st.stop()
+    st.info('Crea il primo scaffale dalla sezione Gestisci scaffali qui sopra.'); st.stop()
 
 idx=st.selectbox('Scaffale da gestire',range(len(data)),format_func=lambda i:shelf_label(data.iloc[i]))
 r=data.iloc[idx]
