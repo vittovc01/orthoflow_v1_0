@@ -75,6 +75,9 @@ ddt_mobile_page = st.Page(
     icon="🚚",
     url_path="ddt-carico-mobile",
 )
+courier_page = st.Page("pages/09_Corrieri.py", title="Corrieri", icon="🚐", url_path="corrieri")
+documents_page = st.Page("pages/10_Documenti_Logistica.py", title="Documenti Logistica", icon="📑", url_path="documenti-logistica")
+
 operations_page = st.Page(
     "core_app.py",
     title="Gestionale",
@@ -94,7 +97,7 @@ else:
     elif role in {"Magazzino", "Agente"}:
         pages["OPERATIVITÀ"].append(customer_connect_page)
     if role in {"Admin", "Magazzino"}:
-        pages["LOGISTICA & MAGAZZINO"] = [ddt_mobile_page, wms_page, shelf_page, qr_page]
+        pages["LOGISTICA & MAGAZZINO"] = [ddt_mobile_page, wms_page, shelf_page, qr_page, courier_page, documents_page]
     nav = st.navigation(pages, position="sidebar", expanded=True)
 
 nav.run()
