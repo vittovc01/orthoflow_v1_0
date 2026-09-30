@@ -8,6 +8,11 @@ from supabase import create_client
 
 st.set_page_config(page_title="Work Implant · OrthoFlow", page_icon="📄", layout="wide")
 
+perms=set(st.session_state.get("permessi",[]) or [])
+allowed=str(st.session_state.get("ruolo",""))=="Admin" or "DIREZIONE" in perms or "AMMINISTRAZIONE" in perms
+if not st.session_state.get("user") or not allowed:
+    st.error("Accesso non autorizzato."); st.stop()
+
 # OrthoFlow RBAC: blocca anche l'accesso diretto via URL.
 if not st.session_state.get("user"):
     st.error("Sessione non autenticata."); st.stop()
