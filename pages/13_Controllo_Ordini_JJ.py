@@ -251,3 +251,16 @@ if not clos.empty:
  cons=float(pd.to_numeric(sel["importo_totale_jj"],errors="coerce").fillna(0).sum())
 a1,a2,a3=st.columns(3); a1.metric("Previsione OrthoFlow",f"€ {prev:,.2f}"); a2.metric("Chiusura J&J caricata",f"€ {cons:,.2f}"); a3.metric("Differenza",f"€ {cons-prev:,.2f}")
 st.caption("La previsione deriva dall'operatività OrthoFlow; il file finale J&J è il consuntivo ufficiale. Le differenze dovranno essere analizzate per ordine/codice/lotto/quantità/prezzo, senza considerare automaticamente il dato J&J corretto.")
+
+st.divider()
+st.subheader("🔬 Controllo dettagliato file finale")
+st.caption("Dopo il caricamento, OrthoFlow conserva ogni riga del file finale J&J per il confronto con consumi, ordini, prezzi e reintegri.")
+if not clos.empty:
+ _mc=pd.to_datetime(clos["mese"],errors="coerce").dt.to_period("M")
+ _fc=clos[_mc==pd.Timestamp(_m0).to_period("M")]
+ if not _fc.empty:
+  _id=st.selectbox("Chiusura importata",_fc["id"].astype(int).tolist(),format_func=lambda x: str(_fc[_fc["id"]==x].iloc[0].get("divisione"))+" · "+str(_fc[_fc["id"]==x].iloc[0].get("nome_file")),key="detail_close")
+  _det=pd.DataFrame(sb().table("righe_chiusura_johnson").select("*").eq("chiusura_id",int(_id)).execute().data or [])
+  if not _det.empty:
+   st.dataframe(_det[[x for x in ["numero_ordine","riferimento_cliente","codice","lotto","quantita","prezzo_unitario","totale_riga"] if x in _det]],use_container_width=True,hide_index=True)
+   st.download_button("⬇️ Esporta dettaglio acquisito",_det.to_csv(index=False).encode("utf-8-sig"),"Dettaglio_chiusura_JJ.csv","text/csv")
