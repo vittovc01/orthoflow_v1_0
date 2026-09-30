@@ -79,6 +79,7 @@ def audit_login(row, action='LOGIN'):
 def complete_login(row):
     st.session_state.user = row.get('username', '')
     st.session_state.ruolo = row.get('ruolo', 'Agente')
+    st.session_state.permessi = row.get('permessi', []) or []
     st.session_state.agente_nome = row.get('agente_nome', '') or ''
     st.session_state.utente_id = row.get('id', '')
     try:
@@ -114,8 +115,12 @@ with st.form('orthoflow_login'):
 
 if submitted:
     row = load_user(username)
-    valid_db = bool(row and bool(row.get('attivo', True)) and password_verify(password, row.get('password_salt'), row.get('password_hash')))
-    if valid_db:
+    valid_password = bool(row and password_verify(password, row.get('password_salt'), row.get('password_hash')))
+    if valid_password and str(row.get('stato_accesso','APPROVATO')).upper() == 'IN_ATTESA':
+        st.warning('La richiesta di accesso è in attesa di approvazione del Direttore.')
+    elif valid_password and str(row.get('stato_accesso','APPROVATO')).upper() == 'RIFIUTATO':
+        st.error('La richiesta di accesso non è stata approvata.')
+    elif valid_password and bool(row.get('attivo', True)):
         audit_login(row)
         complete_login(row)
     elif legacy_admin_ok(username, password):
@@ -124,6 +129,34 @@ if submitted:
         complete_login(emergency)
     else:
         st.error('Credenziali errate o utente disattivato.')
+
+with st.expander('📝 Richiedi accesso'):
+    st.caption('Crea la tua richiesta. Potrai entrare solo dopo l’approvazione e l’assegnazione delle funzioni da parte del Direttore.')
+    with st.form('access_request'):
+        full_name = st.text_input('Nome e cognome')
+        new_username = st.text_input('Nome utente desiderato')
+        new_password = st.text_input('Password', type='password')
+        confirm_password = st.text_input('Conferma password', type='password')
+        request = st.form_submit_button('Invia richiesta', use_container_width=True)
+    if request:
+        if not full_name.strip() or not new_username.strip() or len(new_password) < 8:
+            st.error('Inserisci nome, username e una password di almeno 8 caratteri.')
+        elif new_password != confirm_password:
+            st.error('Le password non coincidono.')
+        elif load_user(new_username):
+            st.error('Nome utente già utilizzato.')
+        else:
+            salt = os.urandom(16).hex()
+            digest = hashlib.pbkdf2_hmac('sha256', new_password.encode('utf-8'), salt.encode('utf-8'), 210_000).hex()
+            try:
+                client().table('utenti_app').insert({
+                    'username': new_username.strip(), 'nome_completo': full_name.strip(),
+                    'password_salt': salt, 'password_hash': digest, 'ruolo': 'Da assegnare',
+                    'permessi': [], 'stato_accesso': 'IN_ATTESA', 'attivo': False
+                }).execute()
+                st.success('Richiesta inviata. Il Direttore dovrà approvarla e assegnarti le funzioni.')
+            except Exception:
+                st.error('Non è stato possibile inviare la richiesta.')
 
 st.markdown('<div class="of-secure">🔒 Accesso protetto · OrthoFlow Control Tower</div>', unsafe_allow_html=True)
 st.markdown('<div class="of-footer">OrthoFlow 7.2 Enterprise</div>', unsafe_allow_html=True)
