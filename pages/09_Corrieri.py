@@ -10,6 +10,7 @@ _ofd=str(st.session_state.get("ruolo",""))=="Admin" or "DIREZIONE" in _ofp
 if not _ofd and not (_ofp & set(["LOGISTICA","CORRIERE"])):
     st.error("Non sei autorizzato ad accedere a questa area."); st.stop()
 if not st.session_state.get("user"): st.switch_page("pages/99_Login.py")
+@st.cache_resource
 def sb():
     url=st.secrets.get("SUPABASE_URL")
     key=st.secrets.get("SUPABASE_SERVICE_KEY") or st.secrets.get("SUPABASE_ANON_KEY") or st.secrets.get("SUPABASE_KEY")
