@@ -4,7 +4,12 @@ from datetime import date
 from supabase import create_client
 st.set_page_config(page_title="Corrieri · OrthoFlow",page_icon="🚐",layout="wide")
 if not st.session_state.get("user"): st.switch_page("pages/99_Login.py")
-def sb(): return create_client(st.secrets["SUPABASE_URL"],st.secrets["SUPABASE_KEY"])
+def sb():
+    url=st.secrets.get("SUPABASE_URL")
+    key=st.secrets.get("SUPABASE_SERVICE_KEY") or st.secrets.get("SUPABASE_ANON_KEY") or st.secrets.get("SUPABASE_KEY")
+    if not url or not key:
+        st.error("Supabase non configurato nei Secrets."); st.stop()
+    return create_client(str(url).rstrip("/"),str(key))
 st.title("🚐 Corrieri & Missioni")
 st.caption("Consegne, ritiri, timbrature GPS, foto e certificazioni.")
 if str(st.session_state.get("ruolo","")) not in {"Admin","Magazzino"}: st.error("Accesso non autorizzato."); st.stop()
