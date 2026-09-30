@@ -79,6 +79,7 @@ ddt_mobile_page = st.Page(
 )
 courier_page = st.Page("pages/09_Corrieri.py", title="Corrieri", icon="🚐", url_path="corrieri")
 documents_page = st.Page("pages/10_Documenti_Logistica.py", title="Documenti Logistica", icon="📑", url_path="documenti-logistica")
+jj_orders_page = st.Page("pages/13_Controllo_Ordini_JJ.py", title="Controllo Ordini J&J", icon="🔎", url_path="controllo-ordini-jj")
 
 users_page = st.Page("pages/11_Gestione_Utenti.py", title="Utenti & Permessi", icon="👥", url_path="utenti-permessi")
 courier_data_page = st.Page("pages/12_Gestione_Dati_Corrieri.py", title="Gestione Dati Corrieri", icon="🗂️", url_path="gestione-dati-corrieri")
@@ -99,7 +100,7 @@ else:
     elif "AGENTE" in permissions:
         pages["OPERATIVITÀ"] = [scarico_sala_ai_page, customer_connect_page]
     if is_director or "AMMINISTRAZIONE" in permissions:
-        pages["AMMINISTRAZIONE"] = [interventions_page, work_implant_page, customer_connect_page]
+        pages["AMMINISTRAZIONE"] = [interventions_page, work_implant_page, customer_connect_page, jj_orders_page]
     if is_director or "LOGISTICA" in permissions:
         pages["LOGISTICA & MAGAZZINO"] = [ddt_mobile_page, wms_page, shelf_page, qr_page, courier_page, documents_page]
     elif "CORRIERE" in permissions:
