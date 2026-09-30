@@ -116,6 +116,22 @@ if role() in {'Admin','Magazzino'}:
         x1.metric('Scaduti',0); x2.metric('Urgenti ≤30 gg',0); x3.metric('Attenzione ≤90 gg',0)
         st.info('Le metriche logistiche compariranno quando inizierai a ubicare i prodotti sugli scaffali.')
 
+if _of_director:
+    st.markdown('<div class="ct-section">🤖 Consumi OCR AI</div>',unsafe_allow_html=True)
+    try:
+        usage=pd.DataFrame(sb().table('ocr_usage').select('*').order('created_at',desc=True).limit(1000).execute().data or [])
+        if usage.empty:
+            st.info('Il monitoraggio OCR parte dalle prossime scansioni.')
+        else:
+            _cost=pd.to_numeric(usage['costo_usd'],errors='coerce').fillna(0).sum()
+            _tok=pd.to_numeric(usage['total_tokens'],errors='coerce').fillna(0).sum()
+            o1,o2,o3=st.columns(3)
+            o1.metric('Scansioni registrate',len(usage)); o2.metric('Token AI',f"{int(_tok):,}".replace(',','.')); o3.metric('Costo stimato',f"$ {_cost:.4f}")
+            st.caption('Il monitor registra le nuove scansioni OCR. Il saldo effettivo resta quello della piattaforma OpenAI.')
+            st.dataframe(usage[['created_at','utente','modulo','modello','file_tipo','total_tokens','costo_usd']].head(50),use_container_width=True,hide_index=True)
+    except Exception:
+        st.caption('Monitor OCR in inizializzazione.')
+
 st.markdown('<div class="ct-section">Attività recente</div>',unsafe_allow_html=True)
 if role() in {'Admin','Magazzino'} and not movimenti.empty:
     cols=[c for c in ['data_movimento','tipo_movimento','codice_magazzino','codice','lotto','quantita','utente'] if c in movimenti.columns]
