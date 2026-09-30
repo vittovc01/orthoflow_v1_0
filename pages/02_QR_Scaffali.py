@@ -31,6 +31,7 @@ if not _of_director and not (_of_perms & _of_required):
     st.error("Non sei autorizzato ad accedere a questa area."); st.stop()
 
 
+@st.cache_resource
 def sb():
     url=st.secrets.get('SUPABASE_URL')
     key=st.secrets.get('SUPABASE_SERVICE_KEY') or st.secrets.get('SUPABASE_ANON_KEY') or st.secrets.get('SUPABASE_KEY')
