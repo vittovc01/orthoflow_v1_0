@@ -120,7 +120,19 @@ else:
     if st.button("🗑️ Elimina ID selezionato",disabled=not _confirm,key=f"del_{_tab}_{_rid}"):
         try:
             if _tab=="missioni_corrieri":
+                _assets=[]
+                for _asset_table in ("foto_missioni","documenti_missioni"):
+                    _ar=sb().table(_asset_table).select("*").eq("missione_id",int(_rid)).execute().data or []
+                    for _a in _ar:
+                        for _field in ("storage_path","firma_storage_path"):
+                            if _a.get(_field): _assets.append(_a[_field])
+                if _assets: sb().storage.from_("orthoflow-impianti").remove(list(dict.fromkeys(_assets)))
                 sb().rpc("elimina_missione_corriere_completa",{"p_missione_id":int(_rid)}).execute()
+            elif _tab in ("foto_missioni","documenti_missioni"):
+                _assets=[_rec.get("storage_path"),_rec.get("firma_storage_path")]
+                _assets=[x for x in _assets if x and not pd.isna(x)]
+                if _assets: sb().storage.from_("orthoflow-impianti").remove(_assets)
+                sb().table(_tab).delete().eq("id",int(_rid)).execute()
             elif _tab=="kit_logistici":
                 sb().table("movimenti_kit_corrieri").delete().eq("kit_id",int(_rid)).execute(); sb().table(_tab).delete().eq("id",int(_rid)).execute()
             else:
