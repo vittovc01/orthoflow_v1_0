@@ -162,27 +162,38 @@ else:
             path=f'missioni/{r.id}/foto/{ph.name}'; sb().storage.from_("orthoflow-impianti").upload(path,ph.getvalue(),{"content-type":ph.type,"upsert":"true"}); sb().table("foto_missioni").insert({"missione_id":int(r.id),"tipo":str(r.tipo),"storage_path":path}).execute()
         st.success("Foto archiviate.")
     certok=True
+    _pickup_signature_status=None
     if r["tipo"]=="RITIRO":
         st.subheader("📑 Certificazione lavaggio / decontaminazione")
-        st.caption("Per completare il ritiro è obbligatorio allegare il certificato e raccogliere la firma del referente sul telefono.")
-        cert=st.file_uploader("Allega certificazione",type=["pdf","jpg","jpeg","png"],key=f"cert{r.id}")
-        firm=st.text_input("Nome e cognome firmatario",key=f"firm{r.id}"); ruolo=st.text_input("Ruolo firmatario",key=f"role{r.id}")
-        st.markdown("**✍️ Firma del referente**")
-        sign=st_canvas(fill_color="rgba(255,255,255,0)",stroke_width=3,stroke_color="#000000",background_color="#FFFFFF",height=180,width=500,drawing_mode="freedraw",key=f"signature_{int(r.id)}")
-        _has_signature=bool(sign.json_data and sign.json_data.get("objects"))
-        if cert and firm.strip() and ruolo.strip() and _has_signature and st.button("🔐 Firma e archivia certificazione",type="primary",key=f"archive_cert_{r.id}"):
-            path=f'missioni/{r.id}/documenti/decontaminazione_{cert.name}'
-            sb().storage.from_("orthoflow-impianti").upload(path,cert.getvalue(),{"content-type":cert.type,"upsert":"true"})
-            _img=Image.fromarray(sign.image_data.astype("uint8"),"RGBA"); _buf=io.BytesIO(); _img.save(_buf,format="PNG")
-            _sigpath=f'missioni/{r.id}/documenti/firma_decontaminazione.png'
-            sb().storage.from_("orthoflow-impianti").upload(_sigpath,_buf.getvalue(),{"content-type":"image/png","upsert":"true"})
-            sb().table("documenti_missioni").insert({"missione_id":int(r.id),"tipo_documento":"CERTIFICAZIONE_LAVAGGIO_DECONTAMINAZIONE","storage_path":path,"firma_storage_path":_sigpath,"nome_firmatario":firm.strip(),"ruolo_firmatario":ruolo.strip(),"firmato_at":datetime.now(timezone.utc).isoformat()}).execute()
-            st.success("Certificazione firmata e archiviata."); st.rerun()
-        if cert and (not firm.strip() or not ruolo.strip() or not _has_signature):
-            st.info("Compila nominativo e ruolo e fai firmare il referente nel riquadro prima di archiviare.")
-        certok=bool(sb().table("documenti_missioni").select("id").eq("missione_id",int(r.id)).eq("tipo_documento","CERTIFICAZIONE_LAVAGGIO_DECONTAMINAZIONE").limit(1).execute().data)
+        st.caption("Il ritiro deve restare rapido: scegli se la struttura firma oppure se il materiale viene ritirato senza firma.")
+        _pickup_signature_status=st.radio("Esito firma struttura",["CON_FIRMA","SENZA_FIRMA"],format_func=lambda x:"✍️ Ritiro con firma" if x=="CON_FIRMA" else "⚠️ Ritiro senza firma",horizontal=True,key=f"sig_status_{r.id}")
+        if _pickup_signature_status=="CON_FIRMA":
+            cert=st.file_uploader("Allega certificazione",type=["pdf","jpg","jpeg","png"],key=f"cert{r.id}")
+            firm=st.text_input("Nome e cognome firmatario",key=f"firm{r.id}"); ruolo=st.text_input("Ruolo firmatario",key=f"role{r.id}")
+            st.markdown("**✍️ Firma del referente**")
+            sign=st_canvas(fill_color="rgba(255,255,255,0)",stroke_width=3,stroke_color="#000000",background_color="#FFFFFF",height=180,width=500,drawing_mode="freedraw",key=f"signature_{int(r.id)}")
+            _has_signature=bool(sign.json_data and sign.json_data.get("objects"))
+            if cert and firm.strip() and ruolo.strip() and _has_signature and st.button("🔐 Firma e archivia certificazione",type="primary",key=f"archive_cert_{r.id}"):
+                path=f'missioni/{r.id}/documenti/decontaminazione_{cert.name}'
+                sb().storage.from_("orthoflow-impianti").upload(path,cert.getvalue(),{"content-type":cert.type,"upsert":"true"})
+                _img=Image.fromarray(sign.image_data.astype("uint8"),"RGBA"); _buf=io.BytesIO(); _img.save(_buf,format="PNG")
+                _sigpath=f'missioni/{r.id}/documenti/firma_decontaminazione.png'
+                sb().storage.from_("orthoflow-impianti").upload(_sigpath,_buf.getvalue(),{"content-type":"image/png","upsert":"true"})
+                sb().table("documenti_missioni").insert({"missione_id":int(r.id),"tipo_documento":"CERTIFICAZIONE_LAVAGGIO_DECONTAMINAZIONE","storage_path":path,"firma_storage_path":_sigpath,"nome_firmatario":firm.strip(),"ruolo_firmatario":ruolo.strip(),"firmato_at":datetime.now(timezone.utc).isoformat()}).execute()
+                sb().table("missioni_corrieri").update({"esito_firma_ritiro":"CON_FIRMA","nota_firma_ritiro":None}).eq("id",int(r.id)).execute()
+                st.success("Certificazione firmata e archiviata."); st.rerun()
+            certok=bool(sb().table("documenti_missioni").select("id").eq("missione_id",int(r.id)).eq("tipo_documento","CERTIFICAZIONE_LAVAGGIO_DECONTAMINAZIONE").limit(1).execute().data)
+            if not certok: st.info("Per usare 'Ritiro con firma', archivia prima certificazione e firma.")
+        else:
+            _no_sig_note=st.text_input("Nota facoltativa",placeholder="Es. referente non disponibile / struttura non firma",key=f"nosig_note_{r.id}")
+            certok=True
+            st.warning("Il ritiro potrà essere completato e verrà registrato chiaramente come SENZA FIRMA.")
     if st.button("✅ Conferma operazione",type="primary",disabled=not certok):
-        sb().table("missioni_corrieri").update({"stato":"COMPLETATA"}).eq("id",int(r.id)).execute()
+        _mission_update={"stato":"COMPLETATA"}
+        if r["tipo"]=="RITIRO":
+            _mission_update["esito_firma_ritiro"]=_pickup_signature_status
+            _mission_update["nota_firma_ritiro"]=_no_sig_note.strip() if _pickup_signature_status=="SENZA_FIRMA" else None
+        sb().table("missioni_corrieri").update(_mission_update).eq("id",int(r.id)).execute()
         if str(r.get("kit_codice") or "").strip():
             _kk=sb().table("kit_logistici").select("*").eq("codice",str(r.kit_codice).strip()).limit(1).execute().data or []
             if _kk:
