@@ -11,6 +11,15 @@ except Exception:
 
 st.set_page_config(page_title='Gestione Scaffale · OrthoFlow', page_icon='📚', layout='wide')
 
+# OrthoFlow RBAC: blocca anche l'accesso diretto via URL.
+if not st.session_state.get("user"):
+    st.error("Sessione non autenticata."); st.stop()
+_of_perms=set(st.session_state.get("permessi",[]) or [])
+_of_director=str(st.session_state.get("ruolo",""))=="Admin" or "DIREZIONE" in _of_perms
+_of_required=set(["LOGISTICA"])
+if not _of_director and not (_of_perms & _of_required):
+    st.error("Non sei autorizzato ad accedere a questa area."); st.stop()
+
 
 def sb():
     url=st.secrets.get('SUPABASE_URL')
