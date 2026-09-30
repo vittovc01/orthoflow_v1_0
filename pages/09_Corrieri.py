@@ -3,6 +3,12 @@ import pandas as pd
 from datetime import date
 from supabase import create_client
 st.set_page_config(page_title="Corrieri · OrthoFlow",page_icon="🚐",layout="wide")
+
+if not st.session_state.get("user"): st.stop()
+_ofp=set(st.session_state.get("permessi",[]) or [])
+_ofd=str(st.session_state.get("ruolo",""))=="Admin" or "DIREZIONE" in _ofp
+if not _ofd and not (_ofp & set(["LOGISTICA","CORRIERE"])):
+    st.error("Non sei autorizzato ad accedere a questa area."); st.stop()
 if not st.session_state.get("user"): st.switch_page("pages/99_Login.py")
 def sb():
     url=st.secrets.get("SUPABASE_URL")
@@ -12,7 +18,6 @@ def sb():
     return create_client(str(url).rstrip("/"),str(key))
 st.title("🚐 Corrieri & Missioni")
 st.caption("Consegne, ritiri, timbrature GPS, foto e certificazioni.")
-if str(st.session_state.get("ruolo","")) not in {"Admin","Magazzino"}: st.error("Accesso non autorizzato."); st.stop()
 tab1,tab2,tab3=st.tabs(["📋 Missioni","➕ Nuova missione","⚙️ Anagrafiche"])
 with tab3:
     a,b=st.columns(2)
