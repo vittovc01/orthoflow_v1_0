@@ -1,6 +1,12 @@
 import runpy
 
 import streamlit as st
+
+# OrthoFlow permission gate
+_p=set(st.session_state.get("permessi",[]) or [])
+_ok=str(st.session_state.get("ruolo",""))=="Admin" or "DIREZIONE" in _p or bool(_p.intersection(["OPERATIVITA"]))
+if not st.session_state.get("user") or not _ok:
+    st.error("Accesso non autorizzato."); st.stop()
 from streamlit.delta_generator import DeltaGenerator
 
 # Compatibility wrapper for the legacy monolithic Gestionale.
