@@ -81,6 +81,7 @@ courier_page = st.Page("pages/09_Corrieri.py", title="Corrieri", icon="🚐", ur
 documents_page = st.Page("pages/10_Documenti_Logistica.py", title="Documenti Logistica", icon="📑", url_path="documenti-logistica")
 
 users_page = st.Page("pages/11_Gestione_Utenti.py", title="Utenti & Permessi", icon="👥", url_path="utenti-permessi")
+courier_data_page = st.Page("pages/12_Gestione_Dati_Corrieri.py", title="Gestione Dati Corrieri", icon="🗂️", url_path="gestione-dati-corrieri")
 
 operations_page = st.Page(
     "core_app.py",
@@ -104,7 +105,7 @@ else:
     elif "CORRIERE" in permissions:
         pages["CORRIERI"] = [courier_page]
     if is_director:
-        pages["DIREZIONE"] = [users_page]
+        pages["DIREZIONE"] = [users_page, courier_data_page]
     nav = st.navigation(pages, position="sidebar", expanded=True)
 
 nav.run()
