@@ -3,7 +3,12 @@ import pandas as pd
 from supabase import create_client
 st.set_page_config(page_title="Documenti Logistica · OrthoFlow",page_icon="📑",layout="wide")
 if not st.session_state.get("user"): st.switch_page("pages/99_Login.py")
-def sb(): return create_client(st.secrets["SUPABASE_URL"],st.secrets["SUPABASE_KEY"])
+def sb():
+    url=st.secrets.get("SUPABASE_URL")
+    key=st.secrets.get("SUPABASE_SERVICE_KEY") or st.secrets.get("SUPABASE_ANON_KEY") or st.secrets.get("SUPABASE_KEY")
+    if not url or not key:
+        st.error("Supabase non configurato nei Secrets."); st.stop()
+    return create_client(str(url).rstrip("/"),str(key))
 st.title("📑 Documenti Logistica")
 st.caption("Archivio certificazioni di lavaggio/decontaminazione e documenti collegati alle missioni.")
 d=pd.DataFrame(sb().table("documenti_missioni").select("*").order("created_at",desc=True).limit(500).execute().data or [])
