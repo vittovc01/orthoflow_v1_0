@@ -2,6 +2,7 @@ import io
 from datetime import date
 import pandas as pd
 import streamlit as st
+from streamlit_js_eval import get_geolocation
 from supabase import create_client
 
 st.set_page_config(page_title="Controllo Corrieri · OrthoFlow",page_icon="🚐",layout="wide")
@@ -39,6 +40,13 @@ if manager:
             cols=[x for x in ["created_at","tipo","corriere","struttura","latitudine","longitudine","precisione_m"] if x in t]
             st.dataframe(t[cols].head(100),use_container_width=True,hide_index=True)
             last=t.iloc[0]; st.success(f'Ultima timbratura: {last.get("corriere","")} · {last.get("struttura","")} · {last.get("created_at","")}')
+            _map=t.dropna(subset=["latitudine","longitudine"]).copy()
+            if not _map.empty:
+                _map["lat"]=pd.to_numeric(_map["latitudine"],errors="coerce"); _map["lon"]=pd.to_numeric(_map["longitudine"],errors="coerce")
+                _map=_map.dropna(subset=["lat","lon"])
+                if not _map.empty:
+                    st.caption("📍 Posizioni rilevate automaticamente alle timbrature")
+                    st.map(_map[["lat","lon"]].head(100),use_container_width=True)
     with tabs[1]:
         if mis.empty: st.info("Nessuna missione.")
         else: st.dataframe(mis[[x for x in ["codice","data_missione","tipo","corriere","struttura","kit_codice","colli","stato"] if x in mis]],use_container_width=True,hide_index=True)
@@ -118,17 +126,34 @@ else:
     st.dataframe(mis[[x for x in ["codice","data_missione","tipo","struttura","kit_codice","stato"] if x in mis]],use_container_width=True,hide_index=True)
     sel=st.selectbox("Apri missione",mis.index,format_func=lambda i:f'{mis.loc[i,"codice"]} · {mis.loc[i,"struttura"]}')
     r=mis.loc[sel]; st.subheader(f'{r["codice"]} · {r["tipo"]}'); st.write(f'**{r["struttura"]}** · Kit: {r.get("kit_codice") or "-"}')
-    lat=st.number_input("Latitudine GPS",format="%.6f"); lon=st.number_input("Longitudine GPS",format="%.6f")
-    if st.button("📍 Timbra arrivo"):
-        sb().table("timbrature_corrieri").insert({"missione_id":int(r.id),"corriere_id":cid,"struttura_id":int(r.struttura_id),"tipo":"ARRIVO","latitudine":lat or None,"longitudine":lon or None}).execute()
-        sb().table("missioni_corrieri").update({"stato":"ARRIVATO"}).eq("id",int(r.id)).execute()
-        if str(r.get("kit_codice") or "").strip():
-            _kk=sb().table("kit_logistici").select("*").eq("codice",str(r.kit_codice).strip()).limit(1).execute().data or []
-            if _kk:
-                _old=str(_kk[0].get("stato") or "ASSEGNATO"); _ns="IN_USCITA" if r["tipo"]=="CONSEGNA" else "DA_RITIRARE"
-                sb().table("kit_logistici").update({"stato":_ns,"missione_id":int(r.id),"corriere_id":cid,"struttura_id":int(r.struttura_id)}).eq("id",int(_kk[0]["id"])).execute()
-                sb().table("movimenti_kit_corrieri").insert({"kit_id":int(_kk[0]["id"]),"missione_id":int(r.id),"corriere_id":cid,"struttura_id":int(r.struttura_id),"movimento":"TIMBRATURA_ARRIVO","stato_precedente":_old,"stato_nuovo":_ns,"utente":str(st.session_state.get("user",""))}).execute()
+    st.caption("La posizione viene rilevata automaticamente dal telefono e non può essere modificata manualmente.")
+    _geo_key=f"geo_request_{int(r.id)}"
+    if st.button("📍 Acquisisci posizione e timbra",type="primary",key=f"stamp_{int(r.id)}"):
+        st.session_state[_geo_key]=True
         st.rerun()
+    if st.session_state.get(_geo_key):
+        st.info("📡 Consenti l'accesso alla posizione quando il telefono lo richiede.")
+        _loc=get_geolocation(component_key=f"gps_{int(r.id)}")
+        if _loc and isinstance(_loc,dict) and _loc.get("error"):
+            _err=_loc.get("error") or {}
+            if int(_err.get("code",0) or 0)==1:
+                st.error("Posizione non autorizzata. Abilita la localizzazione per OrthoFlow nelle impostazioni del browser e riprova.")
+            else:
+                st.error("Non riesco ad acquisire la posizione GPS. Riprova in un punto con migliore ricezione.")
+            st.session_state[_geo_key]=False
+        elif _loc and isinstance(_loc,dict) and _loc.get("coords"):
+            _coords=_loc["coords"]; _lat=float(_coords["latitude"]); _lon=float(_coords["longitude"]); _acc=float(_coords.get("accuracy") or 0)
+            sb().table("timbrature_corrieri").insert({"missione_id":int(r.id),"corriere_id":cid,"struttura_id":int(r.struttura_id),"tipo":"ARRIVO","latitudine":_lat,"longitudine":_lon,"precisione_m":_acc or None}).execute()
+            sb().table("missioni_corrieri").update({"stato":"ARRIVATO"}).eq("id",int(r.id)).execute()
+            if str(r.get("kit_codice") or "").strip():
+                _kk=sb().table("kit_logistici").select("*").eq("codice",str(r.kit_codice).strip()).limit(1).execute().data or []
+                if _kk:
+                    _old=str(_kk[0].get("stato") or "ASSEGNATO"); _ns="IN_USCITA" if r["tipo"]=="CONSEGNA" else "DA_RITIRARE"
+                    sb().table("kit_logistici").update({"stato":_ns,"missione_id":int(r.id),"corriere_id":cid,"struttura_id":int(r.struttura_id)}).eq("id",int(_kk[0]["id"])).execute()
+                    sb().table("movimenti_kit_corrieri").insert({"kit_id":int(_kk[0]["id"]),"missione_id":int(r.id),"corriere_id":cid,"struttura_id":int(r.struttura_id),"movimento":"TIMBRATURA_ARRIVO","stato_precedente":_old,"stato_nuovo":_ns,"utente":str(st.session_state.get("user","")),"note":f"GPS automatico · precisione {_acc:.0f} m"}).execute()
+            st.session_state[_geo_key]=False
+            st.success(f"📍 Posizione acquisita · precisione circa {_acc:.0f} m")
+            st.rerun()
     photos=st.file_uploader("📷 Foto consegna/ritiro",type=["jpg","jpeg","png"],accept_multiple_files=True,key=f"ph{r.id}")
     if photos and st.button("Carica foto"):
         for ph in photos:
