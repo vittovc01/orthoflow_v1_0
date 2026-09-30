@@ -12,31 +12,94 @@ def sb():
 def get(t): return pd.DataFrame(sb().table(t).select("*").execute().data or [])
 st.title("🔎 Controllo Ordini J&J")
 st.caption("Riconcilia consumi/interventi OrthoFlow con ordini, fatture e chiusure J&J. Residui e anomalie restano aperti e passano al mese successivo.")
-up=st.file_uploader("⬆️ Importa file Johnson (Excel/CSV)",type=["xlsx","xls","csv"])
-if up and st.button("Importa dati Johnson",type="primary"):
+up=st.file_uploader("⬆️ Importa dataset J&J consolidato (CSV/Excel)",type=["xlsx","xls","csv"])
+if up and st.button("Importa / aggiorna J&J",type="primary"):
  try:
-  x=pd.read_csv(up) if up.name.lower().endswith(".csv") else pd.read_excel(up)
-  cols={str(z).strip().lower():z for z in x.columns}
-  def col(*names):
-   for n in names:
-    if n in cols:return cols[n]
-   return None
-  no=col("numero_ordine","ordine","order"); dt=col("data_ordine","data","order date"); cc=col("codice_cliente","cliente","customer"); ss=col("struttura","destinazione","ship to"); stt=col("stato_johnson","stato","status"); imp=col("importo","totale","amount"); nf=col("numero_fattura","fattura","invoice"); df=col("data_fattura","invoice date")
-  if no is None: st.error("Non trovo la colonna numero ordine/ordine.")
+  if up.name.lower().endswith(".csv"):
+   x=pd.read_csv(up,sep=None,engine="python",encoding="utf-8-sig")
   else:
-   for _,r in x.iterrows():
-    payload={"numero_ordine":str(r[no]).strip(),"fonte":up.name}
-    if dt is not None and pd.notna(r[dt]): payload["data_ordine"]=str(pd.to_datetime(r[dt]).date())
-    if cc is not None and pd.notna(r[cc]): payload["codice_cliente"]=str(r[cc]).strip()
-    if ss is not None and pd.notna(r[ss]): payload["struttura"]=str(r[ss]).strip()
-    if stt is not None and pd.notna(r[stt]): payload["stato_johnson"]=str(r[stt]).strip()
-    if imp is not None and pd.notna(r[imp]): payload["importo"]=float(r[imp])\n    if nf is not None and pd.notna(r[nf]): payload["numero_fattura"]=str(r[nf]).strip()\n    if df is not None and pd.notna(r[df]): payload["data_fattura"]=str(pd.to_datetime(r[df]).date())\n    payload["stato_riconciliazione"]="FATTURATO" if payload.get("numero_fattura") else "DA_FATTURARE"\n    _base=pd.to_datetime(payload.get("data_fattura") or payload.get("data_ordine") or pd.Timestamp.today())\n    payload["mese_competenza"]=str(_base.to_period("M").start_time.date())
-    old=sb().table("ordini_johnson").select("id").eq("numero_ordine",payload["numero_ordine"]).limit(1).execute().data or []
-    if old: sb().table("ordini_johnson").update(payload).eq("id",old[0]["id"]).execute()
-    else: sb().table("ordini_johnson").insert(payload).execute()
-   st.success(f"Importati/aggiornati {len(x)} record."); st.rerun()
+   x=pd.read_excel(up)
+  aliases={
+   "NumeroOrdine":["NumeroOrdine","numero_ordine","ordine","order"],
+   "DataOrdine":["DataOrdine","data_ordine","data","order date"],
+   "RiferimentoCliente":["RiferimentoCliente","riferimento_cliente","riferimento ordine di acquisto del cliente"],
+   "CodiceCliente":["CodiceCliente","codice_cliente","cliente","customer"],
+   "Struttura":["Struttura","struttura","destinazione","ship to"],
+   "CodiceProdotto":["CodiceProdotto","codice prodotto","codice","product code"],
+   "Lotto":["Lotto","lotto","lot"],
+   "Quantita":["Quantita","quantità","quantita","quantity"],
+   "PrezzoUnitario":["PrezzoUnitario","prezzo unitario","prezzo","unit price"],
+   "TotaleRiga":["TotaleRiga","totale riga","totale","line total"],
+   "StatoRiga":["StatoRiga","stato riga"],
+   "StatoOrdine":["StatoOrdine","stato ordine","stato_johnson","status"],
+   "NumeroFattura":["NumeroFattura","numero_fattura","fattura","invoice"],
+   "DataFattura":["DataFattura","data_fattura","invoice date"],
+   "NumeroDDT":["NumeroDDT","numero_ddt","ddt"]
+  }
+  norm={str(z).strip().lower():z for z in x.columns}
+  def pick(k):
+   for a in aliases[k]:
+    if a.lower() in norm:return norm[a.lower()]
+   return None
+  no=pick("NumeroOrdine"); cp=pick("CodiceProdotto")
+  if no is None: st.error("Manca NumeroOrdine.")
+  else:
+   imported_orders=set()
+   for ix,r in x.iterrows():
+    numero=str(r[no]).strip()
+    if not numero or numero.lower()=="nan": continue
+    payload={"numero_ordine":numero,"fonte":up.name,"fonte_aggiornata_at":pd.Timestamp.utcnow().isoformat()}
+    mapping={"DataOrdine":"data_ordine","RiferimentoCliente":"riferimento_cliente","CodiceCliente":"account_jj","Struttura":"struttura","StatoOrdine":"stato_johnson","NumeroFattura":"numero_fattura","DataFattura":"data_fattura"}
+    for k,dest in mapping.items():
+     z=pick(k)
+     if z is not None and pd.notna(r[z]) and str(r[z]).strip():
+      payload[dest]=str(pd.to_datetime(r[z]).date()) if k in ("DataOrdine","DataFattura") else str(r[z]).strip()
+    payload["codice_cliente"]=payload.get("account_jj")
+    payload["stato_riconciliazione"]="FATTURATO" if payload.get("numero_fattura") else "DA_FATTURARE"
+    base=pd.to_datetime(payload.get("data_fattura") or payload.get("data_ordine") or pd.Timestamp.today())
+    payload["mese_competenza"]=str(base.to_period("M").start_time.date())
+    old=sb().table("ordini_johnson").select("id").eq("numero_ordine",numero).limit(1).execute().data or []
+    if old:
+     oid=old[0]["id"]; sb().table("ordini_johnson").update(payload).eq("id",oid).execute()
+    else:
+     oid=sb().table("ordini_johnson").insert(payload).execute().data[0]["id"]
+    imported_orders.add(oid)
+    if cp is not None and pd.notna(r[cp]) and str(r[cp]).strip():
+     def val(k):
+      z=pick(k); return r[z] if z is not None and pd.notna(r[z]) else None
+     lotto=val("Lotto"); codice=str(r[cp]).strip()
+     line={"ordine_id":oid,"numero_riga_fonte":str(ix+1),"codice":codice,"lotto":None if lotto is None else str(lotto).strip(),
+           "quantita":pd.to_numeric(val("Quantita"),errors="coerce"),"prezzo":pd.to_numeric(val("PrezzoUnitario"),errors="coerce"),
+           "totale_riga":pd.to_numeric(val("TotaleRiga"),errors="coerce"),"stato_riga":val("StatoRiga"),
+           "fonte_dato":up.name,"fonte_aggiornata_at":pd.Timestamp.utcnow().isoformat()}
+     line={k:(None if pd.isna(v) else v) for k,v in line.items()}
+     ex=sb().table("righe_ordini_johnson").select("id").eq("ordine_id",oid).eq("numero_riga_fonte",str(ix+1)).limit(1).execute().data or []
+     if ex: sb().table("righe_ordini_johnson").update(line).eq("id",ex[0]["id"]).execute()
+     else: sb().table("righe_ordini_johnson").insert(line).execute()
+    nf=payload.get("numero_fattura")
+    if nf:
+     fp={"ordine_id":oid,"numero_fattura":nf,"data_fattura":payload.get("data_fattura"),"fonte":up.name}
+     fe=sb().table("fatture_johnson").select("id").eq("ordine_id",oid).eq("numero_fattura",nf).limit(1).execute().data or []
+     if fe: sb().table("fatture_johnson").update(fp).eq("id",fe[0]["id"]).execute()
+     else: sb().table("fatture_johnson").insert(fp).execute()
+    nd=val("NumeroDDT") if cp is not None else None
+    if nd is not None and str(nd).strip():
+     dp={"ordine_id":oid,"numero_ddt":str(nd).strip(),"fonte":up.name}
+     de=sb().table("ddt_johnson").select("id").eq("numero_ddt",str(nd).strip()).limit(1).execute().data or []
+     if de: sb().table("ddt_johnson").update(dp).eq("id",de[0]["id"]).execute()
+     else: sb().table("ddt_johnson").insert(dp).execute()
+   st.success(f"Import completato: {len(imported_orders)} ordini, {len(x)} righe sorgente."); st.rerun()
  except Exception as e: st.error(f"Import non riuscito: {e}")
-inter=get("interventi"); rig=get("righe_intervento"); ordj=get("ordini_johnson")\nif not ordj.empty:\n ordj["fase"]=ordj.apply(lambda x: "✅ CHIUSO" if pd.notna(x.get("chiuso_at")) else ("🧾 FATTURATO" if pd.notna(x.get("numero_fattura")) else "⏳ DA FATTURARE"),axis=1)\n st.subheader("📅 Ciclo mensile J&J")\n _o=ordj.copy(); _o["mese_competenza"]=pd.to_datetime(_o["mese_competenza"],errors="coerce")\n _open=_o[_o["chiuso_at"].isna()]\n m1,m2,m3=st.columns(3); m1.metric("Da fatturare",int((_open["fase"]=="⏳ DA FATTURARE").sum())); m2.metric("Fatturati da chiudere",int((_open["fase"]=="🧾 FATTURATO").sum())); m3.metric("Aperti / riporto",len(_open))\n _cols=[x for x in ["numero_ordine","data_ordine","numero_fattura","data_fattura","stato_johnson","importo","mese_competenza","riportato_da_mese","fase","note_anomalia"] if x in _open]\n st.dataframe(_open[_cols].sort_values("data_ordine",ascending=False),use_container_width=True,hide_index=True)\n st.caption("A fine mese si chiudono solo le posizioni completamente riconciliate. Residui, ordini non fatturati e anomalie di prezzo restano aperti per il mese successivo.")
+inter=get("interventi"); rig=get("righe_intervento"); ordj=get("ordini_johnson")
+if not ordj.empty:
+ ordj["fase"]=ordj.apply(lambda x: "✅ CHIUSO" if pd.notna(x.get("chiuso_at")) else ("🧾 FATTURATO" if pd.notna(x.get("numero_fattura")) else "⏳ DA FATTURARE"),axis=1)
+ st.subheader("📅 Ciclo mensile J&J")
+ _o=ordj.copy(); _o["mese_competenza"]=pd.to_datetime(_o["mese_competenza"],errors="coerce")
+ _open=_o[_o["chiuso_at"].isna()]
+ m1,m2,m3=st.columns(3); m1.metric("Da fatturare",int((_open["fase"]=="⏳ DA FATTURARE").sum())); m2.metric("Fatturati da chiudere",int((_open["fase"]=="🧾 FATTURATO").sum())); m3.metric("Aperti / riporto",len(_open))
+ _cols=[x for x in ["numero_ordine","data_ordine","numero_fattura","data_fattura","stato_johnson","importo","mese_competenza","riportato_da_mese","fase","note_anomalia"] if x in _open]
+ st.dataframe(_open[_cols].sort_values("data_ordine",ascending=False),use_container_width=True,hide_index=True)
+ st.caption("A fine mese si chiudono solo le posizioni completamente riconciliate. Residui, ordini non fatturati e anomalie di prezzo restano aperti per il mese successivo.")
 if inter.empty: st.info("Nessun intervento disponibile."); st.stop()
 if not rig.empty:
  totals=rig.groupby("intervento_id").agg(valore_teorico=("totale","sum"),righe=("id","count")).reset_index()
