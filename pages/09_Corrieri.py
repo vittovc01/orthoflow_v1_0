@@ -77,7 +77,39 @@ if manager:
             n=st.text_input("Nome"); tel=st.text_input("Telefono")
             if st.form_submit_button("Aggiungi") and n: sb().table("corrieri").insert({"nome":n,"telefono":tel}).execute(); st.rerun()
         st.dataframe(cour,use_container_width=True,hide_index=True)
-        st.subheader("Strutture"); st.dataframe(stru,use_container_width=True,hide_index=True)
+        st.divider()
+        st.subheader("🏥 Anagrafica strutture")
+        st.caption("Crea e consulta le strutture utilizzate per consegne e ritiri.")
+        with st.form("new_structure"):
+            _sc1,_sc2=st.columns(2)
+            _sn=_sc1.text_input("Nome struttura *")
+            _sa=_sc2.text_input("Indirizzo *")
+            _sr=_sc1.text_input("Referente")
+            _st=_sc2.text_input("Telefono")
+            _snote=st.text_area("Note consegna / accesso")
+            _sactive=st.checkbox("Struttura attiva",value=True)
+            if st.form_submit_button("➕ Crea struttura",type="primary"):
+                if not _sn.strip() or not _sa.strip():
+                    st.error("Nome struttura e indirizzo sono obbligatori.")
+                else:
+                    sb().table("strutture_logistiche").insert({"nome":_sn.strip(),"indirizzo":_sa.strip(),"referente":_sr.strip(),"telefono":_st.strip(),"note_consegna":_snote.strip(),"attiva":_sactive}).execute()
+                    st.success("Struttura creata."); st.rerun()
+        if stru.empty:
+            st.info("Nessuna struttura registrata.")
+        else:
+            st.dataframe(stru[[x for x in ["id","nome","indirizzo","referente","telefono","note_consegna","attiva"] if x in stru]],use_container_width=True,hide_index=True)
+            _si=st.selectbox("Modifica struttura",stru.index,format_func=lambda i:f'{stru.loc[i,"nome"]} · {stru.loc[i].get("indirizzo","")}',key="edit_structure_select")
+            _srw=stru.loc[_si]
+            with st.form("edit_structure"):
+                _en=st.text_input("Nome",value=str(_srw.get("nome") or ""))
+                _ea=st.text_input("Indirizzo",value=str(_srw.get("indirizzo") or ""))
+                _er=st.text_input("Referente",value=str(_srw.get("referente") or ""))
+                _et=st.text_input("Telefono",value=str(_srw.get("telefono") or ""))
+                _eno=st.text_area("Note consegna / accesso",value=str(_srw.get("note_consegna") or ""))
+                _eact=st.checkbox("Attiva",value=bool(_srw.get("attiva",True)))
+                if st.form_submit_button("💾 Salva struttura"):
+                    sb().table("strutture_logistiche").update({"nome":_en.strip(),"indirizzo":_ea.strip(),"referente":_er.strip(),"telefono":_et.strip(),"note_consegna":_eno.strip(),"attiva":_eact}).eq("id",int(_srw["id"])).execute()
+                    st.success("Struttura aggiornata."); st.rerun()
     with tabs[4]:
         st.subheader("📦 Registro movimentazione kit")
         kits=df("kit_logistici"); kmov=df("movimenti_kit_corrieri")
