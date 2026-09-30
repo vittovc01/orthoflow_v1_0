@@ -180,3 +180,29 @@ if not ordj.empty:
   aa=rr.groupby("mese").agg(anomalie=("esito",lambda x:(x!="OK").sum()),differenze_prezzo=("differenza_prezzo",lambda x:pd.to_numeric(x,errors="coerce").abs().sum())).reset_index()
   dash=dash.merge(aa,on="mese",how="left")
  st.dataframe(dash.sort_values("mese",ascending=False),use_container_width=True,hide_index=True)
+
+st.divider()
+st.subheader("📦 Controllo reintegri da DDT Carico Mobile")
+st.caption("Il DDT ricevuto in OrthoFlow è la fonte primaria del reintegro fisico. I DDT Customer Connect restano solo una fonte opzionale di controllo.")
+if st.button("🔄 Incrocia consumi → ordini J&J → DDT ricevuti"):
+ try:
+  n=sb().rpc("riconcilia_reintegri_jj",{}).execute().data
+  st.success(f"Controllo reintegri aggiornato: {n} righe."); st.rerun()
+ except Exception as e: st.error(str(e))
+rein=get("riconciliazioni_reintegro_jj")
+if not rein.empty:
+ ri2=get("righe_intervento"); ro2=get("righe_ordini_johnson"); dr2=get("ddt_righe"); dh2=get("ddt")
+ v=rein.merge(ri2[["id","intervento_id","codice","lotto"]].rename(columns={"id":"riga_intervento_id"}),on="riga_intervento_id",how="left")
+ if not ro2.empty: v=v.merge(ro2[["id","ordine_id"]].rename(columns={"id":"riga_ordine_id"}),on="riga_ordine_id",how="left")
+ if not dr2.empty:
+  v=v.merge(dr2[["id","ddt_id"]].rename(columns={"id":"ddt_riga_id"}),on="ddt_riga_id",how="left")
+  if not dh2.empty: v=v.merge(dh2[["id","numero_ddt","data_ddt"]].rename(columns={"id":"ddt_id"}),on="ddt_id",how="left")
+ oo2=get("ordini_johnson")
+ if not oo2.empty and "ordine_id" in v: v=v.merge(oo2[["id","numero_ordine","numero_fattura"]].rename(columns={"id":"ordine_id"}),on="ordine_id",how="left")
+ cc=[x for x in ["codice","lotto","quantita_consumata","quantita_ordinata","quantita_ricevuta","numero_ordine","numero_fattura","numero_ddt","data_ddt","esito"] if x in v]
+ st.dataframe(v[cc],use_container_width=True,hide_index=True)
+ m1,m2,m3,m4=st.columns(4)
+ m1.metric("Da ordinare",int((v.esito=="DA_ORDINARE").sum()))
+ m2.metric("Ordinati da ricevere",int((v.esito=="ORDINATO_DA_RICEVERE").sum()))
+ m3.metric("Parziali",int((v.esito=="REINTEGRO_PARZIALE").sum()))
+ m4.metric("Ricevuti",int((v.esito=="REINTEGRO_RICEVUTO").sum()))
