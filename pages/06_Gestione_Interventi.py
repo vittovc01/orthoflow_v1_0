@@ -8,6 +8,12 @@ from supabase import create_client
 
 st.set_page_config(page_title="Gestione Interventi · OrthoFlow", page_icon="🛠️", layout="wide")
 
+if not st.session_state.get("user"): st.stop()
+_ofp=set(st.session_state.get("permessi",[]) or [])
+_ofd=str(st.session_state.get("ruolo",""))=="Admin" or "DIREZIONE" in _ofp
+if not _ofd and not (_ofp & set(["AMMINISTRAZIONE"])):
+    st.error("Non sei autorizzato ad accedere a questa area."); st.stop()
+
 # OrthoFlow RBAC: blocca anche l'accesso diretto via URL.
 if not st.session_state.get("user"):
     st.error("Sessione non autenticata."); st.stop()
