@@ -63,6 +63,28 @@ def _parse_response(response):
         except Exception as exc: raise RuntimeError("La risposta OCR AI non contiene output utilizzabile.") from exc
     return json.loads(text)
 
+def _track_usage(response, mode, model, suffix):
+    try:
+        import streamlit as st
+        from supabase import create_client
+        usage=getattr(response,"usage",None)
+        inp=int(getattr(usage,"input_tokens",0) or 0)
+        out=int(getattr(usage,"output_tokens",0) or 0)
+        # Current configured OCR model is normally gpt-4.1-mini.
+        rates={"gpt-4.1-mini":(0.40,1.60)}
+        rin,rout=rates.get(str(model),(0.0,0.0))
+        cost=(inp*rin+out*rout)/1_000_000
+        url=st.secrets.get("SUPABASE_URL")
+        key=st.secrets.get("SUPABASE_SERVICE_KEY") or st.secrets.get("SUPABASE_ANON_KEY") or st.secrets.get("SUPABASE_KEY")
+        if url and key:
+            create_client(str(url).rstrip("/"),str(key)).table("ocr_usage").insert({
+                "utente":str(st.session_state.get("user","")),
+                "modulo":mode,"modello":str(model),"input_tokens":inp,"output_tokens":out,
+                "total_tokens":inp+out,"costo_usd":round(cost,6),"file_tipo":suffix,"esito":"OK"
+            }).execute()
+    except Exception:
+        pass
+
 def analyze_document(path: str, mode: str="scarico_sala") -> Dict[str,Any]:
     status=ai_status()
     if not status["enabled"]: raise RuntimeError("AI OCR non abilitato. Configura OPENAI_API_KEY e ENABLE_AI_OCR=true nei Secrets.")
@@ -80,6 +102,7 @@ def analyze_document(path: str, mode: str="scarico_sala") -> Dict[str,Any]:
         content=[{"type":"input_text","text":"Analizza il documento. Restituisci esclusivamente i dati conformi allo schema strutturato."},{"type":"input_image","image_url":image_to_data_url(path),"detail":"high"}]
     response=client.responses.create(model=status["model"],store=False,input=[{"role":"system","content":_instructions(mode)},{"role":"user","content":content}],text={"format":_responses_json_schema_format(schema)})
     result=_parse_response(response)
+    _track_usage(response,mode,status["model"],p.suffix.lower())
     if mode=='ddt': result=_ddt_text_fallback(path,result)
     return result
 
