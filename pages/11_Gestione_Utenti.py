@@ -43,8 +43,12 @@ if col1.button("✅ Approva / Salva",type="primary",use_container_width=True):
     if not selected: st.error("Assegna almeno una funzione.")
     else:
         ruolo="Admin" if "DIREZIONE" in selected else ("Amministrazione" if "AMMINISTRAZIONE" in selected else ("Magazzino" if "LOGISTICA" in selected else ("Agente" if "AGENTE" in selected else ("Corriere" if "CORRIERE" in selected else "Operatore"))))
-        sb().table("utenti_app").update({"permessi":selected,"ruolo":ruolo,"stato_accesso":"APPROVATO","attivo":True,"approvato_da":str(st.session_state.get("user","")),"approvato_at":datetime.now(timezone.utc).isoformat()}).eq("id",int(r["id"])).execute()
-        st.success("Utente approvato e permessi aggiornati."); st.rerun()
+        try:
+            sb().table("utenti_app").update({"permessi":selected,"ruolo":ruolo,"stato_accesso":"APPROVATO","attivo":True,"approvato_da":str(st.session_state.get("user","")),"approvato_at":datetime.now(timezone.utc).isoformat()}).eq("id",int(r["id"])).execute()
+            st.success("Utente approvato e permessi aggiornati."); st.rerun()
+        except Exception as exc:
+            st.error("Impossibile salvare i permessi. Controlla configurazione e vincoli dell'utente.")
+            st.caption(str(exc))
 if col2.button("⛔ Sospendi",use_container_width=True):
     if str(r["username"])==str(st.session_state.get("user")): st.error("Non puoi sospendere il tuo stesso account.")
     else:
