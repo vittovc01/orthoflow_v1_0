@@ -79,6 +79,19 @@ if manager:
         if not kmov.empty:
             st.caption("Storico movimenti")
             st.dataframe(kmov.sort_values("created_at",ascending=False).head(200),use_container_width=True,hide_index=True)
+        ritirati=kits[kits["stato"]=="RITIRATO"] if (not kits.empty and "stato" in kits) else pd.DataFrame()
+        st.divider()
+        st.subheader("🏭 Rientri da confermare in magazzino")
+        if ritirati.empty:
+            st.success("Nessun kit ritirato in attesa di riscontro fisico.")
+        else:
+            ri=st.selectbox("Kit fisicamente rientrato",ritirati.index,format_func=lambda i:f'{ritirati.loc[i,"codice"]} · {ritirati.loc[i].get("struttura","")}',key="warehouse_return")
+            rr=ritirati.loc[ri]
+            st.warning("Confermare solo dopo aver verificato fisicamente il kit/materiale in magazzino.")
+            if st.button("✅ Conferma rientro in magazzino",type="primary",key="confirm_warehouse_return"):
+                sb().table("kit_logistici").update({"stato":"IN_MAGAZZINO","struttura_id":None,"missione_id":None,"corriere_id":None}).eq("id",int(rr["id"])).execute()
+                sb().table("movimenti_kit_corrieri").insert({"kit_id":int(rr["id"]),"missione_id":int(rr["missione_id"]) if pd.notna(rr.get("missione_id")) else None,"corriere_id":int(rr["corriere_id"]) if pd.notna(rr.get("corriere_id")) else None,"struttura_id":int(rr["struttura_id"]) if pd.notna(rr.get("struttura_id")) else None,"movimento":"RIENTRO_MAGAZZINO","stato_precedente":"RITIRATO","stato_nuovo":"IN_MAGAZZINO","utente":str(st.session_state.get("user","")),"note":"Rientro fisico verificato e confermato dal personale autorizzato"}).execute()
+                st.success("Rientro fisico registrato."); st.rerun()
     with tabs[5]:
         mov=mis.copy()
         if not mov.empty:
