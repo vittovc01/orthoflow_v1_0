@@ -54,6 +54,7 @@ st.markdown(
 )
 
 
+@st.cache_resource
 def sb():
     url = st.secrets.get("SUPABASE_URL")
     key = (
