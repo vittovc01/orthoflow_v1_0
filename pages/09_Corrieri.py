@@ -1,8 +1,10 @@
 import io
-from datetime import date
+from PIL import Image
+from datetime import date, datetime, timezone
 import pandas as pd
 import streamlit as st
 from streamlit_js_eval import get_geolocation
+from streamlit_drawable_canvas import st_canvas
 from supabase import create_client
 
 st.set_page_config(page_title="Controllo Corrieri · OrthoFlow",page_icon="🚐",layout="wide")
@@ -161,10 +163,23 @@ else:
         st.success("Foto archiviate.")
     certok=True
     if r["tipo"]=="RITIRO":
-        cert=st.file_uploader("📑 Certificazione lavaggio/decontaminazione (obbligatoria)",type=["pdf","jpg","jpeg","png"],key=f"cert{r.id}")
-        firm=st.text_input("Nome firmatario"); ruolo=st.text_input("Ruolo firmatario")
-        if cert and st.button("Archivia certificazione"):
-            path=f'missioni/{r.id}/documenti/decontaminazione_{cert.name}'; sb().storage.from_("orthoflow-impianti").upload(path,cert.getvalue(),{"content-type":cert.type,"upsert":"true"}); sb().table("documenti_missioni").insert({"missione_id":int(r.id),"tipo_documento":"CERTIFICAZIONE_LAVAGGIO_DECONTAMINAZIONE","storage_path":path,"nome_firmatario":firm,"ruolo_firmatario":ruolo}).execute(); st.rerun()
+        st.subheader("📑 Certificazione lavaggio / decontaminazione")
+        st.caption("Per completare il ritiro è obbligatorio allegare il certificato e raccogliere la firma del referente sul telefono.")
+        cert=st.file_uploader("Allega certificazione",type=["pdf","jpg","jpeg","png"],key=f"cert{r.id}")
+        firm=st.text_input("Nome e cognome firmatario",key=f"firm{r.id}"); ruolo=st.text_input("Ruolo firmatario",key=f"role{r.id}")
+        st.markdown("**✍️ Firma del referente**")
+        sign=st_canvas(fill_color="rgba(255,255,255,0)",stroke_width=3,stroke_color="#000000",background_color="#FFFFFF",height=180,width=500,drawing_mode="freedraw",key=f"signature_{int(r.id)}")
+        _has_signature=bool(sign.json_data and sign.json_data.get("objects"))
+        if cert and firm.strip() and ruolo.strip() and _has_signature and st.button("🔐 Firma e archivia certificazione",type="primary",key=f"archive_cert_{r.id}"):
+            path=f'missioni/{r.id}/documenti/decontaminazione_{cert.name}'
+            sb().storage.from_("orthoflow-impianti").upload(path,cert.getvalue(),{"content-type":cert.type,"upsert":"true"})
+            _img=Image.fromarray(sign.image_data.astype("uint8"),"RGBA"); _buf=io.BytesIO(); _img.save(_buf,format="PNG")
+            _sigpath=f'missioni/{r.id}/documenti/firma_decontaminazione.png'
+            sb().storage.from_("orthoflow-impianti").upload(_sigpath,_buf.getvalue(),{"content-type":"image/png","upsert":"true"})
+            sb().table("documenti_missioni").insert({"missione_id":int(r.id),"tipo_documento":"CERTIFICAZIONE_LAVAGGIO_DECONTAMINAZIONE","storage_path":path,"firma_storage_path":_sigpath,"nome_firmatario":firm.strip(),"ruolo_firmatario":ruolo.strip(),"firmato_at":datetime.now(timezone.utc).isoformat()}).execute()
+            st.success("Certificazione firmata e archiviata."); st.rerun()
+        if cert and (not firm.strip() or not ruolo.strip() or not _has_signature):
+            st.info("Compila nominativo e ruolo e fai firmare il referente nel riquadro prima di archiviare.")
         certok=bool(sb().table("documenti_missioni").select("id").eq("missione_id",int(r.id)).eq("tipo_documento","CERTIFICAZIONE_LAVAGGIO_DECONTAMINAZIONE").limit(1).execute().data)
     if st.button("✅ Conferma operazione",type="primary",disabled=not certok):
         sb().table("missioni_corrieri").update({"stato":"COMPLETATA"}).eq("id",int(r.id)).execute()
