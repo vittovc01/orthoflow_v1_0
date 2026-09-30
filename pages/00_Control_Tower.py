@@ -5,6 +5,15 @@ from supabase import create_client
 
 st.set_page_config(page_title='OrthoFlow Control Tower', page_icon='🛰️', layout='wide')
 
+# OrthoFlow RBAC: blocca anche l'accesso diretto via URL.
+if not st.session_state.get("user"):
+    st.error("Sessione non autenticata."); st.stop()
+_of_perms=set(st.session_state.get("permessi",[]) or [])
+_of_director=str(st.session_state.get("ruolo",""))=="Admin" or "DIREZIONE" in _of_perms
+_of_required=set(["DIREZIONE"])
+if not _of_director and not (_of_perms & _of_required):
+    st.error("Non sei autorizzato ad accedere a questa area."); st.stop()
+
 st.markdown('''
 <style>
 .block-container{max-width:1500px;padding-top:1.1rem;padding-bottom:3rem}
