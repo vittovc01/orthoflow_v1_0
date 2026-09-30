@@ -11,7 +11,7 @@ def sb():
  return create_client(str(st.secrets.get("SUPABASE_URL")).rstrip("/"),str(st.secrets.get("SUPABASE_SERVICE_KEY") or st.secrets.get("SUPABASE_ANON_KEY") or st.secrets.get("SUPABASE_KEY")))
 def get(t): return pd.DataFrame(sb().table(t).select("*").execute().data or [])
 st.title("🔎 Controllo Ordini J&J")
-st.caption("Riconcilia consumi/interventi OrthoFlow con ordini e chiusure trasmesse da Johnson & Johnson.")
+st.caption("Riconcilia consumi/interventi OrthoFlow con ordini, fatture e chiusure J&J. Residui e anomalie restano aperti e passano al mese successivo.")
 up=st.file_uploader("⬆️ Importa file Johnson (Excel/CSV)",type=["xlsx","xls","csv"])
 if up and st.button("Importa dati Johnson",type="primary"):
  try:
@@ -21,7 +21,7 @@ if up and st.button("Importa dati Johnson",type="primary"):
    for n in names:
     if n in cols:return cols[n]
    return None
-  no=col("numero_ordine","ordine","order"); dt=col("data_ordine","data","order date"); cc=col("codice_cliente","cliente","customer"); ss=col("struttura","destinazione","ship to"); stt=col("stato_johnson","stato","status"); imp=col("importo","totale","amount")
+  no=col("numero_ordine","ordine","order"); dt=col("data_ordine","data","order date"); cc=col("codice_cliente","cliente","customer"); ss=col("struttura","destinazione","ship to"); stt=col("stato_johnson","stato","status"); imp=col("importo","totale","amount"); nf=col("numero_fattura","fattura","invoice"); df=col("data_fattura","invoice date")
   if no is None: st.error("Non trovo la colonna numero ordine/ordine.")
   else:
    for _,r in x.iterrows():
@@ -30,13 +30,13 @@ if up and st.button("Importa dati Johnson",type="primary"):
     if cc is not None and pd.notna(r[cc]): payload["codice_cliente"]=str(r[cc]).strip()
     if ss is not None and pd.notna(r[ss]): payload["struttura"]=str(r[ss]).strip()
     if stt is not None and pd.notna(r[stt]): payload["stato_johnson"]=str(r[stt]).strip()
-    if imp is not None and pd.notna(r[imp]): payload["importo"]=float(r[imp])
+    if imp is not None and pd.notna(r[imp]): payload["importo"]=float(r[imp])\n    if nf is not None and pd.notna(r[nf]): payload["numero_fattura"]=str(r[nf]).strip()\n    if df is not None and pd.notna(r[df]): payload["data_fattura"]=str(pd.to_datetime(r[df]).date())\n    payload["stato_riconciliazione"]="FATTURATO" if payload.get("numero_fattura") else "DA_FATTURARE"\n    _base=pd.to_datetime(payload.get("data_fattura") or payload.get("data_ordine") or pd.Timestamp.today())\n    payload["mese_competenza"]=str(_base.to_period("M").start_time.date())
     old=sb().table("ordini_johnson").select("id").eq("numero_ordine",payload["numero_ordine"]).limit(1).execute().data or []
     if old: sb().table("ordini_johnson").update(payload).eq("id",old[0]["id"]).execute()
     else: sb().table("ordini_johnson").insert(payload).execute()
    st.success(f"Importati/aggiornati {len(x)} record."); st.rerun()
  except Exception as e: st.error(f"Import non riuscito: {e}")
-inter=get("interventi"); rig=get("righe_intervento"); ordj=get("ordini_johnson")
+inter=get("interventi"); rig=get("righe_intervento"); ordj=get("ordini_johnson")\nif not ordj.empty:\n ordj["fase"]=ordj.apply(lambda x: "✅ CHIUSO" if pd.notna(x.get("chiuso_at")) else ("🧾 FATTURATO" if pd.notna(x.get("numero_fattura")) else "⏳ DA FATTURARE"),axis=1)\n st.subheader("📅 Ciclo mensile J&J")\n _o=ordj.copy(); _o["mese_competenza"]=pd.to_datetime(_o["mese_competenza"],errors="coerce")\n _open=_o[_o["chiuso_at"].isna()]\n m1,m2,m3=st.columns(3); m1.metric("Da fatturare",int((_open["fase"]=="⏳ DA FATTURARE").sum())); m2.metric("Fatturati da chiudere",int((_open["fase"]=="🧾 FATTURATO").sum())); m3.metric("Aperti / riporto",len(_open))\n _cols=[x for x in ["numero_ordine","data_ordine","numero_fattura","data_fattura","stato_johnson","importo","mese_competenza","riportato_da_mese","fase","note_anomalia"] if x in _open]\n st.dataframe(_open[_cols].sort_values("data_ordine",ascending=False),use_container_width=True,hide_index=True)\n st.caption("A fine mese si chiudono solo le posizioni completamente riconciliate. Residui, ordini non fatturati e anomalie di prezzo restano aperti per il mese successivo.")
 if inter.empty: st.info("Nessun intervento disponibile."); st.stop()
 if not rig.empty:
  totals=rig.groupby("intervento_id").agg(valore_teorico=("totale","sum"),righe=("id","count")).reset_index()
