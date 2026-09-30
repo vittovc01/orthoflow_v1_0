@@ -1,6 +1,12 @@
 import runpy
 import streamlit as st
 
+# OrthoFlow permission gate
+_p=set(st.session_state.get("permessi",[]) or [])
+_ok=str(st.session_state.get("ruolo",""))=="Admin" or "DIREZIONE" in _p or bool(_p.intersection(["OPERATIVITA","AGENTE"]))
+if not st.session_state.get("user") or not _ok:
+    st.error("Accesso non autorizzato."); st.stop()
+
 # Wrapper UX: evita il dead-lock del pulsante dentro st.form.
 # In Streamlit i checkbox dentro un form non causano rerun immediato;
 # quindi un submit disabilitato in base al checkbox può restare grigio per sempre.
