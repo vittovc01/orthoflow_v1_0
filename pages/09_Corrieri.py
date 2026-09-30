@@ -39,9 +39,16 @@ if manager:
         if tim.empty: st.info("Nessuna timbratura.")
         else:
             t=tim.copy(); t["corriere"]=t["corriere_id"].map(cmap); t["struttura"]=t["struttura_id"].map(smap)
-            cols=[x for x in ["created_at","tipo","corriere","struttura","latitudine","longitudine","precisione_m"] if x in t]
+            t["GPS"]="—"
+            _valid=t["latitudine"].notna() & t["longitudine"].notna()
+            t.loc[_valid,"GPS"]="📍 Posizione GPS ✓"
+            t["precisione"]=pd.to_numeric(t.get("precisione_m"),errors="coerce").apply(lambda x:f"{x:.0f} m" if pd.notna(x) else "—")
+            cols=[x for x in ["created_at","tipo","corriere","struttura","GPS","precisione"] if x in t]
             st.dataframe(t[cols].head(100),use_container_width=True,hide_index=True)
             last=t.iloc[0]; st.success(f'Ultima timbratura: {last.get("corriere","")} · {last.get("struttura","")} · {last.get("created_at","")}')
+            if pd.notna(last.get("latitudine")) and pd.notna(last.get("longitudine")):
+                _maps=f'https://www.google.com/maps/search/?api=1&query={last.get("latitudine")},{last.get("longitudine")}'
+                st.link_button("📍 Apri posizione ultima timbratura",_maps)
             _map=t.dropna(subset=["latitudine","longitudine"]).copy()
             if not _map.empty:
                 _map["lat"]=pd.to_numeric(_map["latitudine"],errors="coerce"); _map["lon"]=pd.to_numeric(_map["longitudine"],errors="coerce")
