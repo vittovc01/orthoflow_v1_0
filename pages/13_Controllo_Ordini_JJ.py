@@ -206,3 +206,48 @@ if not rein.empty:
  m2.metric("Ordinati da ricevere",int((v.esito=="ORDINATO_DA_RICEVERE").sum()))
  m3.metric("Parziali",int((v.esito=="REINTEGRO_PARZIALE").sum()))
  m4.metric("Ricevuti",int((v.esito=="REINTEGRO_RICEVUTO").sum()))
+
+st.divider()
+st.subheader("🏁 Chiusura mensile ufficiale J&J")
+st.caption("Carica il file finale mensile Johnson separatamente per TRAUMA e PROTESICA. È il consuntivo ufficiale da confrontare con la previsione OrthoFlow.")
+cm1,cm2=st.columns(2)
+div=cm1.selectbox("Divisione",["TRAUMA","PROTESICA"],key="close_div")
+mese_close=cm2.date_input("Mese di chiusura",value=pd.Timestamp.today().replace(day=1).date(),key="close_month")
+closefile=st.file_uploader("File chiusura dettagliata J&J",type=["xlsx","xls","csv"],key="jj_close")
+if closefile and st.button("📥 Importa e confronta chiusura",type="primary"):
+ try:
+  z=pd.read_csv(closefile,sep=None,engine="python",encoding="utf-8-sig") if closefile.name.lower().endswith(".csv") else pd.read_excel(closefile)
+  lc={str(k).strip().lower():k for k in z.columns}
+  def zcol(*names):
+   for n in names:
+    if n.lower() in lc:return lc[n.lower()]
+   return None
+  code=zcol("codice","codice prodotto","product code"); qty=zcol("quantita","quantità","quantity"); price=zcol("prezzo","prezzo unitario","unit price"); total=zcol("totale","totale riga","total"); order=zcol("numero ordine","numero_ordine","ordine","order"); lot=zcol("lotto","lot")
+  if code is None: st.error("Non riconosco la colonna Codice prodotto. Il file non viene importato.")
+  else:
+   tot=float(pd.to_numeric(z[total],errors="coerce").fillna(0).sum()) if total else 0
+   h=sb().table("chiusure_mensili_johnson").insert({"mese":str(pd.Timestamp(mese_close).to_period("M").start_time.date()),"divisione":div,"nome_file":closefile.name,"importo_totale_jj":tot,"righe_totali":len(z)}).execute().data[0]
+   for _,r in z.iterrows():
+    p={"chiusura_id":h["id"],"codice":str(r[code]).strip(),"raw_data":{str(k):None if pd.isna(v) else str(v) for k,v in r.items()}}
+    for col,dest,num in [(order,"numero_ordine",False),(lot,"lotto",False),(qty,"quantita",True),(price,"prezzo_unitario",True),(total,"totale_riga",True)]:
+     if col is not None and pd.notna(r[col]): p[dest]=float(pd.to_numeric(r[col],errors="coerce")) if num and pd.notna(pd.to_numeric(r[col],errors="coerce")) else str(r[col]).strip()
+    sb().table("righe_chiusura_johnson").insert(p).execute()
+   st.success(f"Chiusura {div} importata: {len(z)} righe · € {tot:,.2f}."); st.rerun()
+ except Exception as e: st.error(f"Chiusura non importata: {e}")
+
+st.subheader("📈 Previsione OrthoFlow vs consuntivo J&J")
+_m0=pd.Timestamp(mese_close).to_period("M").start_time.date(); _m1=(pd.Timestamp(_m0)+pd.offsets.MonthEnd(1)).date()
+ints=get("interventi"); ris=get("righe_intervento"); clos=get("chiusure_mensili_johnson")
+prev=0
+if not ints.empty and not ris.empty:
+ ids=ints[(pd.to_datetime(ints["data_intervento"],errors="coerce").dt.date>=_m0)&(pd.to_datetime(ints["data_intervento"],errors="coerce").dt.date<=_m1)]["id"].tolist()
+ rr=ris[ris["intervento_id"].isin(ids)].copy()
+ base="totale" if "totale" in rr else "valore"
+ if base in rr: prev=float(pd.to_numeric(rr[base],errors="coerce").fillna(0).sum())
+cons=0
+if not clos.empty:
+ cm=pd.to_datetime(clos["mese"],errors="coerce").dt.to_period("M")
+ sel=clos[(cm==pd.Timestamp(_m0).to_period("M"))]
+ cons=float(pd.to_numeric(sel["importo_totale_jj"],errors="coerce").fillna(0).sum())
+a1,a2,a3=st.columns(3); a1.metric("Previsione OrthoFlow",f"€ {prev:,.2f}"); a2.metric("Chiusura J&J caricata",f"€ {cons:,.2f}"); a3.metric("Differenza",f"€ {cons-prev:,.2f}")
+st.caption("La previsione deriva dall'operatività OrthoFlow; il file finale J&J è il consuntivo ufficiale. Le differenze dovranno essere analizzate per ordine/codice/lotto/quantità/prezzo, senza considerare automaticamente il dato J&J corretto.")
