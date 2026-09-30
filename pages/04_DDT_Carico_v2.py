@@ -18,6 +18,12 @@ except Exception:
 
 st.set_page_config(page_title='DDT Mobile · OrthoFlow Control Tower', page_icon='🚚', layout='wide')
 
+# OrthoFlow permission gate
+_p=set(st.session_state.get("permessi",[]) or [])
+_ok=str(st.session_state.get("ruolo",""))=="Admin" or "DIREZIONE" in _p or "LOGISTICA" in _p
+if not st.session_state.get("user") or not _ok:
+    st.error("Accesso non autorizzato."); st.stop()
+
 # OrthoFlow RBAC: blocca anche l'accesso diretto via URL.
 if not st.session_state.get("user"):
     st.error("Sessione non autenticata."); st.stop()
