@@ -59,6 +59,29 @@ if col3.button("❌ Rifiuta richiesta",use_container_width=True):
         sb().table("utenti_app").update({"stato_accesso":"RIFIUTATO","attivo":False,"permessi":[]}).eq("id",int(r["id"])).execute(); st.rerun()
 
 st.divider()
+st.subheader("🚐 Gestione dati corrieri")
+try:
+    cor=pd.DataFrame(sb().table("corrieri").select("*").order("nome").execute().data or [])
+except Exception:
+    cor=pd.DataFrame()
+if cor.empty:
+    st.info("Nessun corriere registrato.")
+else:
+    ci=st.selectbox("Seleziona corriere da modificare",cor.index,format_func=lambda i:str(cor.loc[i].get("nome","")),key="manage_courier")
+    cr=cor.loc[ci]
+    with st.form("edit_courier"):
+        cn=st.text_input("Nome corriere",value=str(cr.get("nome") or ""))
+        ct=st.text_input("Telefono corriere",value=str(cr.get("telefono") or ""))
+        cuid=st.selectbox("Collega a utente",[""]+df["id"].astype(str).tolist(),index=([""]+df["id"].astype(str).tolist()).index(str(cr.get("user_id"))) if str(cr.get("user_id")) in df["id"].astype(str).tolist() else 0,format_func=lambda x:"— Nessun utente —" if not x else str(df.loc[df["id"].astype(str)==x,"username"].iloc[0]))
+        active=st.checkbox("Corriere attivo",value=bool(cr.get("attivo",True)))
+        if st.form_submit_button("💾 Salva corriere",type="primary"):
+            sb().table("corrieri").update({"nome":cn.strip(),"telefono":ct.strip(),"user_id":int(cuid) if cuid else None,"attivo":active}).eq("id",int(cr["id"])).execute(); st.success("Corriere aggiornato."); st.rerun()
+    if st.button("🗑️ Elimina corriere",key="delete_courier"):
+        used=sb().table("missioni_corrieri").select("id").eq("corriere_id",int(cr["id"])).limit(1).execute().data or []
+        if used: st.error("Il corriere ha missioni registrate: per mantenere lo storico disattivalo invece di eliminarlo.")
+        else: sb().table("corrieri").delete().eq("id",int(cr["id"])).execute(); st.rerun()
+
+st.divider()
 show=df.copy()
 show["permessi"]=show["permessi"].apply(lambda x:", ".join(x or []))
 st.dataframe(show[["nome_completo","username","stato_accesso","attivo","permessi","ultimo_accesso"]],use_container_width=True,hide_index=True)
