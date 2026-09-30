@@ -82,6 +82,53 @@ else:
         else: sb().table("corrieri").delete().eq("id",int(cr["id"])).execute(); st.rerun()
 
 st.divider()
+st.subheader("🗂️ Gestione completa dati Corrieri")
+st.caption("Area Direzione: modifica o elimina missioni, timbrature GPS, foto/documenti e movimenti kit creati nel flusso corrieri.")
+_tables=["missioni_corrieri","timbrature_corrieri","foto_missioni","documenti_missioni","kit_logistici","movimenti_kit_corrieri","strutture_logistiche"]
+_tab=st.selectbox("Archivio da gestire",_tables,format_func=lambda x:{
+"missioni_corrieri":"Missioni","timbrature_corrieri":"Timbrature GPS","foto_missioni":"Foto missioni","documenti_missioni":"Documenti / certificazioni","kit_logistici":"Kit logistici","movimenti_kit_corrieri":"Movimenti kit","strutture_logistiche":"Strutture"}[x],key="courier_data_table")
+try:
+    _data=pd.DataFrame(sb().table(_tab).select("*").order("id",desc=True).limit(2000).execute().data or [])
+except Exception as exc:
+    _data=pd.DataFrame(); st.error(str(exc))
+if _data.empty:
+    st.info("Nessun record presente.")
+else:
+    st.dataframe(_data,use_container_width=True,hide_index=True)
+    _rid=st.selectbox("Seleziona ID",_data["id"].tolist(),key="courier_record_id")
+    _rec=_data[_data["id"]==_rid].iloc[0]
+    st.markdown("**Modifica record**")
+    _editable=[x for x in _data.columns if x not in ("id","created_at","updated_at")]
+    _changes={}
+    _cols=st.columns(2)
+    for _n,_col in enumerate(_editable):
+        _val=_rec.get(_col)
+        if _col in ("attivo","attiva"):
+            _changes[_col]=_cols[_n%2].checkbox(_col,value=bool(_val),key=f"edit_{_tab}_{_rid}_{_col}")
+        elif _col in ("colli","corriere_id","struttura_id","missione_id","kit_id","user_id"):
+            _txt=_cols[_n%2].text_input(_col,value="" if pd.isna(_val) else str(int(_val)),key=f"edit_{_tab}_{_rid}_{_col}")
+            _changes[_col]=int(_txt) if _txt.strip() else None
+        else:
+            _changes[_col]=_cols[_n%2].text_input(_col,value="" if pd.isna(_val) else str(_val),key=f"edit_{_tab}_{_rid}_{_col}")
+    _b1,_b2=st.columns(2)
+    if _b1.button("💾 Salva modifiche",type="primary",use_container_width=True,key=f"save_{_tab}_{_rid}"):
+        try:
+            sb().table(_tab).update(_changes).eq("id",int(_rid)).execute()
+            st.success(f"ID {_rid} aggiornato."); st.rerun()
+        except Exception as exc: st.error(f"Modifica non riuscita: {exc}")
+    _confirm=_b2.checkbox("Confermo eliminazione definitiva",key=f"confirm_del_{_tab}_{_rid}")
+    if st.button("🗑️ Elimina ID selezionato",disabled=not _confirm,key=f"del_{_tab}_{_rid}"):
+        try:
+            if _tab=="missioni_corrieri":
+                sb().rpc("elimina_missione_corriere_completa",{"p_missione_id":int(_rid)}).execute()
+            elif _tab=="kit_logistici":
+                sb().table("movimenti_kit_corrieri").delete().eq("kit_id",int(_rid)).execute(); sb().table(_tab).delete().eq("id",int(_rid)).execute()
+            else:
+                sb().table(_tab).delete().eq("id",int(_rid)).execute()
+            st.success(f"ID {_rid} eliminato."); st.rerun()
+        except Exception as exc: st.error(f"Eliminazione non riuscita: {exc}")
+
+st.divider()
 show=df.copy()
 show["permessi"]=show["permessi"].apply(lambda x:", ".join(x or []))
 st.dataframe(show[["nome_completo","username","stato_accesso","attivo","permessi","ultimo_accesso"]],use_container_width=True,hide_index=True)
