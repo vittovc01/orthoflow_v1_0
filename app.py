@@ -6,6 +6,8 @@ import streamlit as st
 
 logged_in = bool(st.session_state.get("user"))
 role = str(st.session_state.get("ruolo", "")).strip()
+permissions = set(st.session_state.get("permessi", []) or [])
+is_director = role == "Admin" or "DIREZIONE" in permissions
 
 login_page = st.Page(
     "pages/99_Login.py",
@@ -78,6 +80,8 @@ ddt_mobile_page = st.Page(
 courier_page = st.Page("pages/09_Corrieri.py", title="Corrieri", icon="🚐", url_path="corrieri")
 documents_page = st.Page("pages/10_Documenti_Logistica.py", title="Documenti Logistica", icon="📑", url_path="documenti-logistica")
 
+users_page = st.Page("pages/11_Gestione_Utenti.py", title="Utenti & Permessi", icon="👥", url_path="utenti-permessi")
+
 operations_page = st.Page(
     "core_app.py",
     title="Gestionale",
@@ -88,16 +92,19 @@ operations_page = st.Page(
 if not logged_in:
     nav = st.navigation([login_page], position="hidden")
 else:
-    pages = {
-        "HOME": [control_tower],
-        "OPERATIVITÀ": [operations_page, scarico_sala_ai_page],
-    }
-    if role in {"Admin", "Amministrazione"}:
+    pages = {"HOME": [control_tower]}
+    if is_director or "OPERATIVITA" in permissions:
+        pages["OPERATIVITÀ"] = [operations_page, scarico_sala_ai_page]
+    elif "AGENTE" in permissions:
+        pages["OPERATIVITÀ"] = [scarico_sala_ai_page, customer_connect_page]
+    if is_director or "AMMINISTRAZIONE" in permissions:
         pages["AMMINISTRAZIONE"] = [interventions_page, work_implant_page, customer_connect_page]
-    elif role in {"Magazzino", "Agente"}:
-        pages["OPERATIVITÀ"].append(customer_connect_page)
-    if role in {"Admin", "Magazzino"}:
+    if is_director or "LOGISTICA" in permissions:
         pages["LOGISTICA & MAGAZZINO"] = [ddt_mobile_page, wms_page, shelf_page, qr_page, courier_page, documents_page]
+    elif "CORRIERE" in permissions:
+        pages["CORRIERI"] = [courier_page]
+    if is_director:
+        pages["DIREZIONE"] = [users_page]
     nav = st.navigation(pages, position="sidebar", expanded=True)
 
 nav.run()
