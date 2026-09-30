@@ -2,6 +2,12 @@ import streamlit as st
 import pandas as pd
 from supabase import create_client
 st.set_page_config(page_title="Documenti Logistica · OrthoFlow",page_icon="📑",layout="wide")
+
+if not st.session_state.get("user"): st.stop()
+_ofp=set(st.session_state.get("permessi",[]) or [])
+_ofd=str(st.session_state.get("ruolo",""))=="Admin" or "DIREZIONE" in _ofp
+if not _ofd and not (_ofp & set(["LOGISTICA"])):
+    st.error("Non sei autorizzato ad accedere a questa area."); st.stop()
 if not st.session_state.get("user"): st.switch_page("pages/99_Login.py")
 def sb():
     url=st.secrets.get("SUPABASE_URL")
