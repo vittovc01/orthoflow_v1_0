@@ -31,7 +31,7 @@ if manager:
     if not mis.empty:
         mis["corriere"]=mis["corriere_id"].map(cmap); mis["struttura"]=mis["struttura_id"].map(smap)
         x1,x2,x3,x4=st.columns(4); x1.metric("Missioni",len(mis)); x2.metric("In corso",int(mis["stato"].isin(["PROGRAMMATA","ARRIVATO"]).sum())); x3.metric("Completate",int((mis["stato"]=="COMPLETATA").sum())); x4.metric("Timbrature",len(tim))
-    tabs=st.tabs(["🛰️ Controllo live","📋 Missioni","➕ Nuova missione","⚙️ Anagrafiche","📊 Report Excel"])
+    tabs=st.tabs(["🛰️ Controllo live","📋 Missioni","➕ Nuova missione","⚙️ Anagrafiche","📦 Registro Kit","📊 Report Excel"])
     with tabs[0]:
         if tim.empty: st.info("Nessuna timbratura.")
         else:
@@ -51,7 +51,16 @@ if manager:
                 ci=st.selectbox("Corriere",ac.index,format_func=lambda i:ac.loc[i,"nome"]); si=st.selectbox("Struttura",ast.index,format_func=lambda i:ast.loc[i,"nome"])
                 tipo=st.selectbox("Tipo",["CONSEGNA","RITIRO"]); kit=st.text_input("Kit / materiale"); colli=st.number_input("Colli",0,step=1); note=st.text_area("Note")
                 if st.form_submit_button("Crea missione",type="primary"):
-                    sb().table("missioni_corrieri").insert({"codice":codice,"data_missione":str(dm),"corriere_id":int(ac.loc[ci,"id"]),"struttura_id":int(ast.loc[si,"id"]),"tipo":tipo,"kit_codice":kit,"colli":int(colli),"note":note}).execute(); st.rerun()
+                    _new=sb().table("missioni_corrieri").insert({"codice":codice,"data_missione":str(dm),"corriere_id":int(ac.loc[ci,"id"]),"struttura_id":int(ast.loc[si,"id"]),"tipo":tipo,"kit_codice":kit.strip(),"colli":int(colli),"note":note}).execute()
+                    if kit.strip():
+                        _existing=sb().table("kit_logistici").select("*").eq("codice",kit.strip()).limit(1).execute().data or []
+                        if _existing: _kid=int(_existing[0]["id"]); _old=str(_existing[0].get("stato") or "IN_MAGAZZINO")
+                        else:
+                            _k=sb().table("kit_logistici").insert({"codice":kit.strip(),"stato":"IN_MAGAZZINO"}).execute().data[0]; _kid=int(_k["id"]); _old="IN_MAGAZZINO"
+                        _mid=int(_new.data[0]["id"]); _newst="ASSEGNATO"
+                        sb().table("kit_logistici").update({"stato":_newst,"missione_id":_mid,"corriere_id":int(ac.loc[ci,"id"]),"struttura_id":int(ast.loc[si,"id"])}).eq("id",_kid).execute()
+                        sb().table("movimenti_kit_corrieri").insert({"kit_id":_kid,"missione_id":_mid,"corriere_id":int(ac.loc[ci,"id"]),"struttura_id":int(ast.loc[si,"id"]),"movimento":"ASSEGNAZIONE","stato_precedente":_old,"stato_nuovo":_newst,"utente":str(st.session_state.get("user",""))}).execute()
+                    st.rerun()
     with tabs[3]:
         st.subheader("Corrieri")
         with st.form("new_courier"):
@@ -60,6 +69,17 @@ if manager:
         st.dataframe(cour,use_container_width=True,hide_index=True)
         st.subheader("Strutture"); st.dataframe(stru,use_container_width=True,hide_index=True)
     with tabs[4]:
+        st.subheader("📦 Registro movimentazione kit")
+        kits=df("kit_logistici"); kmov=df("movimenti_kit_corrieri")
+        if kits.empty: st.info("Il registro si popolerà automaticamente dalle nuove missioni con un codice kit.")
+        else:
+            if "struttura_id" in kits: kits["struttura"]=kits["struttura_id"].map(smap)
+            if "corriere_id" in kits: kits["corriere"]=kits["corriere_id"].map(cmap)
+            st.dataframe(kits[[x for x in ["codice","descrizione","stato","struttura","corriere","updated_at"] if x in kits]],use_container_width=True,hide_index=True)
+        if not kmov.empty:
+            st.caption("Storico movimenti")
+            st.dataframe(kmov.sort_values("created_at",ascending=False).head(200),use_container_width=True,hide_index=True)
+    with tabs[5]:
         mov=mis.copy()
         if not mov.empty:
             mov["movimento"]=mov["tipo"].map({"CONSEGNA":"USCITA","RITIRO":"RIENTRO"})
@@ -67,6 +87,8 @@ if manager:
             with pd.ExcelWriter(out,engine="xlsxwriter") as w:
                 mov.to_excel(w,index=False,sheet_name="Missioni")
                 tim.to_excel(w,index=False,sheet_name="Timbrature")
+                df("kit_logistici").to_excel(w,index=False,sheet_name="Registro_Kit")
+                df("movimenti_kit_corrieri").to_excel(w,index=False,sheet_name="Movimenti_Kit")
                 cour.to_excel(w,index=False,sheet_name="Corrieri")
                 stru.to_excel(w,index=False,sheet_name="Strutture")
                 mov[mov["tipo"]=="CONSEGNA"].to_excel(w,index=False,sheet_name="Kit_Usciti")
@@ -86,7 +108,14 @@ else:
     lat=st.number_input("Latitudine GPS",format="%.6f"); lon=st.number_input("Longitudine GPS",format="%.6f")
     if st.button("📍 Timbra arrivo"):
         sb().table("timbrature_corrieri").insert({"missione_id":int(r.id),"corriere_id":cid,"struttura_id":int(r.struttura_id),"tipo":"ARRIVO","latitudine":lat or None,"longitudine":lon or None}).execute()
-        sb().table("missioni_corrieri").update({"stato":"ARRIVATO"}).eq("id",int(r.id)).execute(); st.rerun()
+        sb().table("missioni_corrieri").update({"stato":"ARRIVATO"}).eq("id",int(r.id)).execute()
+        if str(r.get("kit_codice") or "").strip():
+            _kk=sb().table("kit_logistici").select("*").eq("codice",str(r.kit_codice).strip()).limit(1).execute().data or []
+            if _kk:
+                _old=str(_kk[0].get("stato") or "ASSEGNATO"); _ns="IN_USCITA" if r["tipo"]=="CONSEGNA" else "DA_RITIRARE"
+                sb().table("kit_logistici").update({"stato":_ns,"missione_id":int(r.id),"corriere_id":cid,"struttura_id":int(r.struttura_id)}).eq("id",int(_kk[0]["id"])).execute()
+                sb().table("movimenti_kit_corrieri").insert({"kit_id":int(_kk[0]["id"]),"missione_id":int(r.id),"corriere_id":cid,"struttura_id":int(r.struttura_id),"movimento":"TIMBRATURA_ARRIVO","stato_precedente":_old,"stato_nuovo":_ns,"utente":str(st.session_state.get("user",""))}).execute()
+        st.rerun()
     photos=st.file_uploader("📷 Foto consegna/ritiro",type=["jpg","jpeg","png"],accept_multiple_files=True,key=f"ph{r.id}")
     if photos and st.button("Carica foto"):
         for ph in photos:
@@ -100,4 +129,11 @@ else:
             path=f'missioni/{r.id}/documenti/decontaminazione_{cert.name}'; sb().storage.from_("orthoflow-impianti").upload(path,cert.getvalue(),{"content-type":cert.type,"upsert":"true"}); sb().table("documenti_missioni").insert({"missione_id":int(r.id),"tipo_documento":"CERTIFICAZIONE_LAVAGGIO_DECONTAMINAZIONE","storage_path":path,"nome_firmatario":firm,"ruolo_firmatario":ruolo}).execute(); st.rerun()
         certok=bool(sb().table("documenti_missioni").select("id").eq("missione_id",int(r.id)).eq("tipo_documento","CERTIFICAZIONE_LAVAGGIO_DECONTAMINAZIONE").limit(1).execute().data)
     if st.button("✅ Conferma operazione",type="primary",disabled=not certok):
-        sb().table("missioni_corrieri").update({"stato":"COMPLETATA"}).eq("id",int(r.id)).execute(); st.rerun()
+        sb().table("missioni_corrieri").update({"stato":"COMPLETATA"}).eq("id",int(r.id)).execute()
+        if str(r.get("kit_codice") or "").strip():
+            _kk=sb().table("kit_logistici").select("*").eq("codice",str(r.kit_codice).strip()).limit(1).execute().data or []
+            if _kk:
+                _old=str(_kk[0].get("stato") or ""); _ns="CONSEGNATO" if r["tipo"]=="CONSEGNA" else "RITIRATO"
+                sb().table("kit_logistici").update({"stato":_ns,"missione_id":int(r.id),"corriere_id":cid,"struttura_id":int(r.struttura_id)}).eq("id",int(_kk[0]["id"])).execute()
+                sb().table("movimenti_kit_corrieri").insert({"kit_id":int(_kk[0]["id"]),"missione_id":int(r.id),"corriere_id":cid,"struttura_id":int(r.struttura_id),"movimento":"CONSEGNA" if r["tipo"]=="CONSEGNA" else "RITIRO","stato_precedente":_old,"stato_nuovo":_ns,"utente":str(st.session_state.get("user",""))}).execute()
+        st.rerun()
