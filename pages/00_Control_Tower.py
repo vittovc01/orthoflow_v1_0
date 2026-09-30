@@ -5,6 +5,15 @@ from supabase import create_client
 
 st.set_page_config(page_title='OrthoFlow Control Tower', page_icon='🛰️', layout='wide')
 
+# Role landing: profili operativi entrano direttamente nel proprio lavoro.
+_p=set(st.session_state.get("permessi",[]) or [])
+_r=str(st.session_state.get("ruolo",""))
+if st.session_state.get("user") and _r!="Admin" and "DIREZIONE" not in _p:
+    if _p == {"CORRIERE"}: st.switch_page("pages/09_Corrieri.py")
+    elif _p == {"LOGISTICA"}: st.switch_page("pages/01_WMS.py")
+    elif _p == {"AGENTE"}: st.switch_page("pages/05_Scarico_Sala_AI.py")
+    elif _p == {"AMMINISTRAZIONE"}: st.switch_page("pages/06_Gestione_Interventi.py")
+
 # OrthoFlow RBAC: protegge anche l'accesso diretto via URL.
 if not st.session_state.get("user"):
     st.error("Sessione non autenticata."); st.stop()
