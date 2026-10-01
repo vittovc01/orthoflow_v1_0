@@ -15,7 +15,7 @@ class Context:
 class ST:
  def __init__(self,rows):
   self.session_state={'scarico_ai_rows':rows,'scarico_editor_revision':7};self.active=False
-  self.column_config=SimpleNamespace(CheckboxColumn=lambda *a,**kw:None)
+  self.column_config=SimpleNamespace(CheckboxColumn=lambda *a,**kw:None, TextColumn=lambda *a,**kw:None)
  def form(self,*a):
   outer=self
   class Form(Context):

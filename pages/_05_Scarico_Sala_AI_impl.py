@@ -384,9 +384,10 @@ with st.form("scarico_ai_confirm"):
     if rows:
         st.divider()
         st.subheader("✅ Lista materiali riconosciuti")
-        st.caption("Controlla sempre codice Johnson/REF, lotto, scadenza e quantità prima della conferma.")
+        st.caption("Tocca una cella per correggere codice, lotto, scadenza o quantità. Spunta Escludi riga per non inserirla nello scarico. Le modifiche vengono applicate alla conferma.")
         df_rows = pd.DataFrame(rows)
-        preferred = ["codice", "descrizione", "lotto", "scadenza", "quantita", "produttore", "confidence", "warning"]
+        preferred = ["codice", "escludi_riga", "descrizione", "lotto", "scadenza", "quantita", "produttore", "confidence", "warning"]
+        df_rows["escludi_riga"] = False
         for col in preferred:
             if col not in df_rows.columns:
                 df_rows[col] = ""
@@ -398,7 +399,13 @@ with st.form("scarico_ai_confirm"):
             st.info("Malzoni: spunta il materiale della struttura Smart Track. Prezzi, fatturato e ordini restano inclusi; queste righe non scaricano la vostra giacenza.")
         edited = st.data_editor(
             df_rows[preferred], num_rows="dynamic", use_container_width=True,
-            column_config={"conto_deposito_struttura": st.column_config.CheckboxColumn(
+            column_config={
+                "escludi_riga": st.column_config.CheckboxColumn(
+                    "Escludi riga", default=False,
+                    help="La riga non verrà salvata e non genererà fatturato, ordini o movimenti di magazzino."),
+                "codice": st.column_config.TextColumn("Codice Johnson/REF"),
+                "lotto": st.column_config.TextColumn("Lotto"),
+                "conto_deposito_struttura": st.column_config.CheckboxColumn(
                 "Conto deposito struttura", default=False,
                 help="Materiale Malzoni / Smart Track: incluso nel fatturato, senza scarico del nostro magazzino.")},
             key=f"scarico_ai_editor_{clean(selected_client.get('codice_cliente'))}_{st.session_state.get('scarico_editor_revision', 0)}")
@@ -463,6 +470,8 @@ if confirm:
     final_rows = edited.to_dict("records") if rows else []
     valid_rows = []
     for r in final_rows:
+        if r.get("escludi_riga") is True:
+            continue
         if is_other_manufacturer(r.get("produttore")):
             continue
         code = clean(r.get("codice")).upper()
