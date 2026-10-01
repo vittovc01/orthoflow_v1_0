@@ -44,7 +44,7 @@ def generate_implant_document(intervention_id, header):
         if existing: return existing[0]
         division="PROTESICA" if "PROTES" in clean(header.get("linea")).upper() else "TRAUMA"
         seq="documento_impianto_protesica_seq" if division=="PROTESICA" else "documento_impianto_trauma_seq"
-        nr=sb().rpc("nextval",{"regclass":seq}).execute().data
+        nr=sb().rpc("prossimo_numero_documento_impianto",{"p_divisione":division}).execute().data
         numero=f"{'PRO' if division=='PROTESICA' else 'TRA'}-{pd.Timestamp(header.get('data_intervento')).year}-{int(nr):06d}"
         rows=sb().table("righe_intervento").select("codice,descrizione,lotto,scadenza,quantita").eq("intervento_id",intervention_id).execute().data or []
         from io import BytesIO
