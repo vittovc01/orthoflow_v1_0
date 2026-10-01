@@ -87,7 +87,7 @@ price_anomalies_page = st.Page("pages/14_Anomalie_Prezzi.py", title="Anomalie Pr
 
 operations_page = st.Page(
     "core_app.py",
-    title="Gestionale",
+    title="Controllo di Gestione",
     icon="🏥",
     url_path="gestionale",
 )
