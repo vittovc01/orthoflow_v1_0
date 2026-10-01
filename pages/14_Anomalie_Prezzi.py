@@ -14,8 +14,11 @@ if not st.session_state.get("user") or not allowed:
 @st.cache_resource
 def sb():
     url=st.secrets.get("SUPABASE_URL",os.getenv("SUPABASE_URL",""))
-    key=st.secrets.get("SUPABASE_SERVICE_ROLE_KEY",st.secrets.get("SUPABASE_KEY",os.getenv("SUPABASE_SERVICE_ROLE_KEY",os.getenv("SUPABASE_KEY",""))))
-    return create_client(url,key)
+    key=st.secrets.get("SUPABASE_SERVICE_KEY") or st.secrets.get("SUPABASE_ANON_KEY") or st.secrets.get("SUPABASE_KEY") or os.getenv("SUPABASE_SERVICE_KEY") or os.getenv("SUPABASE_ANON_KEY") or os.getenv("SUPABASE_KEY")
+    if not url or not key:
+        st.error("Configurazione Supabase non disponibile.")
+        st.stop()
+    return create_client(str(url).rstrip("/"),str(key))
 
 st.title("⚠️ Anomalie Prezzi")
 st.caption("Prezzi mancanti rilevati durante Scarico Sala. Gli agenti non vengono bloccati; Direzione/Amministrazione regolarizza qui.")
