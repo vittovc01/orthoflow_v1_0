@@ -335,7 +335,8 @@ ai_date = pd.to_datetime(meta.get("procedure_date"), errors="coerce") if meta.ge
 ai_surgeon = clean(meta.get("surgeon"))
 
 missing_prices = st.session_state.get("scarico_missing_prices", []) or []
-if missing_prices:
+can_manage_prices = str(st.session_state.get("role","")).strip().lower() in ["admin","amministrazione"] or "DIREZIONE" in (st.session_state.get("permessi") or []) or "AMMINISTRAZIONE" in (st.session_state.get("permessi") or [])
+if missing_prices and can_manage_prices:
     st.warning("Alcuni codici non hanno un prezzo nell'offerta collegata. Inserisci il prezzo manuale prima di confermare lo scarico.")
     with st.expander("💶 Prezzi mancanti da inserire", expanded=True):
         # One price input per unique code. The same REF can appear on multiple lots/rows.
@@ -428,13 +429,16 @@ if confirm:
             source = ("SCONTO_MERCE" if st.session_state.get(f"free_goods_{ncode(code)}", False) else "MANUALE") if price is not None else "MANCANTE"
         if price is None:
             missing.append({"codice": code, "descrizione": clean(r.get("descrizione"))})
+            price = 0.0
+            source = "DA_VERIFICARE_DIREZIONE"
         priced_rows.append((r, code, lot, qty, price, source))
 
     if missing:
         st.session_state["scarico_missing_prices"] = missing
-        st.error(f"Mancano {len(missing)} prezzi. Inseriscili nel riquadro 'Prezzi mancanti da inserire' e premi di nuovo Crea intervento.")
-        st.rerun()
-    st.session_state.pop("scarico_missing_prices", None)
+        if can_manage_prices:
+            st.warning(f"{len(missing)} prezzi mancanti: lo scarico può proseguire a €0 provvisorio oppure puoi regolarizzarli ora.")
+    else:
+        st.session_state.pop("scarico_missing_prices", None)
 
     rpc_rows = []
     for r, code, lot, qty, price, price_source in priced_rows:
