@@ -52,3 +52,18 @@ if st.button("✅ Salva e chiudi anomalia",type="primary",use_container_width=Tr
     sb().table("righe_intervento").update(payload).eq("id",int(rid)).execute()
     st.success("Prezzo regolarizzato. L'anomalia è stata chiusa.")
     st.rerun()
+
+st.divider()
+st.subheader("📦 Anomalie Giacenza")
+stock=sb().table("anomalie_giacenza").select("*").eq("stato","DA_VERIFICARE").order("id",desc=True).execute().data or []
+if not stock:
+    st.success("Nessuna anomalia giacenza da verificare.")
+else:
+    sdf=pd.DataFrame(stock)
+    st.dataframe(sdf[[x for x in ["id","created_at","codice","lotto","quantita_richiesta","quantita_disponibile","magazzino","intervento_id","motivo"] if x in sdf]],use_container_width=True,hide_index=True)
+    sid=st.selectbox("Anomalia giacenza da chiudere",sdf["id"].astype(int).tolist(),key="stock_anomaly")
+    reason=st.selectbox("Esito",["Già scaricato in Business prima dell'importazione","Rettifica giacenza","Lotto da correggere","Altro"])
+    note=st.text_input("Nota Direzione",key="stock_note")
+    if st.button("✅ Chiudi anomalia giacenza",type="primary"):
+        sb().table("anomalie_giacenza").update({"stato":"RISOLTA","motivo":reason + ((" · "+note) if note else ""),"risolto_da":str(st.session_state.get("user","")),"risolto_at":datetime.now(timezone.utc).isoformat()}).eq("id",int(sid)).execute()
+        st.success("Anomalia giacenza chiusa."); st.rerun()
