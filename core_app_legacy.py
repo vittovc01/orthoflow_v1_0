@@ -645,8 +645,8 @@ if 'quick_menu' in st.session_state:
 if menu=='Dashboard':
     nome_area = current_agent() if current_role() == 'Agente' else st.session_state.get('user','')
     st.markdown(
-        f"""<div class="of-hero"><h2>OrthoFlow 7.2 Enterprise</h2>
-        <div class="of-muted">Benvenuto, {nome_area}. Panoramica operativa aggiornata del sistema.</div></div>""",
+        f"""<div class="of-hero"><h2>Controllo di Gestione</h2>
+        <div class="of-muted">Benvenuto, {nome_area}. Controllo economico e direzionale aggiornato del sistema.</div></div>""",
         unsafe_allow_html=True
     )
 
