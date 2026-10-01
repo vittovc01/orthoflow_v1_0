@@ -291,6 +291,18 @@ def storage_signed_url(storage_path, bucket="orthoflow-impianti", expires=3600):
     except Exception:
         return None
 
+def storage_download_bytes(storage_path, bucket="orthoflow-impianti"):
+    if not storage_path:
+        return None
+    try:
+        data = sb().storage.from_(bucket).download(str(storage_path))
+        return bytes(data) if data else None
+    except Exception:
+        return None
+
+def valid_pdf_bytes(data):
+    return bool(data and bytes(data[:5]) == b"%PDF-")
+
 def storage_delete_file(storage_path, bucket="orthoflow-impianti"):
     if not storage_path:
         return True
@@ -1164,9 +1176,21 @@ elif menu=='Archivio impianti':
             st.write(f"**Cliente:** {row.get('cliente','')}")
             st.write(f"**Agente:** {row.get('agente','')}")
             st.write(f"**File:** {row.get('nome_file','')}")
-            signed=storage_signed_url(row.get('storage_path','')) if row.get('storage_path') else None
-            if signed:
-                st.link_button('📎 Apri documento originale', signed, use_container_width=True)
+            storage_path=row.get('storage_path','') or ''
+            bucket=row.get('storage_bucket','') or 'orthoflow-impianti'
+            signed=storage_signed_url(storage_path,bucket=bucket) if storage_path else None
+            file_bytes=storage_download_bytes(storage_path,bucket=bucket) if storage_path else None
+            is_pdf=str(row.get('tipo_file','')).lower().find('pdf')>=0 or str(row.get('nome_file','')).lower().endswith('.pdf')
+            if file_bytes:
+                if is_pdf and not valid_pdf_bytes(file_bytes):
+                    st.error('Il file archiviato non contiene un PDF valido. Il record resta disponibile per la verifica e la sostituzione.')
+                else:
+                    st.download_button('⬇️ Scarica documento',file_bytes,file_name=str(row.get('nome_file') or 'documento.pdf'),mime=str(row.get('tipo_file') or 'application/octet-stream'),use_container_width=True)
+                    if signed:
+                        st.link_button('📎 Apri anteprima',signed,use_container_width=True)
+            elif signed:
+                st.warning('Anteprima disponibile, ma il download diretto non è riuscito.')
+                st.link_button('📎 Prova ad aprire il documento',signed,use_container_width=True)
             else:
                 st.warning('File non disponibile in Supabase Storage.')
 
