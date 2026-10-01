@@ -1124,8 +1124,7 @@ elif menu=='Offerte':
             nome=st.text_input('Nome offerta','Federico II Trauma'); linea=st.selectbox('Linea',['TRAUMA','PROTESICA','CMF','SPINE','SPORTS','ALTRO']); clienti=st.text_area('Codici clienti','9010062'); ok=st.form_submit_button('Crea offerta')
         if ok:
             h=ins('offerte_header',{'nome_offerta':nome,'linea':linea})
-            for x in clienti.replace(',', '
-').splitlines():
+            for x in clienti.replace(',', chr(10)).splitlines():
                 x=x.strip()
                 if x: ins('offerte_clienti',{'offerta_id':h['id'],'codice_cliente':x})
             st.success(f"Offerta ID {h['id']}")
