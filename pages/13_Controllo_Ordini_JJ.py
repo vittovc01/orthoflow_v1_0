@@ -276,3 +276,40 @@ if not clos.empty:
   if not _det.empty:
    st.dataframe(_det[[x for x in ["numero_ordine","riferimento_cliente","codice","lotto","quantita","prezzo_unitario","totale_riga"] if x in _det]],use_container_width=True,hide_index=True)
    st.download_button("⬇️ Esporta dettaglio acquisito",_det.to_csv(index=False).encode("utf-8-sig"),"Dettaglio_chiusura_JJ.csv","text/csv")
+
+st.divider()
+st.subheader("🎯 Previsione chiusura OrthoFlow")
+st.caption("Previsione indipendente dai consuntivi J&J: nasce dagli interventi e consumi registrati in OrthoFlow.")
+pf_i=get("interventi"); pf_r=get("righe_intervento")
+if not pf_i.empty and not pf_r.empty:
+ pf_i["_data"]=pd.to_datetime(pf_i["data_intervento"],errors="coerce")
+ mesi=sorted(pf_i["_data"].dropna().dt.to_period("M").unique(),reverse=True)
+ if mesi:
+  pm=st.selectbox("Mese previsione",mesi,format_func=lambda x:str(x),key="forecast_month")
+  pi=pf_i[pf_i["_data"].dt.to_period("M")==pm].copy()
+  pr=pf_r[pf_r["intervento_id"].isin(pi["id"])].copy()
+  pr["_valore"]=pd.to_numeric(pr["totale"],errors="coerce").fillna(0) if "totale" in pr else 0
+  if "totale" not in pr or pd.Series(pr["_valore"]).fillna(0).eq(0).all():
+   pr["_valore"]=pd.to_numeric(pr["quantita"],errors="coerce").fillna(0)*pd.to_numeric(pr["prezzo"],errors="coerce").fillna(0)
+  pr=pr.merge(pi[["id","struttura","linea","codice_cliente","cartella_clinica"]].rename(columns={"id":"intervento_id"}),on="intervento_id",how="left")
+  pr["_divisione"]=pr["linea"].fillna("NON CLASSIFICATA").astype(str).str.upper()
+  tot=float(pd.to_numeric(pr["_valore"],errors="coerce").fillna(0).sum())
+  ordp=get("ordini_johnson"); ordtot=0.0
+  if not ordp.empty and "data_ordine" in ordp and "importo" in ordp:
+   om=pd.to_datetime(ordp["data_ordine"],errors="coerce").dt.to_period("M")
+   ordtot=float(pd.to_numeric(ordp.loc[om==pm,"importo"],errors="coerce").fillna(0).sum())
+  clp=get("chiusure_mensili_johnson"); nis=0.0; inv=0.0
+  if not clp.empty:
+   cm=pd.to_datetime(clp["mese"],errors="coerce").dt.to_period("M"); mc=clp[cm==pm]
+   if "nis_totale" in mc: nis=float(pd.to_numeric(mc["nis_totale"],errors="coerce").fillna(0).sum())
+   if "invoiced_sales_totale" in mc: inv=float(pd.to_numeric(mc["invoiced_sales_totale"],errors="coerce").fillna(0).sum())
+  a,b,d,e=st.columns(4)
+  a.metric("Previsione OrthoFlow",f"€ {tot:,.2f}")
+  b.metric("Ordini J&J rilevati",f"€ {ordtot:,.2f}",f"€ {ordtot-tot:,.2f}")
+  d.metric("NIS chiusura J&J",f"€ {nis:,.2f}",f"€ {nis-tot:,.2f}")
+  e.metric("Invoiced Sales J&J",f"€ {inv:,.2f}")
+  by=pr.groupby(["_divisione","struttura"],dropna=False).agg(Interventi=("intervento_id","nunique"),Righe=("intervento_id","size"),Previsione_EUR=("_valore","sum")).reset_index().rename(columns={"_divisione":"Divisione","struttura":"Struttura"})
+  st.dataframe(by.sort_values("Previsione_EUR",ascending=False),use_container_width=True,hide_index=True)
+  miss=pr[pr["linea"].isna() | pr["codice_cliente"].isna()]
+  if not miss.empty: st.warning(f"{len(miss)} righe senza Linea o Codice Cliente: incluse nel totale, ma da classificare per il confronto J&J preciso.")
+  st.download_button("⬇️ Esporta previsione dettagliata",pr.to_csv(index=False).encode("utf-8-sig"),f"Previsione_OrthoFlow_{pm}.csv","text/csv")
