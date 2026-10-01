@@ -1,6 +1,7 @@
 import os
 import re
 from datetime import date
+from functools import lru_cache
 
 import pandas as pd
 import streamlit as st
@@ -94,6 +95,7 @@ def audit(action, table_name, record_id, detail):
         pass
 
 
+@lru_cache(maxsize=None)
 def offer_ids_for(customer_code, line):
     try:
         links = (sb().table("offerte_clienti").select("offerta_id")
@@ -110,23 +112,50 @@ def offer_ids_for(customer_code, line):
         return []
 
 
+# Queste cache vengono ricreate ad ogni rerun, dopo i controlli di accesso.
+# Nessun prezzo viene condiviso tra sessioni o conservato in session_state.
+@lru_cache(maxsize=None)
+def offer_prices_for(oid):
+    try:
+        exact = {}
+        insensitive = {}
+        offset = 0
+        while True:
+            rows = (sb().table("offerte_prezzi").select("codice,prezzo")
+                    .eq("offerta_id", oid).order("id")
+                    .range(offset, offset + 499).execute().data or [])
+            if not rows:
+                break
+            for row in rows:
+                code = row.get("codice")
+                if code is None:
+                    continue
+                code = str(code)
+                exact.setdefault(code, row.get("prezzo"))
+                insensitive.setdefault(code.upper(), row.get("prezzo"))
+            # Avanza della quantità ricevuta anche se il server limita la pagina.
+            offset += len(rows)
+        return exact, insensitive
+    except Exception:
+        # Non usare dati parziali e non ripetere una query fallita per ogni riga.
+        return None
+
+
+@lru_cache(maxsize=None)
 def price_for(customer_code, product_code, line):
     target = clean(product_code).upper()
     if not target:
         return None
     try:
         for oid in offer_ids_for(customer_code, line):
-            rows = (sb().table("offerte_prezzi").select("codice,prezzo")
-                    .eq("offerta_id", oid).eq("codice", target)
-                    .limit(1).execute().data or [])
-            if rows:
-                return float(rows[0].get("prezzo") or 0)
-            rows = (sb().table("offerte_prezzi").select("codice,prezzo")
-                    .eq("offerta_id", oid).ilike("codice", target)
-                    .limit(20).execute().data or [])
-            for p in rows:
-                if ncode(p.get("codice")) == ncode(target):
-                    return float(p.get("prezzo") or 0)
+            prices = offer_prices_for(oid)
+            if prices is None:
+                return None
+            exact, insensitive = prices
+            if target in exact:
+                return float(exact[target] or 0)
+            if target in insensitive:
+                return float(insensitive[target] or 0)
     except Exception:
         pass
     return None
