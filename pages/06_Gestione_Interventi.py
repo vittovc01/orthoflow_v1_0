@@ -366,8 +366,24 @@ if st.button("💾 Salva tutte le modifiche", type="primary", use_container_widt
             if ncode(code) == ncode(old_code) and lot == old_lot:
                 avail += old_qty
             if avail < qty:
-                errors.append(f"Riga {rid} ({code} lotto {lot}): disponibile {avail:g}, richiesto {qty:g} in {mag}.")
-                continue
+                # Non bloccare la rettifica: il materiale può essere già stato scaricato in Business
+                # prima dell'importazione della giacenza in OrthoFlow. La carenza viene inviata a Direzione.
+                try:
+                    existing = (sb().table("anomalie_giacenza").select("id")
+                                .eq("intervento_id", intervention_id)
+                                .eq("codice", code).eq("lotto", lot)
+                                .eq("stato", "DA_VERIFICARE").limit(1).execute().data or [])
+                    if not existing:
+                        sb().table("anomalie_giacenza").insert({
+                            "codice": code, "lotto": lot,
+                            "quantita_richiesta": qty, "quantita_disponibile": avail,
+                            "magazzino": mag, "intervento_id": intervention_id,
+                            "stato": "DA_VERIFICARE",
+                            "motivo": "RETTIFICA_INTERVENTO_GIACENZA_INSUFFICIENTE",
+                            "creato_da": user(),
+                        }).execute()
+                except Exception:
+                    pass
 
         changes.append({
             "rid": rid,
@@ -405,6 +421,12 @@ if st.button("💾 Salva tutte le modifiche", type="primary", use_container_widt
             old_origin = clean(old.get("origine")) or "CONTO DEPOSITO"
 
             if ch["stock_changed"]:
+                # Se il nuovo materiale non è disponibile, la rettifica resta salvabile e viene
+                # tracciata come anomalia Direzione; non creiamo uno scarico negativo fittizio.
+                _avail_new = available_qty(mag, ch["code"], ch["lot"])
+                _same_item = ncode(ch["code"]) == ncode(old_code) and ch["lot"] == old_lot
+                if _same_item:
+                    _avail_new += old_qty
                 # 1) annulla il vecchio scarico: quantità positiva => rientro in giacenza
                 sb().table("movimenti_magazzino").insert({
                     "tipo_movimento": "RETTIFICA_INTERVENTO",
@@ -420,21 +442,22 @@ if st.button("💾 Salva tutte le modifiche", type="primary", use_container_widt
                     "note": f"Rettifica riga {rid}: annullo scarico precedente",
                     "utente": user(),
                 }).execute()
-                # 2) applica il materiale corretto
-                sb().table("movimenti_magazzino").insert({
-                    "tipo_movimento": "RETTIFICA_INTERVENTO",
-                    "codice_magazzino": mag,
-                    "codice": ch["code"],
-                    "descrizione": ch["desc"],
-                    "lotto": ch["lot"],
-                    "scadenza": ch["expiry"],
-                    "quantita": -abs(ch["qty"]),
-                    "origine": ch["origin"],
-                    "riferimento_tipo": "INTERVENTO",
-                    "riferimento_id": str(intervention_id),
-                    "note": f"Rettifica riga {rid}: applicato materiale corretto",
-                    "utente": user(),
-                }).execute()
+                # 2) applica il materiale corretto solo se realmente disponibile.
+                if _avail_new >= ch["qty"]:
+                    sb().table("movimenti_magazzino").insert({
+                        "tipo_movimento": "RETTIFICA_INTERVENTO",
+                        "codice_magazzino": mag,
+                        "codice": ch["code"],
+                        "descrizione": ch["desc"],
+                        "lotto": ch["lot"],
+                        "scadenza": ch["expiry"],
+                        "quantita": -abs(ch["qty"]),
+                        "origine": ch["origin"],
+                        "riferimento_tipo": "INTERVENTO",
+                        "riferimento_id": str(intervention_id),
+                        "note": f"Rettifica riga {rid}: applicato materiale corretto",
+                        "utente": user(),
+                    }).execute()
 
             payload = {
                 "codice": ch["code"],
