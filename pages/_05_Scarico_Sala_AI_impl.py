@@ -123,6 +123,8 @@ def storage_upload(local_path, intervention_id):
     storage_path = f"impianti/{pd.Timestamp.now().strftime('%Y/%m')}/intervento_{intervention_id}_{safe_name}"
     try:
         data = Path(local_path).read_bytes()
+        if str(local_path).lower().endswith(".pdf") and data[:5] != b"%PDF-":
+            raise ValueError("Il file dichiarato PDF non contiene un PDF valido")
         try:
             sb().storage.from_(bucket).upload(storage_path, data, file_options={"upsert": "true"})
         except Exception:
