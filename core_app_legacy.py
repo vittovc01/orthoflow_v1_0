@@ -752,7 +752,10 @@ if menu=='Dashboard':
     struttura_col = 'struttura' if 'struttura' in revenue.columns else ('cliente' if 'cliente' in revenue.columns else None)
     if not revenue.empty and struttura_col:
         sr = revenue.copy()
-        sr['Struttura'] = sr[struttura_col].fillna('').astype(str).str.strip().replace('', 'NON INDICATA')
+        sr['Struttura'] = sr[struttura_col].fillna('').astype(str).str.strip()
+        if 'cliente' in sr.columns:
+            sr['Struttura'] = sr['Struttura'].mask(sr['Struttura'].eq(''), sr['cliente'].fillna('').astype(str).str.strip())
+        sr['Struttura'] = sr['Struttura'].replace('', 'NON INDICATA')
         sr_summary = sr.groupby('Struttura',as_index=False).agg(Fatturato=('totale','sum'),Interventi=('intervento_id','nunique'),Pezzi=('quantita','sum')).sort_values('Fatturato',ascending=False)
         st.bar_chart(sr_summary.head(20).set_index('Struttura')['Fatturato'])
         st.dataframe(sr_summary,use_container_width=True,hide_index=True,height=360)
@@ -1121,7 +1124,8 @@ elif menu=='Offerte':
             nome=st.text_input('Nome offerta','Federico II Trauma'); linea=st.selectbox('Linea',['TRAUMA','PROTESICA','CMF','SPINE','SPORTS','ALTRO']); clienti=st.text_area('Codici clienti','9010062'); ok=st.form_submit_button('Crea offerta')
         if ok:
             h=ins('offerte_header',{'nome_offerta':nome,'linea':linea})
-            for x in clienti.replace(',', '\n').splitlines():
+            for x in clienti.replace(',', '
+').splitlines():
                 x=x.strip()
                 if x: ins('offerte_clienti',{'offerta_id':h['id'],'codice_cliente':x})
             st.success(f"Offerta ID {h['id']}")
