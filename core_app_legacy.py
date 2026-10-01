@@ -706,6 +706,39 @@ if menu=='Dashboard':
     render_revenue_charts(revenue, 'dash')
 
     st.divider()
+    st.subheader('🏥 Andamento per divisione')
+    if not revenue.empty and 'linea' in revenue.columns:
+        div = revenue.copy()
+        div['Divisione'] = div['linea'].fillna('NON DEFINITA').astype(str).str.upper().apply(lambda x: 'PROTESICA' if 'PROTES' in x else ('TRAUMA' if 'TRAUMA' in x else x))
+        div_summary = div.groupby('Divisione',as_index=False).agg(Fatturato=('totale','sum'),Interventi=('intervento_id','nunique'))
+        dc1,dc2=st.columns(2)
+        with dc1:
+            st.caption('Fatturato per divisione')
+            st.bar_chart(div_summary.set_index('Divisione')['Fatturato'])
+        with dc2:
+            st.caption('Interventi per divisione')
+            st.bar_chart(div_summary.set_index('Divisione')['Interventi'])
+        st.dataframe(div_summary,use_container_width=True,hide_index=True)
+    else:
+        st.info('Dati divisione non ancora disponibili.')
+
+    st.subheader('👨‍⚕️ Andamento per chirurgo')
+    if not revenue.empty and 'chirurgo' in revenue.columns:
+        surg = revenue.copy()
+        surg['Chirurgo'] = surg['chirurgo'].fillna('').astype(str).str.strip().replace('', 'NON INDICATO')
+        surg_summary = surg.groupby('Chirurgo',as_index=False).agg(Fatturato=('totale','sum'),Interventi=('intervento_id','nunique'),Pezzi=('quantita','sum')).sort_values('Fatturato',ascending=False)
+        sc1,sc2=st.columns(2)
+        with sc1:
+            st.caption('Fatturato per chirurgo')
+            st.bar_chart(surg_summary.head(20).set_index('Chirurgo')['Fatturato'])
+        with sc2:
+            st.caption('Numero interventi per chirurgo')
+            st.bar_chart(surg_summary.head(20).set_index('Chirurgo')['Interventi'])
+        st.dataframe(surg_summary,use_container_width=True,hide_index=True,height=360)
+    else:
+        st.info('Dati chirurgo non ancora disponibili.')
+
+    st.divider()
     a1,a2=st.columns(2)
     with a1:
         st.subheader('⚠️ Anomalie recenti')
