@@ -414,9 +414,8 @@ if confirm:
             shortages.append({"Codice": sample_code, "Lotto": lot, "Disponibile": avail, "Richiesto": qty, "Magazzino": mag})
     if shortages:
         st.session_state["scarico_stock_errors"] = shortages
-        st.error("Giacenza insufficiente: intervento NON creato e magazzino NON scaricato.")
-        st.rerun()
-    st.session_state.pop("scarico_stock_errors", None)
+    else:
+        st.session_state.pop("scarico_stock_errors", None)
 
     customer_code = clean(selected_client.get("codice_cliente"))
     priced_rows = []
@@ -468,7 +467,7 @@ if confirm:
     }
 
     try:
-        result = sb().rpc("crea_intervento_scarico_ai", {
+        result = sb().rpc("crea_intervento_scarico_ai_flessibile", {
             "p_header": header,
             "p_rows": rpc_rows,
             "p_utente": user(),
