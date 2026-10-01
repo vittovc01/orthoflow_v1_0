@@ -461,6 +461,7 @@ if confirm:
         "data_intervento": procedure_date.isoformat(),
         "codice_cliente": customer_code,
         "cliente": clean(selected_client.get("descrizione")),
+        "struttura": clean(selected_client.get("descrizione")),
         "cartella_clinica": clean(clinical_record),
         "chirurgo": clean(surgeon),
         "agente": clean(agent),
