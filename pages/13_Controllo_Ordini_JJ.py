@@ -223,16 +223,28 @@ if closefile and st.button("📥 Importa e confronta chiusura",type="primary"):
     if n.lower() in lc:return lc[n.lower()]
    return None
   code=zcol("codice","codice prodotto","product code"); qty=zcol("quantita","quantità","quantity"); price=zcol("prezzo","prezzo unitario","unit price"); total=zcol("totale","totale riga","total"); order=zcol("numero ordine","numero_ordine","ordine","order"); lot=zcol("lotto","lot")
-  if code is None: st.error("Non riconosco la colonna Codice prodotto. Il file non viene importato.")
+  econ_nis=zcol("sum of [nis]","nis"); econ_is=zcol("sum of [invoiced_sales__is_]","invoiced_sales","invoiced sales"); cac=zcol("c account[c. account code (cac)]","cac"); fam=zcol("product[p. bravo major]","famiglia prodotto"); bill=zcol("c bill to[c. bill to]","bill to"); acc=zcol("c account[c. account]","account"); reg=zcol("c account[c. account region]","region"); prov=zcol("c account[c. account county]","county")
+  if code is None and econ_nis is None and econ_is is None: st.error("Formato non riconosciuto: servono colonne di dettaglio ordine oppure NIS/Invoiced Sales.")
   else:
-   tot=float(pd.to_numeric(z[total],errors="coerce").fillna(0).sum()) if total else 0
-   h=sb().table("chiusure_mensili_johnson").insert({"mese":str(pd.Timestamp(mese_close).to_period("M").start_time.date()),"divisione":div,"nome_file":closefile.name,"importo_totale_jj":tot,"righe_totali":len(z)}).execute().data[0]
-   for _,r in z.iterrows():
-    p={"chiusura_id":h["id"],"codice":str(r[code]).strip(),"raw_data":{str(k):None if pd.isna(v) else str(v) for k,v in r.items()}}
+   is_econ=(code is None and (econ_nis is not None or econ_is is not None))
+   valid=z.copy()
+   if is_econ and cac is not None: valid=valid[valid[cac].notna()]
+   nis_tot=float(pd.to_numeric(valid[econ_nis],errors="coerce").fillna(0).sum()) if econ_nis else 0
+   is_tot=float(pd.to_numeric(valid[econ_is],errors="coerce").fillna(0).sum()) if econ_is else 0
+   tot=float(pd.to_numeric(valid[total],errors="coerce").fillna(0).sum()) if total else nis_tot
+   h=sb().table("chiusure_mensili_johnson").insert({"mese":str(pd.Timestamp(mese_close).to_period("M").start_time.date()),"divisione":div,"nome_file":closefile.name,"importo_totale_jj":tot,"nis_totale":nis_tot,"invoiced_sales_totale":is_tot,"righe_totali":len(valid)}).execute().data[0]
+   for _,r in valid.iterrows():
+    p={"chiusura_id":h["id"],"codice":str(r[code]).strip() if code is not None and pd.notna(r[code]) else "ECONOMICO","raw_data":{str(k):None if pd.isna(v) else str(v) for k,v in r.items()}}
+    if is_econ:
+     emap=[(reg,"regione"),(prov,"provincia"),(bill,"bill_to"),(acc,"account_name"),(fam,"famiglia_prodotto"),(cac,"cac")]
+     for ec,ed in emap:
+      if ec is not None and pd.notna(r[ec]): p[ed]=str(r[ec]).strip()
+     if econ_nis is not None and pd.notna(r[econ_nis]): p["nis"]=float(pd.to_numeric(r[econ_nis],errors="coerce"))
+     if econ_is is not None and pd.notna(r[econ_is]): p["invoiced_sales"]=float(pd.to_numeric(r[econ_is],errors="coerce"))
     for col,dest,num in [(order,"numero_ordine",False),(lot,"lotto",False),(qty,"quantita",True),(price,"prezzo_unitario",True),(total,"totale_riga",True)]:
      if col is not None and pd.notna(r[col]): p[dest]=float(pd.to_numeric(r[col],errors="coerce")) if num and pd.notna(pd.to_numeric(r[col],errors="coerce")) else str(r[col]).strip()
     sb().table("righe_chiusura_johnson").insert(p).execute()
-   st.success(f"Chiusura {div} importata: {len(z)} righe · € {tot:,.2f}."); st.rerun()
+   st.success(f"Chiusura {div} importata: {len(valid)} righe · NIS € {nis_tot:,.2f} · Invoiced Sales € {is_tot:,.2f}."); st.rerun()
  except Exception as e: st.error(f"Chiusura non importata: {e}")
 
 st.subheader("📈 Previsione OrthoFlow vs consuntivo J&J")
