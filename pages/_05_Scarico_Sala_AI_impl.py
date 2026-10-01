@@ -376,6 +376,8 @@ else:
 
 
 is_malzoni = clean(selected_client.get("codice_cliente")) == "9010013"
+if source_rows:
+    st.caption(f"OCR: {len(source_rows)} righe riconosciute · {len(rows)} righe nella lista modificabile · {len(excluded_rows)} righe di altri produttori escluse.")
 if excluded_rows:
     st.warning(f"{len(excluded_rows)} righe di altri produttori escluse dallo scarico, dal fatturato e dagli ordini OrthoFlow.")
     with st.expander("Materiale di altre aziende escluso"):
@@ -399,6 +401,7 @@ with st.form("scarico_ai_confirm"):
             st.info("Malzoni: spunta il materiale della struttura Smart Track. Prezzi, fatturato e ordini restano inclusi; queste righe non scaricano la vostra giacenza.")
         edited = st.data_editor(
             df_rows[preferred], num_rows="dynamic", use_container_width=True,
+            height=min(1600, max(220, 35 * (len(df_rows) + 3))), row_height=35,
             column_config={
                 "escludi_riga": st.column_config.CheckboxColumn(
                     "Escludi riga", default=False,
