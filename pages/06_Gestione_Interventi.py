@@ -168,6 +168,24 @@ def price_for(customer_code, product_code, line):
     return None
 
 
+@lru_cache(maxsize=None)
+def remembered_prices_for(customer_code, line):
+    # La memoria deriva esclusivamente da prezzi manuali realmente salvati.
+    try:
+        rows = sb().rpc("prezzi_manuali_struttura", {
+            "p_codice_cliente": clean(customer_code),
+            "p_linea": clean(line).upper(),
+        }).execute().data or []
+        return {r["codice_normalizzato"]: float(r["prezzo"]) for r in rows}
+    except Exception as e:
+        st.warning(f"Prezzi manuali precedenti non disponibili: {e}")
+        return {}
+
+
+def remembered_price_for(customer_code, product_code, line):
+    return remembered_prices_for(customer_code, line).get(ncode(product_code))
+
+
 def available_qty(mag, code, lot):
     try:
         rows = (sb().table("giacenze").select("codice,lotto,quantita")
@@ -285,9 +303,13 @@ prepared = []
 for r in rows:
     current_price = r.get("prezzo")
     offer_price = price_for(customer_code, r.get("codice"), line)
+    remembered_price = remembered_price_for(customer_code, r.get("codice"), line) if offer_price is None and current_price is None else None
     if current_price is None and offer_price is not None:
         editable_price = float(offer_price)
         source = "OFFERTA DA APPLICARE"
+    elif current_price is None and remembered_price is not None:
+        editable_price = float(remembered_price)
+        source = "PREZZO MANUALE MEMORIZZATO"
     elif current_price is None:
         editable_price = None
         source = "DA INSERIRE"
@@ -307,13 +329,16 @@ for r in rows:
         "origine": clean(r.get("origine")),
         "conto_deposito_struttura": clean(r.get("origine")) == "CONTO DEPOSITO STRUTTURA",
         "prezzo": editable_price,
+        "prezzo_source": clean(r.get("prezzo_source")) or (
+            "OFFERTA" if offer_price is not None else
+            "MANUALE_MEMORIZZATO" if remembered_price is not None else "DA_VERIFICARE_DIREZIONE"),
         "prezzo_offerta": offer_price,
         "fonte": source,
         "reintegro": bool(r.get("reintegro", True)),
         "totale": (qty * editable_price) if editable_price is not None else None,
     })
 
-df = pd.DataFrame(prepared)
+df = pd.DataFrame(prepared).drop(columns=["prezzo_source"])
 if is_malzoni:
     cols = list(df.columns)
     cols.remove("conto_deposito_struttura")
@@ -536,6 +561,7 @@ if st.button("💾 Salva tutte le modifiche", type="primary", use_container_widt
                 "validazione": ch["validation"],
                 "origine": ch["origin"],
                 "prezzo": ch["price"],
+                "prezzo_source": "MANUALE" if ch["price"] != float(old.get("prezzo") or 0) else old.get("prezzo_source"),
                 "totale": ch["total"],
                 "reintegro": ch["reintegro"],
             }

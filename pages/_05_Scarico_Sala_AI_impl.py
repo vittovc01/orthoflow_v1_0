@@ -249,15 +249,37 @@ def price_for(customer_code, product_code, line):
     return None
 
 
-def manual_price_for(code):
+def manual_price_key(customer_code, code, line):
+    return f"{clean(customer_code)}_{clean(line).upper()}_{ncode(code)}"
+
+
+def manual_price_for(customer_code, code, line):
     try:
-        key=ncode(code)
+        key=manual_price_key(customer_code, code, line)
         if st.session_state.get(f"free_goods_{key}", False):
             return 0.0
         val = float(st.session_state.get(f"manual_price_{key}", 0) or 0)
         return val if val > 0 else None
     except Exception:
         return None
+
+
+@lru_cache(maxsize=None)
+def remembered_prices_for(customer_code, line):
+    # La memoria deriva esclusivamente da prezzi manuali realmente salvati.
+    try:
+        rows = sb().rpc("prezzi_manuali_struttura", {
+            "p_codice_cliente": clean(customer_code),
+            "p_linea": clean(line).upper(),
+        }).execute().data or []
+        return {r["codice_normalizzato"]: float(r["prezzo"]) for r in rows}
+    except Exception as e:
+        st.warning(f"Prezzi manuali precedenti non disponibili: {e}")
+        return {}
+
+
+def remembered_price_for(customer_code, product_code, line):
+    return remembered_prices_for(customer_code, line).get(ncode(product_code))
 
 
 def available_qty(mag, code, lot):
@@ -375,6 +397,7 @@ else:
     selected_client = {"codice_cliente": "", "descrizione": st.text_input("Struttura / cliente", value=ai_clinic)}
 
 
+line = st.selectbox("Linea", ["TRAUMA", "PROTESICA", "CMF", "SPINE", "SPORTS", "ALTRO"], key="scarico_price_line")
 is_malzoni = clean(selected_client.get("codice_cliente")) == "9010013"
 if source_rows:
     st.caption(f"OCR: {len(source_rows)} righe riconosciute · {len(rows)} righe nella lista modificabile · {len(excluded_rows)} righe di altri produttori escluse.")
@@ -444,8 +467,8 @@ with st.form("scarico_ai_confirm"):
                 cols = st.columns([2, 4, 2, 2])
                 cols[0].markdown(f"**{code}**")
                 cols[1].caption(clean(item.get("descrizione")) or "Descrizione non disponibile")
-                cols[2].number_input("Prezzo €", min_value=0.0, step=0.01, format="%.2f", key=f"manual_price_{code_key}", label_visibility="collapsed")
-                cols[3].checkbox("Sconto merce €0", key=f"free_goods_{code_key}", help="Usa prezzo zero come valore reale, non come prezzo mancante.")
+                cols[2].number_input("Prezzo €", min_value=0.0, step=0.01, format="%.2f", key=f"manual_price_{manual_price_key(selected_client.get('codice_cliente'), code, line)}", label_visibility="collapsed")
+                cols[3].checkbox("Sconto merce €0", key=f"free_goods_{manual_price_key(selected_client.get('codice_cliente'), code, line)}", help="Usa prezzo zero come valore reale, non come prezzo mancante.")
 
     stock_errors = st.session_state.get("scarico_stock_errors", []) or []
     if stock_errors:
@@ -461,7 +484,6 @@ with st.form("scarico_ai_confirm"):
         wh = st.selectbox("Scarica da giacenza", warehouses)
         mag = wh.split(" - ")[0]
         agent = st.selectbox("Agente", agents) if agents and agents != [""] else st.text_input("Agente")
-        line = st.selectbox("Linea", ["TRAUMA", "PROTESICA", "CMF", "SPINE", "SPORTS", "ALTRO"])
 
     verified = st.checkbox("Ho verificato codice Johnson/REF, lotto, scadenza e quantità di tutte le righe.")
     confirm = st.form_submit_button("📤 Crea intervento e scarica materiali", type="primary", use_container_width=True, disabled=(len(rows) == 0))
@@ -515,8 +537,12 @@ if confirm:
         price = price_for(customer_code, code, line)
         source = "OFFERTA"
         if price is None:
-            price = manual_price_for(code)
-            source = ("SCONTO_MERCE" if st.session_state.get(f"free_goods_{ncode(code)}", False) else "MANUALE") if price is not None else "MANCANTE"
+            price = manual_price_for(customer_code, code, line)
+            source = ("SCONTO_MERCE" if st.session_state.get(f"free_goods_{manual_price_key(customer_code, code, line)}", False) else "MANUALE") if price is not None else "MANCANTE"
+        if price is None:
+            price = remembered_price_for(customer_code, code, line)
+            if price is not None:
+                source = "MANUALE_MEMORIZZATO"
         if price is None:
             missing.append({"codice": code, "descrizione": clean(r.get("descrizione"))})
             price = 0.0
