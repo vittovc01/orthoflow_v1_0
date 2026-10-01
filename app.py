@@ -96,8 +96,10 @@ if not logged_in:
     nav = st.navigation([login_page], position="hidden")
 else:
     pages = {"HOME": [control_tower]}
-    if is_director or "OPERATIVITA" in permissions:
-        pages["OPERATIVITÀ"] = [operations_page, scarico_sala_ai_page]
+    if is_director:
+        pages["OPERATIVITÀ"] = [scarico_sala_ai_page]
+    elif "OPERATIVITA" in permissions:
+        pages["OPERATIVITÀ"] = [scarico_sala_ai_page]
     elif "AGENTE" in permissions:
         pages["OPERATIVITÀ"] = [scarico_sala_ai_page, customer_connect_page]
     if is_director or "AMMINISTRAZIONE" in permissions:
