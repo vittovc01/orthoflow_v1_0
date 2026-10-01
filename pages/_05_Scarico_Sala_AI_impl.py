@@ -36,7 +36,7 @@ def client():
     return create_client(str(url).rstrip("/"), str(key))
 
 
-def sb(): return client()\n
+def sb(): return client()
 def generate_implant_document(intervention_id, header):
     """Genera un DDT di avvenuto impianto nello stile operativo Business."""
     try:
