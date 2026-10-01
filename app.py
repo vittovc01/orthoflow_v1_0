@@ -82,7 +82,7 @@ documents_page = st.Page("pages/10_Documenti_Logistica.py", title="Documenti Log
 jj_orders_page = st.Page("pages/13_Controllo_Ordini_JJ.py", title="Controllo Ordini J&J", icon="🔎", url_path="controllo-ordini-jj")
 
 users_page = st.Page("pages/11_Gestione_Utenti.py", title="Utenti & Permessi", icon="👥", url_path="utenti-permessi")
-courier_data_page = st.Page("pages/12_Gestione_Dati_Corrieri.py", title="Gestione Dati Corrieri", icon="🗂️", url_path="gestione-dati-corrieri")
+courier_data_page = st.Page("pages/12_Gestione_Dati_Corrieri.py", title="Gestione Dati Corrieri", icon="🗂️", url_path="gestione-dati-corrieri")\nprice_anomalies_page = st.Page("pages/14_Anomalie_Prezzi.py", title="Anomalie Prezzi", icon="⚠️", url_path="anomalie-prezzi")
 
 operations_page = st.Page(
     "core_app.py",
@@ -106,7 +106,7 @@ else:
     elif "CORRIERE" in permissions:
         pages["CORRIERI"] = [courier_page]
     if is_director:
-        pages["DIREZIONE"] = [users_page, courier_data_page]
+        pages["DIREZIONE"] = [price_anomalies_page, users_page, courier_data_page]
     nav = st.navigation(pages, position="sidebar", expanded=True)
 
 nav.run()
