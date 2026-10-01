@@ -1,6 +1,6 @@
 import os
 import re
-from datetime import date
+from datetime import date, datetime
 from pathlib import Path
 
 import pandas as pd
@@ -36,7 +36,41 @@ def client():
     return create_client(str(url).rstrip("/"), str(key))
 
 
-def sb(): return client()
+def sb(): return client()\n
+def generate_implant_document(intervention_id, header):
+    """Genera il documento impianto numerato e lo archivia nello Storage."""
+    try:
+        existing=sb().table("documenti_impianto").select("*").eq("intervento_id",intervention_id).limit(1).execute().data or []
+        if existing: return existing[0]
+        division="PROTESICA" if "PROTES" in clean(header.get("linea")).upper() else "TRAUMA"
+        seq="documento_impianto_protesica_seq" if division=="PROTESICA" else "documento_impianto_trauma_seq"
+        nr=sb().rpc("nextval",{"regclass":seq}).execute().data
+        numero=f"{'PRO' if division=='PROTESICA' else 'TRA'}-{pd.Timestamp(header.get('data_intervento')).year}-{int(nr):06d}"
+        rows=sb().table("righe_intervento").select("codice,descrizione,lotto,scadenza,quantita").eq("intervento_id",intervention_id).execute().data or []
+        from io import BytesIO
+        from reportlab.lib.pagesizes import A4
+        from reportlab.platypus import SimpleDocTemplate,Paragraph,Spacer,Table,TableStyle
+        from reportlab.lib import colors
+        from reportlab.lib.styles import getSampleStyleSheet
+        b=BytesIO(); styles=getSampleStyleSheet(); doc=SimpleDocTemplate(b,pagesize=A4,rightMargin=28,leftMargin=28,topMargin=28,bottomMargin=28)
+        story=[Paragraph("ORTHOFLOW - DOCUMENTO DI IMPIANTO",styles["Title"]),Spacer(1,10),
+          Paragraph(f"<b>Documento:</b> {numero} &nbsp;&nbsp; <b>Divisione:</b> {division}",styles["Normal"]),
+          Paragraph(f"<b>Data intervento:</b> {header.get('data_intervento')} &nbsp;&nbsp; <b>Cartella clinica:</b> {clean(header.get('cartella_clinica'))}",styles["Normal"]),
+          Paragraph(f"<b>Struttura/Cliente:</b> {clean(header.get('cliente'))} &nbsp;&nbsp; <b>Codice cliente:</b> {clean(header.get('codice_cliente'))}",styles["Normal"]),Spacer(1,12)]
+        data=[["Codice","Descrizione","Lotto","Scadenza","Q.tà"]]
+        for r in rows:data.append([clean(r.get("codice")),clean(r.get("descrizione")),clean(r.get("lotto")),clean(r.get("scadenza")),str(r.get("quantita") or "")])
+        t=Table(data,repeatRows=1,colWidths=[85,190,85,80,40]); t.setStyle(TableStyle([("GRID",(0,0),(-1,-1),.4,colors.grey),("BACKGROUND",(0,0),(-1,0),colors.lightgrey),("FONTSIZE",(0,0),(-1,-1),8),("VALIGN",(0,0),(-1,-1),"TOP")]))
+        story+=[t,Spacer(1,16),Paragraph("Documento generato automaticamente da OrthoFlow. In futuro la numerazione/documentazione potrà essere demandata a Business.",styles["Italic"])]
+        doc.build(story); b.seek(0)
+        path=f"documenti_impianto/{division.lower()}/{pd.Timestamp(header.get('data_intervento')).year}/{numero}.pdf"
+        sb().storage.from_("orthoflow-impianti").upload(path,b.getvalue(),file_options={"content-type":"application/pdf","upsert":"true"})
+        rec={"intervento_id":intervention_id,"divisione":division,"numero_documento":numero,"data_documento":header.get("data_intervento"),"storage_path":path}
+        return sb().table("documenti_impianto").insert(rec).execute().data[0]
+    except Exception as e:
+        st.warning(f"Intervento salvato, ma documento impianto da rigenerare: {e}")
+        return None
+
+
 def clean(v):
     if v is None or (isinstance(v, float) and pd.isna(v)):
         return ""
