@@ -69,10 +69,6 @@ def get_table(name):
     try: return pd.DataFrame(sb().table(name).select('*').execute().data or [])
     except Exception: return pd.DataFrame()
 
-def euro(v):
-    try: return f"€ {float(v):,.2f}".replace(',', 'X').replace('.', ',').replace('X','.')
-    except Exception: return '€ 0,00'
-
 st.markdown(f'''<div class="ct-hero"><div class="ct-kicker">ORTHOFLOW CONTROL TOWER</div><h1>Command center operativo</h1><p>{role()} · {agent() or user()} · {date.today().strftime('%d/%m/%Y')}</p></div>''',unsafe_allow_html=True)
 
 interventi=get_table('interventi'); righe=get_table('righe_intervento'); giacenze=get_table('giacenze'); anomalie=get_table('anomalie'); movimenti=get_table('movimenti_magazzino')
@@ -80,13 +76,11 @@ if role()=='Agente' and agent():
     if not interventi.empty and 'agente' in interventi.columns: interventi=interventi[interventi['agente'].astype(str).str.casefold()==agent().casefold()]
     if not righe.empty and 'intervento_id' in righe.columns and not interventi.empty:
         ids=set(interventi['id'].astype(str)); righe=righe[righe['intervento_id'].astype(str).isin(ids)]
-fatt=0.0
-if not righe.empty and 'totale' in righe.columns: fatt=pd.to_numeric(righe['totale'],errors='coerce').fillna(0).sum()
 aperti=len(anomalie) if not anomalie.empty else 0
 if not anomalie.empty and 'risolta' in anomalie.columns: aperti=len(anomalie[~anomalie['risolta'].fillna(False).astype(bool)])
 
-c1,c2,c3,c4,c5=st.columns(5)
-c1.metric('Fatturato',euro(fatt)); c2.metric('Interventi',len(interventi)); c3.metric('Giacenze',len(giacenze) if role()!='Agente' else '—'); c4.metric('Anomalie aperte',aperti); c5.metric('Movimenti',len(movimenti) if role() in {'Admin','Magazzino'} else '—')
+c1,c2,c3,c4=st.columns(4)
+c1.metric('Interventi',len(interventi)); c2.metric('Giacenze',len(giacenze) if role()!='Agente' else '—'); c3.metric('Anomalie aperte',aperti); c4.metric('Movimenti',len(movimenti) if role() in {'Admin','Magazzino'} else '—')
 
 st.markdown('<div class="ct-section">Azioni rapide</div>',unsafe_allow_html=True)
 if role() in {'Admin','Magazzino'}:
@@ -98,7 +92,7 @@ if role() in {'Admin','Magazzino'}:
 else:
     a,b=st.columns(2)
     a.page_link('pages/05_Scarico_Sala_AI.py',label='📸 Scarico Sala AI',use_container_width=True)
-    b.page_link('core_app.py',label='🏥 Gestionale',use_container_width=True)
+    b.page_link('core_app.py',label='📊 Controllo di Gestione',use_container_width=True)
 
 if role() in {'Admin','Magazzino'}:
     st.markdown('<div class="ct-section">Logistica in evidenza</div>',unsafe_allow_html=True)
