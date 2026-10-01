@@ -420,6 +420,30 @@ if confirm:
         inserted = int(result.get("righe", 0) or 0)
         total = float(result.get("totale", 0) or 0)
 
+        # Se lo scarico proviene da un magazzino associato a un Kit, genera automaticamente i reintegri.
+        try:
+            kits = sb().table("kit_logistici").select("id,codice").eq("codice_magazzino", mag).execute().data or []
+            if len(kits) == 1 and intervention_id:
+                kit_id = int(kits[0]["id"])
+                saved_rows = sb().table("righe_intervento").select("id,codice,lotto,quantita").eq("intervento_id", intervention_id).execute().data or []
+                for sr in saved_rows:
+                    exists = sb().table("reintegri_kit").select("id").eq("kit_id", kit_id).eq("riga_intervento_id", sr["id"]).limit(1).execute().data or []
+                    if not exists:
+                        sb().table("reintegri_kit").insert({
+                            "kit_id": kit_id,
+                            "riga_intervento_id": sr["id"],
+                            "codice": sr.get("codice"),
+                            "lotto_consumato": sr.get("lotto"),
+                            "quantita_richiesta": float(sr.get("quantita") or 0),
+                            "stato": "DA_REINTEGRARE",
+                            "utente": user()
+                        }).execute()
+                st.info(f"Kit {kits[0]['codice']}: creati automaticamente i reintegri dei componenti utilizzati.")
+            elif len(kits) > 1:
+                st.warning("Più Kit risultano associati allo stesso magazzino: reintegro automatico non creato per evitare un abbinamento errato.")
+        except Exception as kit_err:
+            st.warning(f"Scarico completato, ma generazione reintegro Kit da verificare: {kit_err}")
+
         doc_ok = save_document_after_transaction(
             intervention_id, procedure_date, customer_code,
             clean(selected_client.get("descrizione")), agent, clinical_record
