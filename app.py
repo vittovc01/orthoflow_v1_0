@@ -107,7 +107,7 @@ else:
     elif "CORRIERE" in permissions:
         pages["CORRIERI"] = [courier_page]
     if is_director:
-        pages["DIREZIONE"] = [price_anomalies_page, users_page, courier_data_page]
+        pages["DIREZIONE"] = [operations_page, price_anomalies_page, users_page, courier_data_page]
     nav = st.navigation(pages, position="sidebar", expanded=True)
 
 nav.run()
