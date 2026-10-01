@@ -240,3 +240,31 @@ else:
                 sb().table("kit_logistici").update({"stato":_ns,"missione_id":int(r.id),"corriere_id":cid,"struttura_id":int(r.struttura_id)}).eq("id",int(_kk[0]["id"])).execute()
                 sb().table("movimenti_kit_corrieri").insert({"kit_id":int(_kk[0]["id"]),"missione_id":int(r.id),"corriere_id":cid,"struttura_id":int(r.struttura_id),"movimento":"CONSEGNA" if r["tipo"]=="CONSEGNA" else "RITIRO","stato_precedente":_old,"stato_nuovo":_ns,"utente":str(st.session_state.get("user",""))}).execute()
         st.rerun()
+
+st.divider()
+st.subheader("🧩 Reintegro fisico Kit")
+st.caption("Dopo il Carico Mobile, assegna il nuovo componente ricevuto al kit corretto. Il lotto nuovo entra nella composizione aggiornata del kit.")
+if manager:
+ kits=pd.DataFrame(sb.table("kit_logistici").select("*").execute().data or [])
+ drows=pd.DataFrame(sb.table("ddt_righe").select("*").execute().data or [])
+ dheads=pd.DataFrame(sb.table("ddt").select("id,numero_ddt,data_ddt").execute().data or [])
+ pending=pd.DataFrame(sb.table("reintegri_kit").select("*").in_("stato",["DA_REINTEGRARE","PARZIALE"]).execute().data or [])
+ if not pending.empty:
+  pending=pending.merge(kits[["id","codice"]].rename(columns={"id":"kit_id","codice":"kit"}),on="kit_id",how="left")
+  st.dataframe(pending[[x for x in ["id","kit","codice","lotto_consumato","quantita_richiesta","quantita_reintegrata","stato"] if x in pending]],use_container_width=True,hide_index=True)
+  rid=st.selectbox("Componente da reintegrare",pending["id"].astype(int).tolist(),format_func=lambda x:f'#{x} · {pending[pending["id"]==x].iloc[0]["kit"]} · {pending[pending["id"]==x].iloc[0]["codice"]}')
+  rr=pending[pending["id"]==rid].iloc[0]
+  cand=drows[drows["codice"].astype(str).str.strip().str.upper()==str(rr["codice"]).strip().upper()].copy()
+  if not cand.empty and not dheads.empty: cand=cand.merge(dheads.rename(columns={"id":"ddt_id"}),on="ddt_id",how="left")
+  if cand.empty: st.warning("Il codice non risulta ancora ricevuto tramite DDT Carico Mobile.")
+  else:
+   did=st.selectbox("Pezzo ricevuto da inserire nel kit",cand["id"].astype(int).tolist(),format_func=lambda x:(lambda z:f'{z.get("codice")} · lotto {z.get("lotto")} · qta {z.get("quantita")} · DDT {z.get("numero_ddt","")}')(cand[cand["id"]==x].iloc[0]))
+   if st.button("✅ Inserisci nuovo pezzo nel Kit",type="primary"):
+    dr=cand[cand["id"]==did].iloc[0]; q=min(float(dr.get("quantita") or 0),float(rr.get("quantita_richiesta") or 0)-float(rr.get("quantita_reintegrata") or 0))
+    if q<=0: st.error("Quantità disponibile/non richiesta non valida.")
+    else:
+     sb.table("componenti_kit").insert({"kit_id":int(rr["kit_id"]),"codice":str(dr["codice"]),"lotto":None if pd.isna(dr.get("lotto")) else str(dr.get("lotto")),"scadenza":None if pd.isna(dr.get("scadenza")) else str(dr.get("scadenza")),"quantita":q,"ddt_riga_id":int(did)}).execute()
+     newq=float(rr.get("quantita_reintegrata") or 0)+q; req=float(rr.get("quantita_richiesta") or 0)
+     sb.table("reintegri_kit").update({"ddt_riga_id":int(did),"lotto_nuovo":None if pd.isna(dr.get("lotto")) else str(dr.get("lotto")),"scadenza_nuova":None if pd.isna(dr.get("scadenza")) else str(dr.get("scadenza")),"quantita_reintegrata":newq,"stato":"REINTEGRATO" if newq>=req else "PARZIALE","utente":str(st.session_state.get("user")),"reintegrato_at":datetime.now(timezone.utc).isoformat() if newq>=req else None}).eq("id",int(rid)).execute()
+     st.success("Kit aggiornato con il nuovo lotto ricevuto."); st.rerun()
+ else: st.info("Nessun componente Kit in attesa di reintegro.")
