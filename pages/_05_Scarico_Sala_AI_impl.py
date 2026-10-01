@@ -209,7 +209,10 @@ def price_for(customer_code, product_code, line):
 
 def manual_price_for(code):
     try:
-        val = float(st.session_state.get(f"manual_price_{ncode(code)}", 0) or 0)
+        key=ncode(code)
+        if st.session_state.get(f"free_goods_{key}", False):
+            return 0.0
+        val = float(st.session_state.get(f"manual_price_{key}", 0) or 0)
         return val if val > 0 else None
     except Exception:
         return None
@@ -343,10 +346,11 @@ if missing_prices:
             if not code_key or code_key in seen_price_codes:
                 continue
             seen_price_codes.add(code_key)
-            cols = st.columns([2, 4, 2])
+            cols = st.columns([2, 4, 2, 2])
             cols[0].markdown(f"**{code}**")
             cols[1].caption(clean(item.get("descrizione")) or "Descrizione non disponibile")
             cols[2].number_input("Prezzo €", min_value=0.0, step=0.01, format="%.2f", key=f"manual_price_{code_key}", label_visibility="collapsed")
+            cols[3].checkbox("Sconto merce €0", key=f"free_goods_{code_key}", help="Usa prezzo zero come valore reale, non come prezzo mancante.")
 
 stock_errors = st.session_state.get("scarico_stock_errors", []) or []
 if stock_errors:
@@ -421,7 +425,7 @@ if confirm:
         source = "OFFERTA"
         if price is None:
             price = manual_price_for(code)
-            source = "MANUALE" if price is not None else "MANCANTE"
+            source = ("SCONTO_MERCE" if st.session_state.get(f"free_goods_{ncode(code)}", False) else "MANUALE") if price is not None else "MANCANTE"
         if price is None:
             missing.append({"codice": code, "descrizione": clean(r.get("descrizione"))})
         priced_rows.append((r, code, lot, qty, price, source))
@@ -504,7 +508,7 @@ if confirm:
         for k in ["scarico_ai_rows", "scarico_ai_meta", "scarico_file_path", "scarico_file_name", "scarico_file_type", "scarico_source", "scarico_missing_prices", "scarico_stock_errors", "scarico_verified"]:
             st.session_state.pop(k, None)
         for k in list(st.session_state.keys()):
-            if str(k).startswith("manual_price_"):
+            if str(k).startswith("manual_price_") or str(k).startswith("free_goods_"):
                 st.session_state.pop(k, None)
         st.cache_data.clear()
     except Exception as e:
