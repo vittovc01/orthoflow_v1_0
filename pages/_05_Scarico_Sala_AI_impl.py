@@ -271,6 +271,15 @@ def available_qty(mag, code, lot):
         return 0.0
 
 
+def is_other_manufacturer(value):
+    """Esclude solo produttori espliciti non J&J; un marchio ignoto richiede verifica."""
+    name = clean(value).upper()
+    unknown = {"", "UNKNOWN", "SCONOSCIUTO", "NON LETTO", "NON RILEVATO", "N/D", "ND", "N/A", "NONE", "NAN", "MARCHIO NON LETTO"}
+    if name in unknown:
+        return False
+    return not any(brand in name for brand in ("JOHNSON", "J&J", "DEPUY", "SYNTHES", "ETHICON", "MENTOR"))
+
+
 def run_ai(path):
     if not ai_enabled():
         st.error("OCR AI non configurato. Verifica OPENAI_API_KEY ed ENABLE_AI_OCR nei Secrets.")
@@ -279,6 +288,7 @@ def run_ai(path):
         with st.spinner("Analisi AI di codici, lotti e scadenze…"):
             meta = analyze_document(path, mode="scarico_sala")
         st.session_state["scarico_ai_rows"] = normalize_ai_items(meta)
+        st.session_state["scarico_editor_revision"] = int(st.session_state.get("scarico_editor_revision", 0)) + 1
         st.session_state["scarico_ai_meta"] = meta
         st.session_state["scarico_file_path"] = path
         st.session_state["scarico_file_name"] = Path(path).name
@@ -348,7 +358,9 @@ with upload_tab:
             run_ai(path)
 
 meta = st.session_state.get("scarico_ai_meta", {}) or {}
-rows = st.session_state.get("scarico_ai_rows", []) or []
+source_rows = st.session_state.get("scarico_ai_rows", []) or []
+excluded_rows = [r for r in source_rows if is_other_manufacturer(r.get("produttore"))]
+rows = [r for r in source_rows if not is_other_manufacturer(r.get("produttore"))]
 clients = client_options()
 ai_clinic = clean(meta.get("clinic_name"))
 if clients:
@@ -364,68 +376,72 @@ else:
 
 
 is_malzoni = clean(selected_client.get("codice_cliente")) == "9010013"
-if rows:
-    st.divider()
-    st.subheader("✅ Lista materiali riconosciuti")
-    st.caption("Controlla sempre codice Johnson/REF, lotto, scadenza e quantità prima della conferma.")
-    df_rows = pd.DataFrame(rows)
-    preferred = ["codice", "descrizione", "lotto", "scadenza", "quantita", "produttore", "confidence", "warning"]
-    for col in preferred:
-        if col not in df_rows.columns:
-            df_rows[col] = ""
-    if is_malzoni:
-        if "conto_deposito_struttura" not in df_rows.columns:
-            df_rows["conto_deposito_struttura"] = False
-        df_rows["conto_deposito_struttura"] = df_rows["conto_deposito_struttura"].fillna(False).astype(bool)
-        preferred.insert(1, "conto_deposito_struttura")
-        st.info("Malzoni: spunta il materiale della struttura Smart Track. Prezzi, fatturato e ordini restano inclusi; queste righe non scaricano la vostra giacenza.")
-    edited = st.data_editor(
-        df_rows[preferred], num_rows="dynamic", use_container_width=True,
-        column_config={"conto_deposito_struttura": st.column_config.CheckboxColumn(
-            "Conto deposito struttura", default=False,
-            help="Materiale Malzoni / Smart Track: incluso nel fatturato, senza scarico del nostro magazzino.")},
-        key=f"scarico_ai_editor_{clean(selected_client.get('codice_cliente'))}")
-    st.session_state["scarico_ai_rows"] = edited.to_dict("records")
-    warnings = [clean(r.get("warning")) for r in st.session_state["scarico_ai_rows"] if clean(r.get("warning"))]
-    if warnings:
-        with st.expander("⚠️ Avvisi AI"):
-            for w in warnings:
-                st.write("•", w)
-
-st.divider()
-st.subheader("🏥 Dati intervento e conferma scarico")
-warehouses = warehouse_labels()
-agents = agent_options()
-ai_clinic = clean(meta.get("clinic_name"))
-ai_record = clean(meta.get("clinical_record"))
-ai_date = pd.to_datetime(meta.get("procedure_date"), errors="coerce") if meta.get("procedure_date") else pd.NaT
-ai_surgeon = clean(meta.get("surgeon"))
-
-missing_prices = st.session_state.get("scarico_missing_prices", []) or []
-can_manage_prices = str(st.session_state.get("role","")).strip().lower() in ["admin","amministrazione"] or "DIREZIONE" in (st.session_state.get("permessi") or []) or "AMMINISTRAZIONE" in (st.session_state.get("permessi") or [])
-if missing_prices and can_manage_prices:
-    st.warning("Alcuni codici non hanno un prezzo nell'offerta collegata. Inserisci il prezzo manuale prima di confermare lo scarico.")
-    with st.expander("💶 Prezzi mancanti da inserire", expanded=True):
-        # One price input per unique code. The same REF can appear on multiple lots/rows.
-        seen_price_codes = set()
-        for item in missing_prices:
-            code = clean(item.get("codice"))
-            code_key = ncode(code)
-            if not code_key or code_key in seen_price_codes:
-                continue
-            seen_price_codes.add(code_key)
-            cols = st.columns([2, 4, 2, 2])
-            cols[0].markdown(f"**{code}**")
-            cols[1].caption(clean(item.get("descrizione")) or "Descrizione non disponibile")
-            cols[2].number_input("Prezzo €", min_value=0.0, step=0.01, format="%.2f", key=f"manual_price_{code_key}", label_visibility="collapsed")
-            cols[3].checkbox("Sconto merce €0", key=f"free_goods_{code_key}", help="Usa prezzo zero come valore reale, non come prezzo mancante.")
-
-stock_errors = st.session_state.get("scarico_stock_errors", []) or []
-if stock_errors:
-    st.warning("Uno o più codici/lotti nostri non hanno quantità sufficiente: saranno segnalati a Direzione. Le righe conto deposito struttura sono escluse da questo controllo.")
-    st.dataframe(pd.DataFrame(stock_errors), use_container_width=True, hide_index=True)
-
+if excluded_rows:
+    st.warning(f"{len(excluded_rows)} righe di altri produttori escluse dallo scarico, dal fatturato e dagli ordini OrthoFlow.")
+    with st.expander("Materiale di altre aziende escluso"):
+        st.dataframe(pd.DataFrame(excluded_rows), use_container_width=True, hide_index=True)
 with st.form("scarico_ai_confirm"):
+    if rows:
+        st.divider()
+        st.subheader("✅ Lista materiali riconosciuti")
+        st.caption("Controlla sempre codice Johnson/REF, lotto, scadenza e quantità prima della conferma.")
+        df_rows = pd.DataFrame(rows)
+        preferred = ["codice", "descrizione", "lotto", "scadenza", "quantita", "produttore", "confidence", "warning"]
+        for col in preferred:
+            if col not in df_rows.columns:
+                df_rows[col] = ""
+        if is_malzoni:
+            if "conto_deposito_struttura" not in df_rows.columns:
+                df_rows["conto_deposito_struttura"] = False
+            df_rows["conto_deposito_struttura"] = df_rows["conto_deposito_struttura"].fillna(False).astype(bool)
+            preferred.insert(1, "conto_deposito_struttura")
+            st.info("Malzoni: spunta il materiale della struttura Smart Track. Prezzi, fatturato e ordini restano inclusi; queste righe non scaricano la vostra giacenza.")
+        edited = st.data_editor(
+            df_rows[preferred], num_rows="dynamic", use_container_width=True,
+            column_config={"conto_deposito_struttura": st.column_config.CheckboxColumn(
+                "Conto deposito struttura", default=False,
+                help="Materiale Malzoni / Smart Track: incluso nel fatturato, senza scarico del nostro magazzino.")},
+            key=f"scarico_ai_editor_{clean(selected_client.get('codice_cliente'))}_{st.session_state.get('scarico_editor_revision', 0)}")
+        # Mantieni immutabile la base OCR: Streamlit applica le modifiche tramite lo stato del widget.
+        warnings = [clean(r.get("warning")) for r in edited.to_dict("records") if clean(r.get("warning"))]
+        if warnings:
+            with st.expander("⚠️ Avvisi AI"):
+                for w in warnings:
+                    st.write("•", w)
+
+    st.divider()
+    st.subheader("🏥 Dati intervento e conferma scarico")
+    warehouses = warehouse_labels()
+    agents = agent_options()
+    ai_clinic = clean(meta.get("clinic_name"))
+    ai_record = clean(meta.get("clinical_record"))
+    ai_date = pd.to_datetime(meta.get("procedure_date"), errors="coerce") if meta.get("procedure_date") else pd.NaT
+    ai_surgeon = clean(meta.get("surgeon"))
+
+    missing_prices = st.session_state.get("scarico_missing_prices", []) or []
+    can_manage_prices = str(st.session_state.get("role","")).strip().lower() in ["admin","amministrazione"] or "DIREZIONE" in (st.session_state.get("permessi") or []) or "AMMINISTRAZIONE" in (st.session_state.get("permessi") or [])
+    if missing_prices and can_manage_prices:
+        st.warning("Alcuni codici non hanno un prezzo nell'offerta collegata. Inserisci il prezzo manuale prima di confermare lo scarico.")
+        with st.expander("💶 Prezzi mancanti da inserire", expanded=True):
+            # One price input per unique code. The same REF can appear on multiple lots/rows.
+            seen_price_codes = set()
+            for item in missing_prices:
+                code = clean(item.get("codice"))
+                code_key = ncode(code)
+                if not code_key or code_key in seen_price_codes:
+                    continue
+                seen_price_codes.add(code_key)
+                cols = st.columns([2, 4, 2, 2])
+                cols[0].markdown(f"**{code}**")
+                cols[1].caption(clean(item.get("descrizione")) or "Descrizione non disponibile")
+                cols[2].number_input("Prezzo €", min_value=0.0, step=0.01, format="%.2f", key=f"manual_price_{code_key}", label_visibility="collapsed")
+                cols[3].checkbox("Sconto merce €0", key=f"free_goods_{code_key}", help="Usa prezzo zero come valore reale, non come prezzo mancante.")
+
+    stock_errors = st.session_state.get("scarico_stock_errors", []) or []
+    if stock_errors:
+        st.warning("Uno o più codici/lotti nostri non hanno quantità sufficiente: saranno segnalati a Direzione. Le righe conto deposito struttura sono escluse da questo controllo.")
+        st.dataframe(pd.DataFrame(stock_errors), use_container_width=True, hide_index=True)
+
     c1, c2 = st.columns(2)
     with c1:
         procedure_date = st.date_input("Data intervento", value=ai_date.date() if pd.notna(ai_date) else date.today())
@@ -438,12 +454,17 @@ with st.form("scarico_ai_confirm"):
         line = st.selectbox("Linea", ["TRAUMA", "PROTESICA", "CMF", "SPINE", "SPORTS", "ALTRO"])
 
     verified = st.checkbox("Ho verificato codice Johnson/REF, lotto, scadenza e quantità di tutte le righe.")
-    confirm = st.form_submit_button("📤 Crea intervento e scarica materiali", type="primary", use_container_width=True, disabled=(not verified or len(st.session_state.get("scarico_ai_rows", [])) == 0))
+    confirm = st.form_submit_button("📤 Crea intervento e scarica materiali", type="primary", use_container_width=True, disabled=(len(rows) == 0))
 
 if confirm:
-    final_rows = st.session_state.get("scarico_ai_rows", []) or []
+    if not verified:
+        st.error("Conferma di aver verificato i materiali prima di creare l’intervento.")
+        st.stop()
+    final_rows = edited.to_dict("records") if rows else []
     valid_rows = []
     for r in final_rows:
+        if is_other_manufacturer(r.get("produttore")):
+            continue
         code = clean(r.get("codice")).upper()
         lot = clean(r.get("lotto"))
         try:
@@ -575,6 +596,7 @@ if confirm:
         for k in list(st.session_state.keys()):
             if str(k).startswith("manual_price_") or str(k).startswith("free_goods_"):
                 st.session_state.pop(k, None)
+        st.session_state["scarico_editor_revision"] = int(st.session_state.get("scarico_editor_revision", 0)) + 1
         st.cache_data.clear()
     except Exception as e:
         msg = str(e)
@@ -582,4 +604,5 @@ if confirm:
             st.error("Giacenza modificata o insufficiente al momento della conferma. La transazione è stata annullata: nessun intervento, riga o movimento è stato salvato.")
         else:
             st.error(f"Scarico non completato. La transazione è stata annullata: {e}")
+
 

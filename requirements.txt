@@ -11,3 +11,4 @@ python-dotenv>=1.0
 pypdf>=5.0.0
 streamlit-js-eval==1.0.0
 streamlit-drawable-canvas==0.13.0
+reportlab>=4.0
