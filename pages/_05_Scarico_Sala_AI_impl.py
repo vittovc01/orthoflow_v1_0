@@ -2,6 +2,7 @@ import os
 import re
 from datetime import date, datetime
 from pathlib import Path
+from functools import lru_cache
 
 import pandas as pd
 import streamlit as st
@@ -175,35 +176,74 @@ def agent_options():
     return [""]
 
 
+@lru_cache(maxsize=None)
 def offer_ids_for(customer_code, line):
     try:
-        links = sb().table("offerte_clienti").select("offerta_id").eq("codice_cliente", customer_code).execute().data or []
-        ids = []
+        links = (sb().table("offerte_clienti").select("offerta_id")
+                 .eq("codice_cliente", customer_code).execute().data or [])
+        out = []
         for link in links:
             oid = link.get("offerta_id")
-            heads = sb().table("offerte_header").select("id,linea").eq("id", oid).limit(1).execute().data or []
+            heads = (sb().table("offerte_header").select("id,linea")
+                     .eq("id", oid).limit(1).execute().data or [])
             if heads and clean(heads[0].get("linea")).upper() == clean(line).upper():
-                ids.append(oid)
-        return ids
+                out.append(oid)
+        return out
     except Exception:
         return []
 
 
+# Queste cache vengono ricreate ad ogni rerun, dopo i controlli di accesso.
+# Nessun prezzo viene condiviso tra sessioni o conservato in session_state.
+@lru_cache(maxsize=None)
+def offer_prices_for(oid):
+    try:
+        exact = {}
+        insensitive = {}
+        normalized = {}
+        offset = 0
+        while True:
+            rows = (sb().table("offerte_prezzi").select("codice,prezzo")
+                    .eq("offerta_id", oid).order("id")
+                    .range(offset, offset + 499).execute().data or [])
+            if not rows:
+                break
+            for row in rows:
+                code = row.get("codice")
+                if code is None:
+                    continue
+                code = str(code)
+                exact.setdefault(code, row.get("prezzo"))
+                insensitive.setdefault(code.upper(), row.get("prezzo"))
+                key = ncode(code)
+                if key:
+                    normalized.setdefault(key, row.get("prezzo"))
+            # Avanza della quantità ricevuta anche se il server limita la pagina.
+            offset += len(rows)
+        return exact, insensitive, normalized
+    except Exception:
+        # Non usare dati parziali e non ripetere una query fallita per ogni riga.
+        return None
+
+
+@lru_cache(maxsize=None)
 def price_for(customer_code, product_code, line):
     target = clean(product_code).upper()
     if not target:
         return None
     try:
         for oid in offer_ids_for(customer_code, line):
-            rows = (sb().table("offerte_prezzi").select("codice,prezzo")
-                    .eq("offerta_id", oid).eq("codice", target).limit(1).execute().data or [])
-            if rows:
-                return float(rows[0].get("prezzo") or 0)
-            rows = (sb().table("offerte_prezzi").select("codice,prezzo")
-                    .eq("offerta_id", oid).ilike("codice", target).limit(20).execute().data or [])
-            for p in rows:
-                if ncode(p.get("codice")) == ncode(target):
-                    return float(p.get("prezzo") or 0)
+            prices = offer_prices_for(oid)
+            if prices is None:
+                return None
+            exact, insensitive, normalized = prices
+            if target in exact:
+                return float(exact[target] or 0)
+            if target in insensitive:
+                return float(insensitive[target] or 0)
+            key = ncode(target)
+            if key and key in normalized:
+                return float(normalized[key] or 0)
     except Exception:
         pass
     return None
@@ -309,6 +349,21 @@ with upload_tab:
 
 meta = st.session_state.get("scarico_ai_meta", {}) or {}
 rows = st.session_state.get("scarico_ai_rows", []) or []
+clients = client_options()
+ai_clinic = clean(meta.get("clinic_name"))
+if clients:
+    default_idx = 0
+    if ai_clinic:
+        for i, c in enumerate(clients):
+            if ai_clinic.casefold() in c["descrizione"].casefold() or c["descrizione"].casefold() in ai_clinic.casefold():
+                default_idx = i
+                break
+    selected_client = st.selectbox("Struttura / cliente", clients, index=default_idx, format_func=lambda x: x["label"])
+else:
+    selected_client = {"codice_cliente": "", "descrizione": st.text_input("Struttura / cliente", value=ai_clinic)}
+
+
+is_malzoni = clean(selected_client.get("codice_cliente")) == "9010013"
 if rows:
     st.divider()
     st.subheader("✅ Lista materiali riconosciuti")
@@ -318,7 +373,18 @@ if rows:
     for col in preferred:
         if col not in df_rows.columns:
             df_rows[col] = ""
-    edited = st.data_editor(df_rows[preferred], num_rows="dynamic", use_container_width=True, key="scarico_ai_editor")
+    if is_malzoni:
+        if "conto_deposito_struttura" not in df_rows.columns:
+            df_rows["conto_deposito_struttura"] = False
+        df_rows["conto_deposito_struttura"] = df_rows["conto_deposito_struttura"].fillna(False).astype(bool)
+        preferred.insert(1, "conto_deposito_struttura")
+        st.info("Malzoni: spunta il materiale della struttura Smart Track. Prezzi, fatturato e ordini restano inclusi; queste righe non scaricano la vostra giacenza.")
+    edited = st.data_editor(
+        df_rows[preferred], num_rows="dynamic", use_container_width=True,
+        column_config={"conto_deposito_struttura": st.column_config.CheckboxColumn(
+            "Conto deposito struttura", default=False,
+            help="Materiale Malzoni / Smart Track: incluso nel fatturato, senza scarico del nostro magazzino.")},
+        key=f"scarico_ai_editor_{clean(selected_client.get('codice_cliente'))}")
     st.session_state["scarico_ai_rows"] = edited.to_dict("records")
     warnings = [clean(r.get("warning")) for r in st.session_state["scarico_ai_rows"] if clean(r.get("warning"))]
     if warnings:
@@ -328,7 +394,6 @@ if rows:
 
 st.divider()
 st.subheader("🏥 Dati intervento e conferma scarico")
-clients = client_options()
 warehouses = warehouse_labels()
 agents = agent_options()
 ai_clinic = clean(meta.get("clinic_name"))
@@ -357,21 +422,10 @@ if missing_prices and can_manage_prices:
 
 stock_errors = st.session_state.get("scarico_stock_errors", []) or []
 if stock_errors:
-    st.error("Scarico bloccato: uno o più codici/lotti non hanno quantità sufficiente nel magazzino selezionato.")
+    st.warning("Uno o più codici/lotti nostri non hanno quantità sufficiente: saranno segnalati a Direzione. Le righe conto deposito struttura sono escluse da questo controllo.")
     st.dataframe(pd.DataFrame(stock_errors), use_container_width=True, hide_index=True)
 
 with st.form("scarico_ai_confirm"):
-    if clients:
-        default_idx = 0
-        if ai_clinic:
-            for i, c in enumerate(clients):
-                if ai_clinic.casefold() in c["descrizione"].casefold() or c["descrizione"].casefold() in ai_clinic.casefold():
-                    default_idx = i
-                    break
-        selected_client = st.selectbox("Struttura / cliente", clients, index=default_idx, format_func=lambda x: x["label"])
-    else:
-        selected_client = {"codice_cliente": "", "descrizione": st.text_input("Struttura / cliente", value=ai_clinic)}
-
     c1, c2 = st.columns(2)
     with c1:
         procedure_date = st.date_input("Data intervento", value=ai_date.date() if pd.notna(ai_date) else date.today())
@@ -405,7 +459,9 @@ if confirm:
 
     # UX pre-flight: raggruppa duplicati. La RPC ripete il controllo con lock DB ed è quella autoritativa.
     requested = {}
-    for _, code, lot, qty in valid_rows:
+    for r, code, lot, qty in valid_rows:
+        if is_malzoni and bool(r.get("conto_deposito_struttura", False)):
+            continue
         key = (ncode(code), lot)
         requested[key] = requested.get(key, 0.0) + qty
     shortages = []
@@ -455,6 +511,7 @@ if confirm:
             "validazione": validation,
             "prezzo": float(price),
             "prezzo_source": price_source,
+            "conto_deposito_struttura": is_malzoni and bool(r.get("conto_deposito_struttura", False)),
         })
 
     header = {
@@ -484,8 +541,10 @@ if confirm:
             kits = sb().table("kit_logistici").select("id,codice").eq("codice_magazzino", mag).execute().data or []
             if len(kits) == 1 and intervention_id:
                 kit_id = int(kits[0]["id"])
-                saved_rows = sb().table("righe_intervento").select("id,codice,lotto,quantita").eq("intervento_id", intervention_id).execute().data or []
+                saved_rows = sb().table("righe_intervento").select("id,codice,lotto,quantita,origine").eq("intervento_id", intervention_id).execute().data or []
                 for sr in saved_rows:
+                    if sr.get("origine") == "CONTO DEPOSITO STRUTTURA":
+                        continue
                     exists = sb().table("reintegri_kit").select("id").eq("kit_id", kit_id).eq("riga_intervento_id", sr["id"]).limit(1).execute().data or []
                     if not exists:
                         sb().table("reintegri_kit").insert({
@@ -507,7 +566,7 @@ if confirm:
             intervention_id, procedure_date, customer_code,
             clean(selected_client.get("descrizione")), agent, clinical_record
         )
-        st.success(f"Intervento {intervention_id} creato in modo atomico. Materiali scaricati: {inserted}. Fatturato teorico: € {total:,.2f}")
+        st.success(f"Intervento {intervention_id} creato in modo atomico. Righe registrate: {inserted}. Fatturato teorico: € {total:,.2f}")
         if not doc_ok:
             st.warning("Intervento e magazzino sono stati salvati correttamente, ma il documento originale non è stato archiviato. Puoi ricaricarlo dall'Archivio impianti.")
 
@@ -523,3 +582,4 @@ if confirm:
             st.error("Giacenza modificata o insufficiente al momento della conferma. La transazione è stata annullata: nessun intervento, riga o movimento è stato salvato.")
         else:
             st.error(f"Scarico non completato. La transazione è stata annullata: {e}")
+

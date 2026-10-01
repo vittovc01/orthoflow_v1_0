@@ -236,6 +236,13 @@ with st.form(f"header_{intervention_id}"):
 
 if save_header:
     try:
+        if clean(edit_customer_code) != "9010013":
+            structure_rows = (sb().table("righe_intervento").select("id")
+                              .eq("intervento_id", intervention_id)
+                              .eq("origine", "CONTO DEPOSITO STRUTTURA").limit(1).execute().data or [])
+            if structure_rows:
+                st.error("Questo intervento contiene materiale della struttura Malzoni: correggi prima la proprietà delle righe, poi cambia cliente.")
+                st.stop()
         old_mag = clean(intervention.get("magazzino_scarico") or intervention.get("magazzino"))
         if edit_mag != old_mag:
             st.warning("Il cambio di magazzino va effettuato insieme alle righe materiali sotto, così OrthoFlow può rettificare correttamente le giacenze. Modifica il magazzino nella testata e poi salva anche le righe.")
@@ -259,6 +266,7 @@ if save_header:
         st.error(f"Aggiornamento testata non completato: {e}")
 
 customer_code = clean(intervention.get("codice_cliente"))
+is_malzoni = customer_code == "9010013"
 line = clean(intervention.get("linea"))
 mag = clean(intervention.get("magazzino_scarico") or intervention.get("magazzino")) or "MAG1"
 
@@ -297,6 +305,7 @@ for r in rows:
         "produttore": clean(r.get("produttore")),
         "validazione": clean(r.get("validazione")),
         "origine": clean(r.get("origine")),
+        "conto_deposito_struttura": clean(r.get("origine")) == "CONTO DEPOSITO STRUTTURA",
         "prezzo": editable_price,
         "prezzo_offerta": offer_price,
         "fonte": source,
@@ -305,6 +314,13 @@ for r in rows:
     })
 
 df = pd.DataFrame(prepared)
+if is_malzoni:
+    cols = list(df.columns)
+    cols.remove("conto_deposito_struttura")
+    cols.insert(cols.index("codice") + 1, "conto_deposito_struttura")
+    df = df[cols]
+else:
+    df = df.drop(columns=["conto_deposito_struttura"])
 
 st.subheader("Controllo completo materiali")
 st.info("Puoi correggere tutti i dati operativi della riga. Se cambi codice, lotto, quantità o magazzino, OrthoFlow crea automaticamente una rettifica: riporta a magazzino il vecchio materiale e scarica quello corretto. Prezzo e descrizione non muovono la giacenza.")
@@ -314,8 +330,11 @@ edited = st.data_editor(
     hide_index=True,
     use_container_width=True,
     num_rows="fixed",
-    disabled=["id", "prezzo_offerta", "fonte", "totale"],
+    disabled=["id", "prezzo_offerta", "fonte", "totale"] + (["origine"] if is_malzoni else []),
     column_config={
+        "conto_deposito_struttura": st.column_config.CheckboxColumn(
+            "Conto deposito struttura", default=False,
+            help="Materiale Malzoni / Smart Track: mantiene fatturato e ordini, senza movimento del nostro magazzino."),
         "id": st.column_config.NumberColumn("ID", format="%d"),
         "codice": st.column_config.TextColumn("Codice Johnson/REF", required=True),
         "descrizione": st.column_config.TextColumn("Descrizione"),
@@ -358,7 +377,13 @@ if st.button("💾 Salva tutte le modifiche", type="primary", use_container_widt
         expiry = clean(row["scadenza"]) or None
         manufacturer = clean(row["produttore"])
         validation = clean(row["validazione"])
-        origin = clean(row["origine"]) or "CONTO DEPOSITO"
+        old_structure = bool(old.get("conto_deposito_struttura", False))
+        structure = is_malzoni and bool(row.get("conto_deposito_struttura", False))
+        origin = "CONTO DEPOSITO STRUTTURA" if structure else (
+            "CONTO DEPOSITO" if old_structure else clean(row["origine"]) or "CONTO DEPOSITO")
+        if not is_malzoni and origin == "CONTO DEPOSITO STRUTTURA":
+            errors.append(f"Riga {rid}: conto deposito struttura disponibile solo per Malzoni.")
+            continue
         reintegro = bool(row["reintegro"])
         try:
             qty = float(row["quantita"])
@@ -387,19 +412,22 @@ if st.button("💾 Salva tutte le modifiche", type="primary", use_container_widt
             expiry = dt.date().isoformat()
 
         stock_changed = (
+            structure != old_structure
+            or (not structure and (
             ncode(code) != ncode(old.get("codice"))
             or lot != clean(old.get("lotto"))
             or abs(qty - float(old.get("quantita") or 0)) > 0.0001
+            ))
         )
 
-        if stock_changed:
+        if stock_changed and not structure:
             old_code = clean(old.get("codice")).upper()
             old_lot = clean(old.get("lotto"))
             old_qty = float(old.get("quantita") or 0)
             # Il vecchio scarico verrà annullato prima del nuovo. Se la nuova identità è la stessa,
             # la quantità effettivamente disponibile dopo l'annullo include old_qty.
             avail = available_qty(mag, code, lot)
-            if ncode(code) == ncode(old_code) and lot == old_lot:
+            if not old_structure and ncode(code) == ncode(old_code) and lot == old_lot:
                 avail += old_qty
             if avail < qty:
                 # Non bloccare la rettifica: il materiale può essere già stato scaricato in Business
@@ -436,6 +464,8 @@ if st.button("💾 Salva tutte le modifiche", type="primary", use_container_widt
             "price": price,
             "total": qty * price,
             "stock_changed": stock_changed,
+            "structure": structure,
+            "old_structure": old_structure,
         })
 
     if errors:
@@ -459,27 +489,28 @@ if st.button("💾 Salva tutte le modifiche", type="primary", use_container_widt
             if ch["stock_changed"]:
                 # Se il nuovo materiale non è disponibile, la rettifica resta salvabile e viene
                 # tracciata come anomalia Direzione; non creiamo uno scarico negativo fittizio.
-                _avail_new = available_qty(mag, ch["code"], ch["lot"])
+                _avail_new = available_qty(mag, ch["code"], ch["lot"]) if not ch["structure"] else 0
                 _same_item = ncode(ch["code"]) == ncode(old_code) and ch["lot"] == old_lot
-                if _same_item:
+                if _same_item and not ch["old_structure"]:
                     _avail_new += old_qty
                 # 1) annulla il vecchio scarico: quantità positiva => rientro in giacenza
-                sb().table("movimenti_magazzino").insert({
-                    "tipo_movimento": "RETTIFICA_INTERVENTO",
-                    "codice_magazzino": mag,
-                    "codice": old_code,
-                    "descrizione": old_desc,
-                    "lotto": old_lot,
-                    "scadenza": old_expiry,
-                    "quantita": abs(old_qty),
-                    "origine": old_origin,
-                    "riferimento_tipo": "INTERVENTO",
-                    "riferimento_id": str(intervention_id),
-                    "note": f"Rettifica riga {rid}: annullo scarico precedente",
-                    "utente": user(),
-                }).execute()
+                if not ch["old_structure"]:
+                    sb().table("movimenti_magazzino").insert({
+                        "tipo_movimento": "RETTIFICA_INTERVENTO",
+                        "codice_magazzino": mag,
+                        "codice": old_code,
+                        "descrizione": old_desc,
+                        "lotto": old_lot,
+                        "scadenza": old_expiry,
+                        "quantita": abs(old_qty),
+                        "origine": old_origin,
+                        "riferimento_tipo": "INTERVENTO",
+                        "riferimento_id": str(intervention_id),
+                        "note": f"Rettifica riga {rid}: annullo scarico precedente",
+                        "utente": user(),
+                    }).execute()
                 # 2) applica il materiale corretto solo se realmente disponibile.
-                if _avail_new >= ch["qty"]:
+                if not ch["structure"] and _avail_new >= ch["qty"]:
                     sb().table("movimenti_magazzino").insert({
                         "tipo_movimento": "RETTIFICA_INTERVENTO",
                         "codice_magazzino": mag,
@@ -528,3 +559,4 @@ if st.button("💾 Salva tutte le modifiche", type="primary", use_container_widt
     except Exception as e:
         st.error(f"Aggiornamento non completato: {e}")
         st.warning("Se l'errore è avvenuto durante una rettifica di magazzino, controlla i movimenti dell'intervento prima di riprovare.")
+
