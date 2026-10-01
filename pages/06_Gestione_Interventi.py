@@ -119,6 +119,7 @@ def offer_prices_for(oid):
     try:
         exact = {}
         insensitive = {}
+        normalized = {}
         offset = 0
         while True:
             rows = (sb().table("offerte_prezzi").select("codice,prezzo")
@@ -133,9 +134,12 @@ def offer_prices_for(oid):
                 code = str(code)
                 exact.setdefault(code, row.get("prezzo"))
                 insensitive.setdefault(code.upper(), row.get("prezzo"))
+                key = ncode(code)
+                if key:
+                    normalized.setdefault(key, row.get("prezzo"))
             # Avanza della quantità ricevuta anche se il server limita la pagina.
             offset += len(rows)
-        return exact, insensitive
+        return exact, insensitive, normalized
     except Exception:
         # Non usare dati parziali e non ripetere una query fallita per ogni riga.
         return None
@@ -151,11 +155,14 @@ def price_for(customer_code, product_code, line):
             prices = offer_prices_for(oid)
             if prices is None:
                 return None
-            exact, insensitive = prices
+            exact, insensitive, normalized = prices
             if target in exact:
                 return float(exact[target] or 0)
             if target in insensitive:
                 return float(insensitive[target] or 0)
+            key = ncode(target)
+            if key and key in normalized:
+                return float(normalized[key] or 0)
     except Exception:
         pass
     return None
