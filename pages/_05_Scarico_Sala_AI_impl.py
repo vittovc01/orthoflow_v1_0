@@ -38,32 +38,47 @@ def client():
 
 def sb(): return client()\n
 def generate_implant_document(intervention_id, header):
-    """Genera il documento impianto numerato e lo archivia nello Storage."""
+    """Genera un DDT di avvenuto impianto nello stile operativo Business."""
     try:
         existing=sb().table("documenti_impianto").select("*").eq("intervento_id",intervention_id).limit(1).execute().data or []
         if existing: return existing[0]
         division="PROTESICA" if "PROTES" in clean(header.get("linea")).upper() else "TRAUMA"
-        seq="documento_impianto_protesica_seq" if division=="PROTESICA" else "documento_impianto_trauma_seq"
         nr=sb().rpc("prossimo_numero_documento_impianto",{"p_divisione":division}).execute().data
-        numero=f"{'PRO' if division=='PROTESICA' else 'TRA'}-{pd.Timestamp(header.get('data_intervento')).year}-{int(nr):06d}"
+        year=pd.Timestamp(header.get("data_intervento")).year
+        numero=f"{'PRO' if division=='PROTESICA' else 'TRA'}-{year}-{int(nr):06d}"
         rows=sb().table("righe_intervento").select("codice,descrizione,lotto,scadenza,quantita").eq("intervento_id",intervention_id).execute().data or []
         from io import BytesIO
         from reportlab.lib.pagesizes import A4
         from reportlab.platypus import SimpleDocTemplate,Paragraph,Spacer,Table,TableStyle
         from reportlab.lib import colors
         from reportlab.lib.styles import getSampleStyleSheet
-        b=BytesIO(); styles=getSampleStyleSheet(); doc=SimpleDocTemplate(b,pagesize=A4,rightMargin=28,leftMargin=28,topMargin=28,bottomMargin=28)
-        story=[Paragraph("ORTHOFLOW - DOCUMENTO DI IMPIANTO",styles["Title"]),Spacer(1,10),
-          Paragraph(f"<b>Documento:</b> {numero} &nbsp;&nbsp; <b>Divisione:</b> {division}",styles["Normal"]),
-          Paragraph(f"<b>Data intervento:</b> {header.get('data_intervento')} &nbsp;&nbsp; <b>Cartella clinica:</b> {clean(header.get('cartella_clinica'))}",styles["Normal"]),
-          Paragraph(f"<b>Struttura/Cliente:</b> {clean(header.get('cliente'))} &nbsp;&nbsp; <b>Codice cliente:</b> {clean(header.get('codice_cliente'))}",styles["Normal"]),Spacer(1,12)]
-        data=[["Codice","Descrizione","Lotto","Scadenza","Q.tà"]]
-        for r in rows:data.append([clean(r.get("codice")),clean(r.get("descrizione")),clean(r.get("lotto")),clean(r.get("scadenza")),str(r.get("quantita") or "")])
-        t=Table(data,repeatRows=1,colWidths=[85,190,85,80,40]); t.setStyle(TableStyle([("GRID",(0,0),(-1,-1),.4,colors.grey),("BACKGROUND",(0,0),(-1,0),colors.lightgrey),("FONTSIZE",(0,0),(-1,-1),8),("VALIGN",(0,0),(-1,-1),"TOP")]))
-        story+=[t,Spacer(1,16),Paragraph("Documento generato automaticamente da OrthoFlow. In futuro la numerazione/documentazione potrà essere demandata a Business.",styles["Italic"])]
-        doc.build(story); b.seek(0)
-        path=f"documenti_impianto/{division.lower()}/{pd.Timestamp(header.get('data_intervento')).year}/{numero}.pdf"
-        sb().storage.from_("orthoflow-impianti").upload(path,b.getvalue(),file_options={"content-type":"application/pdf","upsert":"true"})
+        from reportlab.lib.enums import TA_CENTER
+        buf=BytesIO(); styles=getSampleStyleSheet()
+        styles["Title"].alignment=TA_CENTER
+        doc=SimpleDocTemplate(buf,pagesize=A4,rightMargin=22,leftMargin=22,topMargin=22,bottomMargin=22)
+        cc=clean(header.get("cartella_clinica")); dt=clean(header.get("data_intervento"))
+        story=[Paragraph("<b>P.M. MEDICAL SRLS</b>",styles["Title"]),
+          Paragraph("DOCUMENTO DI AVVENUTO IMPIANTO",styles["Heading2"]),Spacer(1,8)]
+        info=[
+          ["Destinatario / Struttura",clean(header.get("cliente")),"Tipo documento","D.D.T. AVVENUTO IMPIANTO"],
+          ["Cod. Cliente",clean(header.get("codice_cliente")),"Numero doc.",numero],
+          ["Cartella clinica",cc,"Data documento",dt],
+          ["Divisione",division,"Causale",f"AVVENUTO IMPIANTO {division}"]]
+        ti=Table(info,colWidths=[90,180,85,180])
+        ti.setStyle(TableStyle([("GRID",(0,0),(-1,-1),.35,colors.grey),("BACKGROUND",(0,0),(0,-1),colors.lightgrey),("BACKGROUND",(2,0),(2,-1),colors.lightgrey),("FONTSIZE",(0,0),(-1,-1),8),("VALIGN",(0,0),(-1,-1),"MIDDLE")]))
+        story += [ti,Spacer(1,12)]
+        data=[["Cod. articolo","Descrizione","LOTTO","DATA SC","UM","QUANTITA'"]]
+        for r in rows:
+            data.append([clean(r.get("codice")),clean(r.get("descrizione")),clean(r.get("lotto")),clean(r.get("scadenza")),"PZ",str(r.get("quantita") or "")])
+        tb=Table(data,repeatRows=1,colWidths=[75,205,75,70,35,55])
+        tb.setStyle(TableStyle([("GRID",(0,0),(-1,-1),.35,colors.grey),("BACKGROUND",(0,0),(-1,0),colors.lightgrey),("FONTSIZE",(0,0),(-1,-1),7.5),("VALIGN",(0,0),(-1,-1),"TOP"),("LEFTPADDING",(0,0),(-1,-1),3),("RIGHTPADDING",(0,0),(-1,-1),3)]))
+        story += [tb,Spacer(1,14),
+          Table([["Causale del Trasporto",f"AVVENUTO IMPIANTO {division}"],["Note",f"cc {cc} del {dt}"]],colWidths=[130,385],style=TableStyle([("GRID",(0,0),(-1,-1),.35,colors.grey),("BACKGROUND",(0,0),(0,-1),colors.lightgrey),("FONTSIZE",(0,0),(-1,-1),8)])),
+          Spacer(1,22),Paragraph("Firma destinatario per accettazione: ____________________________________",styles["Normal"]),
+          Spacer(1,18),Paragraph("Documento generato da OrthoFlow in attesa dell'integrazione con Business.",styles["Italic"])]
+        doc.build(story); buf.seek(0)
+        path=f"documenti_impianto/{division.lower()}/{year}/{numero}.pdf"
+        sb().storage.from_("orthoflow-impianti").upload(path,buf.getvalue(),file_options={"content-type":"application/pdf","upsert":"true"})
         rec={"intervento_id":intervention_id,"divisione":division,"numero_documento":numero,"data_documento":header.get("data_intervento"),"storage_path":path}
         return sb().table("documenti_impianto").insert(rec).execute().data[0]
     except Exception as e:
