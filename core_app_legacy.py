@@ -515,7 +515,7 @@ def revenue_dataset():
     if 'quantita' in out.columns:
         out['quantita'] = pd.to_numeric(out['quantita'], errors='coerce').fillna(0.0)
     if not interventi.empty and 'intervento_id' in out.columns and 'id' in interventi.columns:
-        cols = [c for c in ['id','data_intervento','cliente','codice_cliente','agente','linea','magazzino_scarico'] if c in interventi.columns]
+        cols = [c for c in ['id','data_intervento','cliente','struttura','codice_cliente','agente','chirurgo','linea','magazzino_scarico'] if c in interventi.columns]
         meta = interventi[cols].copy().rename(columns={'id':'intervento_id'})
         out['intervento_id'] = out['intervento_id'].astype(str)
         meta['intervento_id'] = meta['intervento_id'].astype(str)
@@ -737,6 +737,40 @@ if menu=='Dashboard':
         st.dataframe(surg_summary,use_container_width=True,hide_index=True,height=360)
     else:
         st.info('Dati chirurgo non ancora disponibili.')
+
+    st.subheader('🧑‍💼 Andamento per agente')
+    if not revenue.empty and 'agente' in revenue.columns:
+        ag = revenue.copy()
+        ag['Agente'] = ag['agente'].fillna('').astype(str).str.strip().replace('', 'NON INDICATO')
+        ag_summary = ag.groupby('Agente',as_index=False).agg(Fatturato=('totale','sum'),Interventi=('intervento_id','nunique'),Pezzi=('quantita','sum')).sort_values('Fatturato',ascending=False)
+        st.bar_chart(ag_summary.set_index('Agente')['Fatturato'])
+        st.dataframe(ag_summary,use_container_width=True,hide_index=True)
+    else:
+        st.info('Dati agente non ancora disponibili.')
+
+    st.subheader('🏥 Andamento per struttura')
+    struttura_col = 'struttura' if 'struttura' in revenue.columns else ('cliente' if 'cliente' in revenue.columns else None)
+    if not revenue.empty and struttura_col:
+        sr = revenue.copy()
+        sr['Struttura'] = sr[struttura_col].fillna('').astype(str).str.strip().replace('', 'NON INDICATA')
+        sr_summary = sr.groupby('Struttura',as_index=False).agg(Fatturato=('totale','sum'),Interventi=('intervento_id','nunique'),Pezzi=('quantita','sum')).sort_values('Fatturato',ascending=False)
+        st.bar_chart(sr_summary.head(20).set_index('Struttura')['Fatturato'])
+        st.dataframe(sr_summary,use_container_width=True,hide_index=True,height=360)
+    else:
+        st.info('Dati struttura non ancora disponibili.')
+
+    st.subheader('📅 Andamento mensile per divisione')
+    if not revenue.empty and 'linea' in revenue.columns and not revenue['data_intervento'].isna().all():
+        monthly = revenue.dropna(subset=['data_intervento']).copy()
+        monthly['Mese'] = monthly['data_intervento'].dt.to_period('M').astype(str)
+        monthly['Divisione'] = monthly['linea'].fillna('NON DEFINITA').astype(str).str.upper().apply(lambda x: 'PROTESICA' if 'PROTES' in x else ('TRAUMA' if 'TRAUMA' in x else x))
+        monthly_summary = monthly.groupby(['Mese','Divisione'],as_index=False).agg(Fatturato=('totale','sum'),Interventi=('intervento_id','nunique'))
+        pivot = monthly_summary.pivot(index='Mese',columns='Divisione',values='Fatturato').fillna(0)
+        st.line_chart(pivot,use_container_width=True,height=360)
+        st.dataframe(monthly_summary,use_container_width=True,hide_index=True)
+    else:
+        st.info('Dati mensili per divisione non ancora disponibili.')
+
 
     st.divider()
     a1,a2=st.columns(2)
