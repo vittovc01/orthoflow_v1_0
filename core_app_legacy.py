@@ -208,7 +208,35 @@ def upd(table, row_id, data):
     audit_log("MODIFICA", table, row_id, ", ".join(data.keys()))
     return res
 
+def cleanup_intervention_files(documents):
+    pending = {}
+    for doc in documents:
+        path = str(doc.get("storage_path") or "").strip()
+        bucket = str(doc.get("storage_bucket") or "orthoflow-impianti").strip()
+        if not path:
+            continue
+        try:
+            # A shared file still referenced by another record must be retained.
+            references = sb().table("documenti_impianto").select("id,storage_bucket").eq("storage_path", path).execute().data or []
+            if not any(str(ref.get("storage_bucket") or "orthoflow-impianti") == bucket for ref in references):
+                sb().storage.from_(bucket).remove([path])
+        except Exception:
+            pending[(bucket, path)] = doc
+    st.session_state["intervention_file_cleanup"] = list(pending.values())
+    if pending:
+        st.warning("Intervento e righe eliminati. Alcuni file non sono stati rimossi: usa Riprova pulizia allegati.")
+
+
 def dele(table, row_id):
+    if table == "interventi":
+        result = sb().rpc("elimina_intervento_completo", {
+            "p_intervento_id": int(row_id),
+            "p_utente": str(st.session_state.get("user", "")),
+        }).execute().data or {}
+        documents = list(st.session_state.get("intervention_file_cleanup", []))
+        documents.extend(result.get("documenti", []))
+        cleanup_intervention_files(documents)
+        return result
     res = sb().table(table).delete().eq('id', row_id).execute()
     audit_log("ELIMINAZIONE", table, row_id, "Record eliminato")
     return res
@@ -266,6 +294,10 @@ def batch_upsert(table, rows, conflict, size=500):
 def svuota_tabella(tab):
     all_ids = sb().table(tab).select("id").execute().data or []
     ids = [x["id"] for x in all_ids if "id" in x]
+    if tab == "interventi":
+        for row_id in ids:
+            dele(tab, row_id)
+        return len(ids)
     for chunk_ids in chunks(ids, 500):
         sb().table(tab).delete().in_("id", chunk_ids).execute()
     return len(ids)
@@ -702,7 +734,7 @@ if menu=='Dashboard':
     anomalie_aperte = len(anomalie_df[anomalie_df['stato'].astype(str).str.casefold()!='risolta']) if not anomalie_df.empty and 'stato' in anomalie_df.columns else len(anomalie_df)
 
     c1,c2,c3,c4,c5,c6=st.columns(6)
-    c1.metric('Fatturato', euro(fatt))
+    c1.metric('Fatturato totale', euro(fatt))
     c2.metric('Interventi',len(interventi_df))
     c3.metric('Valore medio',euro(valore_medio))
     c4.metric('Giacenze',len(giacenze_df))
@@ -829,7 +861,12 @@ if menu=='Dashboard':
 
 elif menu=='Gestione dati':
     st.title('🗄️ Gestione dati')
-    st.caption('Modifica, elimina e scarica le principali tabelle operative.')
+    st.caption('Modifica, elimina e scarica le principali tabelle operative. Per correggere gli scarichi usa Gestione Interventi.')
+    if st.session_state.get('intervention_file_cleanup'):
+        st.warning('Pulizia di alcuni allegati ancora da completare.')
+        if st.button('Riprova pulizia allegati'):
+            cleanup_intervention_files(st.session_state['intervention_file_cleanup'])
+            st.rerun()
 
     if st.button('🔄 Aggiorna tabelle', use_container_width=True):
         st.cache_data.clear()
@@ -902,9 +939,13 @@ elif menu=='Gestione dati':
                     st.error(f'Errore modifica: {e}')
 
         with cdel:
-            st.error('Attenzione: eliminazione definitiva dal database.')
+            if tab == 'interventi':
+                st.warning('Elimina insieme intervento, righe, documenti collegati e anomalie di giacenza. Le giacenze e lo storico movimenti restano invariati; questa è una cancellazione amministrativa. Un riepilogo resta in Audit Log.')
+                st.write(f"Intervento {selected_id} · {row.get('cliente', '')} · cartella {row.get('cartella_clinica', '')} · {row.get('data_intervento', '')}")
+            else:
+                st.error('Attenzione: eliminazione definitiva dal database.')
             conferma=st.checkbox(f'Confermo eliminazione ID {selected_id} dalla tabella {tab}')
-            if st.button('🗑️ Elimina definitivamente', use_container_width=True, disabled=not conferma):
+            if st.button('🗑️ Elimina intervento e dati collegati' if tab == 'interventi' else '🗑️ Elimina definitivamente', use_container_width=True, disabled=not conferma):
                 try:
                     if tab == 'documenti_impianto':
                         storage_delete_file(row.get('storage_path',''), row.get('storage_bucket','orthoflow-impianti') or 'orthoflow-impianti')
