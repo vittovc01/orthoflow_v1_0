@@ -242,35 +242,56 @@ with photo_tab:
         st.success(f"OCR AI attivo · {status.get('model', '')}")
     else:
         st.warning('OCR AI non attivo: ' + ', '.join(status.get('missing', [])))
-    doc = st.file_uploader('Carica DDT PDF oppure foto', type=['pdf', 'jpg', 'jpeg', 'png', 'webp'], key='ddt_document_v4', help='Puoi caricare direttamente il PDF originale Johnson anche se contiene più pagine.')
-    if doc:
-        import os
-        os.makedirs('uploads/ddt', exist_ok=True)
-        path = f"uploads/ddt/{pd.Timestamp.now().strftime('%Y%m%d_%H%M%S')}_{doc.name.replace('/', '_')}"
-        open(path, 'wb').write(doc.getbuffer())
-        if doc.type == 'application/pdf' or doc.name.lower().endswith('.pdf'):
-            st.info(f'📄 PDF pronto: {doc.name} · {len(doc.getvalue())/1024:.0f} KB')
-        else:
-            st.image(doc, use_container_width=True)
-        if st.button('🤖 Analizza DDT completo con AI', type='primary', use_container_width=True):
+    docs = st.file_uploader(
+        'Carica foto e PDF del DDT', type=['pdf', 'jpg', 'jpeg', 'png', 'webp'],
+        accept_multiple_files=True, key='ddt_documents_v5',
+        help='Seleziona più foto e/o PDF dello stesso DDT. Ogni PDF può contenere più pagine.')
+    if docs:
+        st.caption(f'{len(docs)} file selezionati. Carica ogni pagina una sola volta, evitando la stessa pagina sia in foto sia in PDF.')
+        for doc in docs:
+            st.write(f"📎 {doc.name} · {len(doc.getvalue()) / 1024:.0f} KB")
+        if st.button('🤖 Analizza tutti i file del DDT', type='primary', use_container_width=True):
             try:
-                with st.spinner('Analisi di tutte le pagine del DDT in corso...'):
-                    meta = analyze_document(path, mode='ddt')
-                st.session_state['ddt_ai_header'] = {
-                    'numero_ddt': clean(meta.get('ddt_number')),
-                    'data_ddt': clean(meta.get('ddt_date')),
-                    'cliente': clean(meta.get('customer') or meta.get('destination')),
-                }
-                st.session_state['ddt_ai_rows'] = normalize_ai_items(meta)
-                st.session_state['ddt_ai_back_orders'] = normalize_ai_items({'items': meta.get('back_orders', [])})
+                from pathlib import Path
+                from uuid import uuid4
+                base = Path('uploads/ddt')
+                base.mkdir(parents=True, exist_ok=True)
+                all_rows, all_back_orders, files = [], [], []
+                merged_header = {'numero_ddt': '', 'data_ddt': '', 'cliente': ''}
+                with st.spinner(f'Analisi di {len(docs)} file e di tutte le pagine PDF...'):
+                    for index, doc in enumerate(docs, start=1):
+                        path = base / f"{uuid4().hex}_{Path(doc.name).name}"
+                        path.write_bytes(doc.getvalue())
+                        meta = analyze_document(str(path), mode='ddt')
+                        incoming = {
+                            'numero_ddt': clean(meta.get('ddt_number')),
+                            'data_ddt': clean(meta.get('ddt_date')),
+                            'cliente': clean(meta.get('customer') or meta.get('destination')),
+                        }
+                        for field in ('numero_ddt', 'data_ddt'):
+                            old, new = merged_header[field], incoming[field]
+                            if old and new and old != new:
+                                raise ValueError(f"Il file {doc.name} riporta {field} diverso ({new} invece di {old}). Carica insieme solo pagine dello stesso DDT.")
+                        for field, value in incoming.items():
+                            if not merged_header[field] and value:
+                                merged_header[field] = value
+                        all_rows.extend(normalize_ai_items(meta))
+                        all_back_orders.extend(normalize_ai_items({'items': meta.get('back_orders', [])}))
+                        files.append(str(path))
+                # Pubblica il risultato solo se tutti i file sono stati analizzati.
+                st.session_state['ddt_ai_header'] = merged_header
+                st.session_state['ddt_ai_rows'] = all_rows
+                st.session_state['ddt_ai_back_orders'] = all_back_orders
+                st.session_state['ddt_ai_files'] = files
+                st.session_state['ddt_ai_revision'] = int(st.session_state.get('ddt_ai_revision', 0)) + 1
                 st.session_state['ddt_source'] = 'Foto DDT AI'
-                st.success(f"Analisi completata: {len(st.session_state['ddt_ai_rows'])} righe spedite · {len(st.session_state['ddt_ai_back_orders'])} back order rilevati.")
+                st.success(f"Analisi completata: {len(docs)} file · {len(all_rows)} righe spedite · {len(all_back_orders)} back order rilevati.")
             except Exception as e:
-                st.error(f'Errore OCR AI DDT: {e}')
+                st.error(f'Analisi multipla non completata: {e}. Nessuna lista parziale è stata caricata.')
     adf = pd.DataFrame(st.session_state.get('ddt_ai_rows', []))
     aed = st.data_editor(
         adf if not adf.empty else pd.DataFrame(columns=['codice', 'descrizione', 'lotto', 'scadenza', 'quantita', 'produttore']),
-        num_rows='dynamic', use_container_width=True, key='ddt_ai_editor_v4'
+        num_rows='dynamic', use_container_width=True, key=f"ddt_ai_editor_v5_{st.session_state.get('ddt_ai_revision', 0)}"
     )
     st.session_state['ddt_ai_rows'] = aed.to_dict('records')
     bo_preview = pd.DataFrame(st.session_state.get('ddt_ai_back_orders', []))
