@@ -17,8 +17,11 @@
 - Offer/history price helpers are duplicated in Scarico Sala AI and Gestione Interventi. A shared module can remove implementation duplication; run-scoped cache behavior must remain intact.
 - One orphan implant-document record was found; no existing orphan record was deleted automatically.
 
-## Inventory finding
-The existing crea_intervento_scarico_ai_flessibile function directly decrements giacenze and also inserts a movement. An AFTER INSERT trigger independently applies that movement to giacenze under origin SCARICO SALA AI. This deserves a dedicated correction and reconciliation; these changes deliberately do not change existing stock quantities or infer corrections from historical movements.
+## Inventory correction (2026-10-02)
+The double update was reproduced and corrected. The flexible AI RPC directly debits the matched stock row; its exact audit movement (SCARICO, SCARICO SALA AI, INTERVENTO, note Scarico sala AI flessibile) now bypasses the movement trigger's additional debit. Other movement types keep the existing trigger behavior.
+A guarded transaction removed 16 artificial negative stock rows totaling -17 units. Each row was checked against its exact original AI movement balance. Real stock quantities were left unchanged, all 17 movements retained, and full removed-row snapshots stored in Audit Log under AI_DOUBLE_DEBIT_20261002.
+Rollback regression tests passed before and after deployment: single debit with normalized/dashed codes, repeated debits, structure stock/revenue, insufficient-stock anomalies, standard load and correction movements.
+Operational monitoring must keep that exact movement marker aligned with the flexible AI RPC; if that RPC is refactored, preserve the single-writer stock contract.
 
 ## Validation
 - Both edited Python files parse.
