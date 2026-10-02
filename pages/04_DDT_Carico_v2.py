@@ -1,4 +1,5 @@
 import re
+from io import BytesIO
 from datetime import date
 
 import pandas as pd
@@ -159,6 +160,23 @@ def add_scan(raw):
     st.session_state['ddt_mobile_rows'] = rows
 
 
+def ddt_excel_bytes(rows):
+    columns = ['codice', 'descrizione', 'lotto', 'scadenza', 'quantita', 'produttore']
+    data = pd.DataFrame(rows).reindex(columns=columns)
+    output = BytesIO()
+    with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
+        data.to_excel(writer, index=False, sheet_name='Codici DDT')
+        sheet = writer.sheets['Codici DDT']
+        sheet.freeze_panes(1, 0)
+        sheet.autofilter(0, 0, len(data), len(columns) - 1)
+        sheet.set_column(0, 0, 20)
+        sheet.set_column(1, 1, 55)
+        sheet.set_column(2, 3, 20)
+        sheet.set_column(4, 4, 12)
+        sheet.set_column(5, 5, 40)
+    return output.getvalue()
+
+
 def atomic_ddt(header, rows):
     payload_rows = []
     errors = []
@@ -294,6 +312,15 @@ with photo_tab:
         num_rows='dynamic', use_container_width=True, key=f"ddt_ai_editor_v5_{st.session_state.get('ddt_ai_revision', 0)}"
     )
     st.session_state['ddt_ai_rows'] = aed.to_dict('records')
+    if not aed.empty:
+        st.download_button(
+            '⬇️ Scarica lista codici Excel',
+            data=ddt_excel_bytes(aed.to_dict('records')),
+            file_name='DDT_lista_codici.xlsx',
+            mime='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+            use_container_width=True,
+            key='ddt_ai_export_excel')
+
     bo_preview = pd.DataFrame(st.session_state.get('ddt_ai_back_orders', []))
     if not bo_preview.empty:
         st.warning(f'📌 Back order / prodotto non spedito rilevati: {len(bo_preview)}')
