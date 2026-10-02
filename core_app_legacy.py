@@ -538,11 +538,44 @@ def euro(value):
     except Exception:
         return '€ 0,00'
 
+def daily_revenue(data):
+    """Fatturato teorico per data intervento, con tutte le origini del materiale."""
+    if data.empty:
+        return pd.DataFrame(columns=['Giorno', 'Fatturato', 'Interventi', 'Quantità'])
+    valid = data.dropna(subset=['data_intervento']).copy()
+    valid['Giorno'] = valid['data_intervento'].dt.normalize()
+    return valid.groupby('Giorno', as_index=False).agg(
+        Fatturato=('totale', 'sum'),
+        Interventi=('intervento_id', 'nunique'),
+        Quantità=('quantita', 'sum')
+    ).sort_values('Giorno')
+
+
 def render_revenue_charts(data, key_prefix='rev'):
     if data.empty or data['data_intervento'].isna().all():
         st.info('Servono interventi con data e righe valorizzate per visualizzare i grafici.')
         return
     valid = data.dropna(subset=['data_intervento']).copy()
+    giornaliero = daily_revenue(valid)
+    st.subheader('Fatturato giornaliero')
+    st.caption('Valore teorico per data intervento, incluse le righe conto deposito struttura. In KPI rispetta i filtri selezionati.')
+    giorno = st.date_input('Giorno da consultare',
+                          value=pd.Timestamp.now(tz='Europe/Rome').date(),
+                          key=f'{key_prefix}_giorno')
+    selezione = giornaliero[giornaliero['Giorno'].dt.date == giorno]
+    g1, g2 = st.columns(2)
+    g1.metric(f"Fatturato del {giorno.strftime('%d/%m/%Y')}",
+              euro(float(selezione['Fatturato'].sum())))
+    g2.metric('Interventi del giorno', int(selezione['Interventi'].sum()))
+    st.bar_chart(giornaliero.set_index('Giorno')['Fatturato'],
+                 use_container_width=True, height=280)
+    st.dataframe(giornaliero.sort_values('Giorno', ascending=False),
+                 use_container_width=True, hide_index=True,
+                 column_config={
+                     'Giorno': st.column_config.DateColumn('Giorno', format='DD/MM/YYYY'),
+                     'Fatturato': st.column_config.NumberColumn('Fatturato €', format='€ %.2f')
+                 })
+    st.divider()
     valid['mese'] = valid['data_intervento'].dt.to_period('M').dt.to_timestamp()
     mensile = valid.groupby('mese', as_index=False)['totale'].sum().sort_values('mese')
     mensile['Media mobile 3 mesi'] = mensile['totale'].rolling(3, min_periods=1).mean()
@@ -675,6 +708,10 @@ if menu=='Dashboard':
     c4.metric('Giacenze',len(giacenze_df))
     c5.metric('Clienti',len(clienti_df))
     c6.metric('Anomalie aperte',anomalie_aperte)
+    _giornaliero = daily_revenue(revenue)
+    _oggi = pd.Timestamp.now(tz='Europe/Rome').date()
+    _fatt_oggi = float(_giornaliero.loc[pd.to_datetime(_giornaliero['Giorno']).dt.date == _oggi, 'Fatturato'].sum())
+    st.metric('Fatturato di oggi', euro(_fatt_oggi))
 
     if not revenue.empty and not revenue['data_intervento'].isna().all():
         today = pd.Timestamp.today().normalize()
