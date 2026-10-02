@@ -20,6 +20,37 @@ def sb():
         st.stop()
     return create_client(str(url).rstrip("/"),str(key))
 
+def normalized_code(value):
+    return "".join(c for c in str(value or "").upper() if c.isascii() and c.isalnum())
+
+
+def normalized_lot(value):
+    return str(value or "").strip().upper()
+
+
+def split_stock_anomalies(anomalies, interventions, materials):
+    headers = {str(i["id"]): i for i in interventions}
+    by_item = {}
+    for row in materials:
+        key = (str(row.get("intervento_id")), normalized_code(row.get("codice")), normalized_lot(row.get("lotto")))
+        by_item.setdefault(key, []).append(row)
+    active, unlinked, structure = [], [], []
+    for anomaly in anomalies:
+        intervention = headers.get(str(anomaly.get("intervento_id")))
+        if not intervention:
+            unlinked.append(anomaly)
+            continue
+        key = (str(anomaly.get("intervento_id")), normalized_code(anomaly.get("codice")), normalized_lot(anomaly.get("lotto")))
+        matches = by_item.get(key, [])
+        if str(intervention.get("codice_cliente")) == "9010013" and matches and all(
+                r.get("origine") == "CONTO DEPOSITO STRUTTURA" for r in matches):
+            structure.append(anomaly)
+            continue
+        active.append({**anomaly, "cliente": intervention.get("cliente"),
+                       "cartella_clinica": intervention.get("cartella_clinica")})
+    return active, unlinked, structure
+
+
 st.title("⚠️ Anomalie Prezzi e Giacenze")
 st.caption("Prezzi mancanti e disponibilità di magazzino da verificare. Le due sezioni sono indipendenti.")
 
@@ -56,11 +87,23 @@ else:
 st.divider()
 st.subheader("📦 Anomalie Giacenza")
 stock=sb().table("anomalie_giacenza").select("*").eq("stato","DA_VERIFICARE").order("id",desc=True).execute().data or []
+stock_ids = sorted({int(a["intervento_id"]) for a in stock if a.get("intervento_id") is not None})
+headers = (sb().table("interventi").select("id,codice_cliente,cliente,cartella_clinica").in_("id",stock_ids).execute().data or []) if stock_ids else []
+materials = (sb().table("righe_intervento").select("intervento_id,codice,lotto,origine").in_("intervento_id",stock_ids).execute().data or []) if stock_ids else []
+stock, unlinked_stock, structure_stock = split_stock_anomalies(stock, headers, materials)
+if unlinked_stock:
+    with st.expander(f"Segnalazioni senza intervento collegato: {len(unlinked_stock)}"):
+        st.caption("Segnalazioni storiche rimaste scollegate. Non sono anomalie operative degli interventi attuali; non vengono chiuse o associate automaticamente.")
+        st.dataframe(pd.DataFrame(unlinked_stock), use_container_width=True, hide_index=True)
+if structure_stock:
+    with st.expander(f"Segnalazioni superate: conto deposito struttura ({len(structure_stock)})"):
+        st.caption("Le righe collegate sono confermate conto deposito struttura: non richiedono giacenza nostra.")
+        st.dataframe(pd.DataFrame(structure_stock), use_container_width=True, hide_index=True)
 if not stock:
-    st.success("Nessuna anomalia giacenza da verificare.")
+    st.success("Nessuna anomalia giacenza operativa da verificare.")
 else:
     sdf=pd.DataFrame(stock)
-    st.dataframe(sdf[[x for x in ["id","created_at","codice","lotto","quantita_richiesta","quantita_disponibile","magazzino","intervento_id","motivo"] if x in sdf]],use_container_width=True,hide_index=True)
+    st.dataframe(sdf[[x for x in ["id","created_at","cliente","cartella_clinica","codice","lotto","quantita_richiesta","quantita_disponibile","magazzino","intervento_id","motivo"] if x in sdf]],use_container_width=True,hide_index=True)
     sid=st.selectbox("Anomalia giacenza da chiudere",sdf["id"].astype(int).tolist(),key="stock_anomaly")
     reason=st.selectbox("Esito",["Già scaricato in Business prima dell'importazione","Rettifica giacenza","Lotto da correggere","Altro"])
     note=st.text_input("Nota Direzione",key="stock_note")
