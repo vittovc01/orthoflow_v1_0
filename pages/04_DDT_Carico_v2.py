@@ -1,4 +1,5 @@
 import re
+from hashlib import sha256
 from io import BytesIO
 from datetime import date
 
@@ -160,6 +161,18 @@ def add_scan(raw):
     st.session_state['ddt_mobile_rows'] = rows
 
 
+
+def collect_ddt_files(saved, uploaded):
+    """Keep successive selections; identical bytes are analyzed only once."""
+    result = dict(saved)
+    for doc in uploaded or []:
+        data = doc.getvalue()
+        file_id = sha256(data).hexdigest()
+        if file_id not in result:
+            result[file_id] = {'name': doc.name, 'data': data}
+    return result
+
+
 def ddt_excel_bytes(rows):
     columns = ['codice', 'descrizione', 'lotto', 'scadenza', 'quantita', 'produttore']
     data = pd.DataFrame(rows).reindex(columns=columns)
@@ -260,14 +273,36 @@ with photo_tab:
         st.success(f"OCR AI attivo · {status.get('model', '')}")
     else:
         st.warning('OCR AI non attivo: ' + ', '.join(status.get('missing', [])))
-    docs = st.file_uploader(
-        'Carica foto e PDF del DDT', type=['pdf', 'jpg', 'jpeg', 'png', 'webp'],
-        accept_multiple_files=True, key='ddt_documents_v5',
-        help='Seleziona più foto e/o PDF dello stesso DDT. Ogni PDF può contenere più pagine.')
+    upload_revision = int(st.session_state.get('ddt_upload_revision', 0))
+    selected = st.file_uploader(
+        'Aggiungi foto e PDF del DDT', type=['pdf', 'jpg', 'jpeg', 'png', 'webp'],
+        accept_multiple_files=True, key=f'ddt_documents_v6_{upload_revision}',
+        help='Dal PC puoi selezionare più file con Ctrl (Cmd su Mac), oppure aggiungerli in più passaggi.')
+    pending = collect_ddt_files(st.session_state.get('ddt_pending_files', {}), selected)
+    st.session_state['ddt_pending_files'] = pending
+    if pending:
+        st.caption(f'{len(pending)} file pronti per l’analisi. Le nuove selezioni si aggiungono alla lista.')
+        if st.button('➕ Aggiungi altre foto o PDF', use_container_width=True):
+            st.session_state['ddt_upload_revision'] = upload_revision + 1
+            st.rerun()
+        for file_id, entry in pending.items():
+            label, action = st.columns([5, 1])
+            label.write(f"📎 {entry['name']} · {len(entry['data']) / 1024:.0f} KB")
+            if action.button('Rimuovi', key=f'ddt_remove_{file_id}'):
+                st.session_state['ddt_pending_files'] = {
+                    k: v for k, v in pending.items() if k != file_id}
+                st.session_state['ddt_upload_revision'] = upload_revision + 1
+                st.rerun()
+        if st.button('🧹 Svuota file selezionati'):
+            st.session_state['ddt_pending_files'] = {}
+            st.session_state['ddt_upload_revision'] = upload_revision + 1
+            st.rerun()
+    docs = []
+    for entry in pending.values():
+        doc = BytesIO(entry['data'])
+        doc.name = entry['name']
+        docs.append(doc)
     if docs:
-        st.caption(f'{len(docs)} file selezionati. Carica ogni pagina una sola volta, evitando la stessa pagina sia in foto sia in PDF.')
-        for doc in docs:
-            st.write(f"📎 {doc.name} · {len(doc.getvalue()) / 1024:.0f} KB")
         if st.button('🤖 Analizza tutti i file del DDT', type='primary', use_container_width=True):
             try:
                 from pathlib import Path
@@ -375,6 +410,8 @@ if st.button('🚚 Crea DDT e carica magazzino', type='primary', use_container_w
             st.session_state['ddt_mobile_rows'] = []
             st.session_state['ddt_ai_rows'] = []
             st.session_state['ddt_ai_header'] = {}
+            st.session_state['ddt_pending_files'] = {}
+            st.session_state['ddt_upload_revision'] = int(st.session_state.get('ddt_upload_revision', 0)) + 1
             st.session_state['ddt_ai_back_orders'] = []
             st.cache_data.clear()
         except Exception as e:
