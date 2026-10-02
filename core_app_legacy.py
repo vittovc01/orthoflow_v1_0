@@ -794,7 +794,9 @@ if menu=='Dashboard':
     st.subheader('👨‍⚕️ Andamento per chirurgo')
     if not revenue.empty and 'chirurgo' in revenue.columns:
         surg = revenue.copy()
-        surg['Chirurgo'] = surg['chirurgo'].fillna('').astype(str).str.strip().replace('', 'NON INDICATO')
+        surg['Chirurgo'] = (surg['chirurgo'].fillna('').astype(str).str.normalize('NFKC')
+                            .str.replace(r'\s+', ' ', regex=True).str.strip().str.upper()
+                            .replace('', 'NON INDICATO'))
         surg_summary = surg.groupby('Chirurgo',as_index=False).agg(Fatturato=('totale','sum'),Interventi=('intervento_id','nunique'),Pezzi=('quantita','sum')).sort_values('Fatturato',ascending=False)
         sc1,sc2=st.columns(2)
         with sc1:
