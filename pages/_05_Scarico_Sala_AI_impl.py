@@ -1,5 +1,7 @@
 import os
 import re
+from hashlib import sha256
+from io import BytesIO
 from datetime import date, datetime
 from pathlib import Path
 from functools import lru_cache
@@ -99,6 +101,16 @@ def ncode(v): return re.sub(r"[^A-Z0-9]", "", clean(v).upper())
 if not user():
     st.warning("Accedi prima a OrthoFlow Control Tower.")
     st.stop()
+
+
+def collect_scarico_files(saved, uploaded):
+    result = dict(saved)
+    for doc in uploaded or []:
+        data = doc.getvalue()
+        file_id = sha256(data).hexdigest()
+        if file_id not in result:
+            result[file_id] = {"name": doc.name, "data": data, "type": getattr(doc, "type", "") or ""}
+    return result
 
 
 def save_local(upload, category="scarico_sala"):
@@ -301,14 +313,24 @@ def is_other_manufacturer(value):
         "SMITHNEPHEW", "SMITHANDNEPHEW", "ARTHREX", "BBRAUN", "AESCULAP", "INOMED"))
 
 
-def run_ai(path):
+def run_ai(path, documents=None):
     if not ai_enabled():
         st.error("OCR AI non configurato. Verifica OPENAI_API_KEY ed ENABLE_AI_OCR nei Secrets.")
         return
     try:
-        with st.spinner("Analisi AI di codici, lotti e scadenze…"):
-            meta = analyze_document(path, mode="scarico_sala")
-        st.session_state["scarico_ai_rows"] = normalize_ai_items(meta)
+        documents = documents or [{"path": path, "name": Path(path).name,
+                                   "type": st.session_state.get("scarico_file_type", "")}]
+        combined_rows, meta = [], {}
+        with st.spinner(f"Analisi AI di {len(documents)} file: codici, lotti e scadenze…"):
+            for document in documents:
+                incoming = analyze_document(document["path"], mode="scarico_sala")
+                combined_rows.extend(normalize_ai_items(incoming))
+                for field, value in incoming.items():
+                    if field != "items" and not meta.get(field) and value:
+                        meta[field] = value
+        meta["items"] = combined_rows
+        st.session_state["scarico_ai_rows"] = combined_rows
+        st.session_state["scarico_documents"] = documents
         st.session_state["scarico_editor_revision"] = int(st.session_state.get("scarico_editor_revision", 0)) + 1
         st.session_state["scarico_ai_meta"] = meta
         st.session_state["scarico_file_path"] = path
@@ -323,7 +345,18 @@ def run_ai(path):
 
 
 def save_document_after_transaction(intervention_id, procedure_date, customer_code, customer_name, agent, clinical_record):
-    local_path = st.session_state.get("scarico_file_path")
+    documents = st.session_state.get("scarico_documents") or [{
+        "path": st.session_state.get("scarico_file_path"),
+        "name": st.session_state.get("scarico_file_name"),
+        "type": st.session_state.get("scarico_file_type", "")}]
+    results = [
+        save_one_document(intervention_id, procedure_date, customer_code, customer_name, agent, clinical_record, document)
+        for document in documents]
+    return all(results)
+
+
+def save_one_document(intervention_id, procedure_date, customer_code, customer_name, agent, clinical_record, document):
+    local_path = document.get("path")
     if not local_path or not Path(local_path).exists():
         return True
     bucket, storage_path = storage_upload(local_path, intervention_id)
@@ -335,8 +368,8 @@ def save_document_after_transaction(intervention_id, procedure_date, customer_co
             "cliente": customer_name,
             "agente": clean(agent),
             "cartella_clinica": clean(clinical_record),
-            "nome_file": st.session_state.get("scarico_file_name", Path(local_path).name),
-            "tipo_file": st.session_state.get("scarico_file_type", ""),
+            "nome_file": document.get("name") or Path(local_path).name,
+            "tipo_file": document.get("type", ""),
             "percorso_file": local_path,
             "storage_bucket": bucket,
             "storage_path": storage_path,
@@ -367,16 +400,40 @@ with camera_tab:
             run_ai(save_camera(camera))
 
 with upload_tab:
-    upload = st.file_uploader("Carica foto o PDF scarico sala", type=["jpg", "jpeg", "png", "webp", "pdf"], key="scarico_upload_ai")
-    if upload is not None:
-        path = save_local(upload)
-        st.session_state["scarico_file_type"] = getattr(upload, "type", "") or ""
-        if str(upload.name).lower().endswith(".pdf"):
-            st.info(f"PDF pronto: {upload.name}")
-        else:
-            st.image(upload, use_container_width=True)
-        if st.button("🤖 Analizza file e crea lista codici", type="primary", use_container_width=True, key="analyze_upload"):
-            run_ai(path)
+    upload_revision = int(st.session_state.get("scarico_upload_revision", 0))
+    uploads = st.file_uploader(
+        "Carica foto o PDF scarico sala", type=["jpg", "jpeg", "png", "webp", "pdf"],
+        accept_multiple_files=True, key=f"scarico_upload_ai_v2_{upload_revision}",
+        help="Seleziona più file con Ctrl (Cmd su Mac) oppure aggiungili in più passaggi. Solo foto dello stesso intervento.")
+    pending = collect_scarico_files(st.session_state.get("scarico_pending_files", {}), uploads)
+    st.session_state["scarico_pending_files"] = pending
+    if pending:
+        st.caption(f"{len(pending)} file pronti. Le nuove selezioni si aggiungono alla lista.")
+        if st.button("➕ Aggiungi altre foto o PDF", key="scarico_add_files", use_container_width=True):
+            st.session_state["scarico_upload_revision"] = upload_revision + 1
+            st.rerun()
+        for file_id, entry in pending.items():
+            label, action = st.columns([5, 1])
+            label.write(f"📎 {entry['name']} · {len(entry['data']) / 1024:.0f} KB")
+            if action.button("Rimuovi", key=f"scarico_remove_{file_id}"):
+                st.session_state["scarico_pending_files"] = {k: v for k, v in pending.items() if k != file_id}
+                st.session_state["scarico_upload_revision"] = upload_revision + 1
+                st.rerun()
+        if st.button("🧹 Svuota file selezionati", key="scarico_clear_files"):
+            st.session_state["scarico_pending_files"] = {}
+            st.session_state["scarico_upload_revision"] = upload_revision + 1
+            st.rerun()
+        with st.expander("Anteprima foto"):
+            for entry in pending.values():
+                if not entry["name"].lower().endswith(".pdf"):
+                    st.image(entry["data"], caption=entry["name"], use_container_width=True)
+        if st.button("🤖 Analizza tutti i file e crea lista codici", type="primary", use_container_width=True, key="analyze_upload"):
+            documents = []
+            for entry in pending.values():
+                upload = BytesIO(entry["data"])
+                upload.name = entry["name"]
+                documents.append({"path": save_local(upload), "name": entry["name"], "type": entry["type"]})
+            run_ai(documents[0]["path"], documents=documents)
 
 meta = st.session_state.get("scarico_ai_meta", {}) or {}
 source_rows = st.session_state.get("scarico_ai_rows", []) or []
@@ -639,12 +696,13 @@ if confirm:
         if not doc_ok:
             st.warning("Intervento e magazzino sono stati salvati correttamente, ma il documento originale non è stato archiviato. Puoi ricaricarlo dall'Archivio impianti.")
 
-        for k in ["scarico_ai_rows", "scarico_ai_meta", "scarico_file_path", "scarico_file_name", "scarico_file_type", "scarico_source", "scarico_missing_prices", "scarico_stock_errors", "scarico_verified"]:
+        for k in ["scarico_pending_files", "scarico_documents", "scarico_ai_rows", "scarico_ai_meta", "scarico_file_path", "scarico_file_name", "scarico_file_type", "scarico_source", "scarico_missing_prices", "scarico_stock_errors", "scarico_verified"]:
             st.session_state.pop(k, None)
         for k in list(st.session_state.keys()):
             if str(k).startswith("manual_price_") or str(k).startswith("free_goods_"):
                 st.session_state.pop(k, None)
         st.session_state["scarico_editor_revision"] = int(st.session_state.get("scarico_editor_revision", 0)) + 1
+        st.session_state["scarico_upload_revision"] = int(st.session_state.get("scarico_upload_revision", 0)) + 1
         st.cache_data.clear()
     except Exception as e:
         msg = str(e)
