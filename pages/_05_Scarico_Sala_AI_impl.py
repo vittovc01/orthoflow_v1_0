@@ -294,12 +294,11 @@ def available_qty(mag, code, lot):
 
 
 def is_other_manufacturer(value):
-    """Esclude solo produttori espliciti non J&J; un marchio ignoto richiede verifica."""
-    name = clean(value).upper()
-    unknown = {"", "UNKNOWN", "SCONOSCIUTO", "NON LETTO", "NON RILEVATO", "N/D", "ND", "N/A", "NONE", "NAN", "MARCHIO NON LETTO"}
-    if name in unknown:
-        return False
-    return not any(brand in name for brand in ("JOHNSON", "J&J", "DEPUY", "SYNTHES", "ETHICON", "MENTOR"))
+    """Leghe e produttori ignoti non sono prova di materiale non J&J."""
+    name = ncode(value)
+    return any(brand in name for brand in (
+        "STRYKER", "ZIMMER", "BIOMET", "MEDTRONIC",
+        "SMITHNEPHEW", "SMITHANDNEPHEW", "ARTHREX", "BBRAUN", "AESCULAP", "INOMED"))
 
 
 def run_ai(path):
@@ -381,8 +380,18 @@ with upload_tab:
 
 meta = st.session_state.get("scarico_ai_meta", {}) or {}
 source_rows = st.session_state.get("scarico_ai_rows", []) or []
-excluded_rows = [r for r in source_rows if is_other_manufacturer(r.get("produttore"))]
-rows = [r for r in source_rows if not is_other_manufacturer(r.get("produttore"))]
+excluded_indices = [i for i, r in enumerate(source_rows) if is_other_manufacturer(r.get("produttore"))]
+restored_indices = []
+if excluded_indices:
+    restored_indices = st.multiselect(
+        "Conferma e reinserisci materiale nostro / J&J escluso",
+        excluded_indices,
+        format_func=lambda i: f"{clean(source_rows[i].get('codice'))} · lotto {clean(source_rows[i].get('lotto'))} · {clean(source_rows[i].get('produttore'))}",
+        key=f"scarico_restore_{st.session_state.get('scarico_editor_revision', 0)}",
+        help="Seleziona le righe dopo aver verificato l'etichetta, prima di correggere la tabella.")
+excluded_rows = [r for i, r in enumerate(source_rows) if i in excluded_indices and i not in restored_indices]
+rows = [{**r, "jnj_verificato_manualmente": i in restored_indices}
+        for i, r in enumerate(source_rows) if i not in excluded_indices or i in restored_indices]
 clients = client_options()
 ai_clinic = clean(meta.get("clinic_name"))
 if clients:
@@ -411,7 +420,7 @@ with st.form("scarico_ai_confirm"):
         st.subheader("✅ Lista materiali riconosciuti")
         st.caption("Tocca una cella per correggere codice, lotto, scadenza o quantità. Spunta Escludi riga per non inserirla nello scarico. Le modifiche vengono applicate alla conferma.")
         df_rows = pd.DataFrame(rows)
-        preferred = ["codice", "escludi_riga", "descrizione", "lotto", "scadenza", "quantita", "produttore", "confidence", "warning"]
+        preferred = ["codice", "jnj_verificato_manualmente", "escludi_riga", "descrizione", "lotto", "scadenza", "quantita", "produttore", "confidence", "warning"]
         df_rows["escludi_riga"] = False
         for col in preferred:
             if col not in df_rows.columns:
@@ -426,6 +435,7 @@ with st.form("scarico_ai_confirm"):
             df_rows[preferred], num_rows="dynamic", use_container_width=True,
             height=min(1600, max(220, 35 * (len(df_rows) + 3))), row_height=35,
             column_config={
+                "jnj_verificato_manualmente": None,
                 "escludi_riga": st.column_config.CheckboxColumn(
                     "Escludi riga", default=False,
                     help="La riga non verrà salvata e non genererà fatturato, ordini o movimenti di magazzino."),
@@ -497,7 +507,7 @@ if confirm:
     for r in final_rows:
         if r.get("escludi_riga") is True:
             continue
-        if is_other_manufacturer(r.get("produttore")):
+        if is_other_manufacturer(r.get("produttore")) and not r.get("jnj_verificato_manualmente", False):
             continue
         code = clean(r.get("codice")).upper()
         lot = clean(r.get("lotto"))
@@ -559,7 +569,7 @@ if confirm:
     rpc_rows = []
     for r, code, lot, qty, price, price_source in priced_rows:
         manufacturer = clean(r.get("produttore"))
-        validation = "Validato J&J" if any(x in manufacturer.upper() for x in ["JOHNSON", "J&J", "DEPUY", "SYNTHES"]) else ("Marchio non letto" if not manufacturer else "Prodotto non J&J")
+        validation = "J&J verificato manualmente" if r.get("jnj_verificato_manualmente", False) else "Validato J&J" if any(x in manufacturer.upper() for x in ["JOHNSON", "J&J", "DEPUY", "SYNTHES"]) else ("Marchio non letto" if not manufacturer else "Prodotto non J&J")
         rpc_rows.append({
             "codice": code,
             "descrizione": clean(r.get("descrizione")),
