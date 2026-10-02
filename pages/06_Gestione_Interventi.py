@@ -187,10 +187,20 @@ def remembered_price_for(customer_code, product_code, line):
 
 
 def available_qty(mag, code, lot):
+    """Pre-check UX; include null/empty lots only for confirmed lotless rows."""
     try:
-        rows = (sb().table("giacenze").select("codice,lotto,quantita")
-                .eq("codice_magazzino", mag).eq("lotto", lot).execute().data or [])
-        return sum(float(r.get("quantita") or 0) for r in rows if ncode(r.get("codice")) == ncode(code))
+        query = (sb().table("giacenze").select("codice,lotto,quantita,origine")
+                 .eq("codice_magazzino", mag))
+        if lot:
+            query = query.eq("lotto", lot)
+        total, offset = 0.0, 0
+        while True:
+            batch = query.order("id").range(offset, offset + 499).execute().data or []
+            total += sum(float(r.get("quantita") or 0) for r in batch
+                         if ncode(r.get("codice")) == ncode(code) and clean(r.get("lotto")) == lot)
+            if len(batch) < 500:
+                return total
+            offset += 500
     except Exception:
         return 0.0
 
@@ -322,6 +332,7 @@ for r in rows:
         "codice": clean(r.get("codice")),
         "descrizione": clean(r.get("descrizione")),
         "lotto": clean(r.get("lotto")),
+        "senza_lotto": "Non sterile senza lotto" in clean(r.get("validazione")),
         "scadenza": clean(r.get("scadenza")),
         "quantita": qty,
         "produttore": clean(r.get("produttore")),
@@ -363,7 +374,8 @@ edited = st.data_editor(
         "id": st.column_config.NumberColumn("ID", format="%d"),
         "codice": st.column_config.TextColumn("Codice Johnson/REF", required=True),
         "descrizione": st.column_config.TextColumn("Descrizione"),
-        "lotto": st.column_config.TextColumn("Lotto", required=True),
+        "lotto": st.column_config.TextColumn("Lotto"),
+        "senza_lotto": st.column_config.CheckboxColumn("Non sterile / senza lotto", default=False),
         "scadenza": st.column_config.TextColumn("Scadenza YYYY-MM-DD"),
         "quantita": st.column_config.NumberColumn("Qtà", min_value=0.01, step=1.0, format="%.2f", required=True),
         "produttore": st.column_config.TextColumn("Produttore"),
@@ -402,6 +414,9 @@ if st.button("💾 Salva tutte le modifiche", type="primary", use_container_widt
         expiry = clean(row["scadenza"]) or None
         manufacturer = clean(row["produttore"])
         validation = clean(row["validazione"])
+        no_lot = bool(row.get("senza_lotto", False))
+        if no_lot and "Non sterile senza lotto" not in validation:
+            validation = (validation + " · Non sterile senza lotto").strip(" ·")
         old_structure = bool(old.get("conto_deposito_struttura", False))
         structure = is_malzoni and bool(row.get("conto_deposito_struttura", False))
         origin = "CONTO DEPOSITO STRUTTURA" if structure else (
@@ -415,8 +430,8 @@ if st.button("💾 Salva tutte le modifiche", type="primary", use_container_widt
         except Exception:
             qty = 0
         price = row["prezzo"]
-        if not code or not lot or qty <= 0:
-            errors.append(f"Riga {rid}: codice, lotto e quantità devono essere validi.")
+        if not code or qty <= 0 or (not lot and not no_lot) or (lot and no_lot):
+            errors.append(f"Riga {rid}: servono codice e quantità validi, lotto oppure conferma Non sterile / senza lotto.")
             continue
         if pd.isna(price):
             errors.append(f"Riga {rid} ({code}): prezzo mancante.")

@@ -295,12 +295,20 @@ def remembered_price_for(customer_code, product_code, line):
 
 
 def available_qty(mag, code, lot):
-    """Pre-check UX. La verifica definitiva e bloccante avviene nella RPC atomica."""
+    """Pre-check UX; include null/empty lots only for confirmed lotless rows."""
     try:
-        rows = (sb().table("giacenze").select("codice,lotto,quantita,origine")
-                .eq("codice_magazzino", mag).eq("lotto", lot).eq("origine", "CONTO DEPOSITO")
-                .execute().data or [])
-        return sum(float(r.get("quantita") or 0) for r in rows if ncode(r.get("codice")) == ncode(code))
+        query = (sb().table("giacenze").select("codice,lotto,quantita,origine")
+                 .eq("codice_magazzino", mag).eq("origine", "CONTO DEPOSITO"))
+        if lot:
+            query = query.eq("lotto", lot)
+        total, offset = 0.0, 0
+        while True:
+            batch = query.order("id").range(offset, offset + 499).execute().data or []
+            total += sum(max(0.0, float(r.get("quantita") or 0)) for r in batch
+                         if ncode(r.get("codice")) == ncode(code) and clean(r.get("lotto")) == lot)
+            if len(batch) < 500:
+                return total
+            offset += 500
     except Exception:
         return 0.0
 
@@ -475,10 +483,11 @@ with st.form("scarico_ai_confirm"):
     if rows:
         st.divider()
         st.subheader("✅ Lista materiali riconosciuti")
-        st.caption("Tocca una cella per correggere codice, lotto, scadenza o quantità. Spunta Escludi riga per non inserirla nello scarico. Le modifiche vengono applicate alla conferma.")
+        st.caption("Tocca una cella per correggere codice, lotto, scadenza o quantità. Per materiale non sterile senza lotto spunta Non sterile / senza lotto. Spunta Escludi riga per non inserirla nello scarico. Le modifiche vengono applicate alla conferma.")
         df_rows = pd.DataFrame(rows)
-        preferred = ["codice", "jnj_verificato_manualmente", "escludi_riga", "descrizione", "lotto", "scadenza", "quantita", "produttore", "confidence", "warning"]
+        preferred = ["codice", "senza_lotto", "jnj_verificato_manualmente", "escludi_riga", "descrizione", "lotto", "scadenza", "quantita", "produttore", "confidence", "warning"]
         df_rows["escludi_riga"] = False
+        df_rows["senza_lotto"] = df_rows.get("senza_lotto", pd.Series(False, index=df_rows.index)).fillna(False).astype(bool)
         for col in preferred:
             if col not in df_rows.columns:
                 df_rows[col] = ""
@@ -498,6 +507,8 @@ with st.form("scarico_ai_confirm"):
                     help="La riga non verrà salvata e non genererà fatturato, ordini o movimenti di magazzino."),
                 "codice": st.column_config.TextColumn("Codice Johnson/REF"),
                 "lotto": st.column_config.TextColumn("Lotto"),
+                "senza_lotto": st.column_config.CheckboxColumn("Non sterile / senza lotto", default=False,
+                    help="Spunta solo materiale non sterile che non prevede lotto. La disponibilità viene cercata nelle giacenze senza lotto."),
                 "conto_deposito_struttura": st.column_config.CheckboxColumn(
                 "Conto deposito struttura", default=False,
                 help="Materiale Malzoni / Smart Track: incluso nel fatturato, senza scarico del nostro magazzino.")},
@@ -561,6 +572,7 @@ if confirm:
         st.stop()
     final_rows = edited.to_dict("records") if rows else []
     valid_rows = []
+    invalid_lots = []
     for r in final_rows:
         if r.get("escludi_riga") is True:
             continue
@@ -572,11 +584,21 @@ if confirm:
             qty = float(r.get("quantita") or 1)
         except Exception:
             qty = 0
-        if code and lot and qty > 0:
-            valid_rows.append((r, code, lot, qty))
+        no_lot = bool(r.get("senza_lotto", False))
+        if code and qty > 0:
+            if not lot and not no_lot:
+                invalid_lots.append(code)
+            elif lot and no_lot:
+                invalid_lots.append(f"{code}: togli la spunta senza lotto oppure svuota il lotto")
+            else:
+                valid_rows.append((r, code, lot, qty))
+
+    if invalid_lots:
+        st.error("Verifica il lotto oppure spunta Non sterile / senza lotto: " + ", ".join(invalid_lots))
+        st.stop()
 
     if not valid_rows:
-        st.error("Nessuna riga valida: servono almeno codice, lotto e quantità > 0.")
+        st.error("Nessuna riga valida: servono codice e quantità > 0; il lotto è richiesto salvo materiale confermato non sterile senza lotto.")
         st.stop()
 
     # UX pre-flight: raggruppa duplicati. La RPC ripete il controllo con lock DB ed è quella autoritativa.
@@ -631,6 +653,7 @@ if confirm:
             "codice": code,
             "descrizione": clean(r.get("descrizione")),
             "lotto": lot,
+            "senza_lotto": bool(r.get("senza_lotto", False)),
             "scadenza": clean(r.get("scadenza")) or None,
             "quantita": qty,
             "produttore": manufacturer,
