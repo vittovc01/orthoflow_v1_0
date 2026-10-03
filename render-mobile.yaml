@@ -1,0 +1,25 @@
+# Separate deployment; existing Streamlit desktop render.yaml is unchanged.
+services:
+  - type: web
+    name: orthoflow-mobile
+    runtime: docker
+    dockerfilePath: ./mobile/Dockerfile
+    dockerContext: .
+    healthCheckPath: /health
+    envVars:
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_SERVICE_KEY
+        sync: false
+      - key: MOBILE_PUBLIC_ORIGIN
+        sync: false
+      - key: ORTHOFLOW_DESKTOP_URL
+        sync: false
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: ENABLE_AI_OCR
+        value: 'true'
+      - key: OPENAI_VISION_MODEL
+        sync: false
+      - key: MOBILE_LOCAL_DEV
+        value: 'false'
