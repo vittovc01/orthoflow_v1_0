@@ -8,6 +8,7 @@ from functools import lru_cache
 
 import pandas as pd
 import streamlit as st
+from orthoflow_branding import configure_page
 from supabase import create_client
 
 try:
@@ -18,7 +19,7 @@ except Exception:
     analyze_document = None
     normalize_ai_items = lambda x: []
 
-st.set_page_config(page_title="Scarico Sala AI · OrthoFlow", page_icon="📸", layout="wide")
+configure_page(page_title="Scarico Sala AI · OrthoFlow", page_icon="📸", layout="wide")
 
 
 def secret(name, default=None):

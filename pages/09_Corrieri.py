@@ -3,11 +3,12 @@ from PIL import Image
 from datetime import date, datetime, timezone
 import pandas as pd
 import streamlit as st
+from orthoflow_branding import configure_page
 from streamlit_js_eval import get_geolocation
 from streamlit_drawable_canvas import st_canvas
 from supabase import create_client
 
-st.set_page_config(page_title="Controllo Corrieri · OrthoFlow",page_icon="🚐",layout="wide")
+configure_page(page_title="Controllo Corrieri · OrthoFlow",page_icon="🚐",layout="wide")
 if not st.session_state.get("user"): st.switch_page("pages/99_Login.py")
 p=set(st.session_state.get("permessi",[]) or [])
 director=str(st.session_state.get("ruolo",""))=="Admin" or "DIREZIONE" in p

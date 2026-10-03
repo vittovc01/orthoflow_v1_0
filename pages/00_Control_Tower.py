@@ -1,9 +1,10 @@
 from datetime import date
 import pandas as pd
 import streamlit as st
+from orthoflow_branding import configure_page
 from supabase import create_client
 
-st.set_page_config(page_title='OrthoFlow Control Tower', page_icon='🛰️', layout='wide')
+configure_page(page_title='OrthoFlow Control Tower', page_icon='🛰️', layout='wide')
 
 # Role landing: profili operativi entrano direttamente nel proprio lavoro.
 _p=set(st.session_state.get("permessi",[]) or [])

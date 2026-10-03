@@ -1,9 +1,10 @@
 import os, re, hashlib, hmac
 from pathlib import Path
 import streamlit as st
+from orthoflow_branding import configure_page
 from supabase import create_client
 
-st.set_page_config(page_title='OrthoFlow 7.2 Enterprise', page_icon='🏥', layout='centered')
+configure_page(page_title='OrthoFlow 7.2 Enterprise', page_icon='🏥', layout='centered')
 
 
 def secret(name, default=None):

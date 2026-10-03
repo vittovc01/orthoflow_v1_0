@@ -1,7 +1,8 @@
 import streamlit as st
+from orthoflow_branding import configure_page
 import pandas as pd
 from supabase import create_client
-st.set_page_config(page_title="Documenti Logistica · OrthoFlow",page_icon="📑",layout="wide")
+configure_page(page_title="Documenti Logistica · OrthoFlow",page_icon="📑",layout="wide")
 
 if not st.session_state.get("user"): st.stop()
 _ofp=set(st.session_state.get("permessi",[]) or [])

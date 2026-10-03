@@ -1,9 +1,10 @@
 import streamlit as st
+from orthoflow_branding import configure_page
 import pandas as pd
 from datetime import datetime, timezone
 from supabase import create_client
 
-st.set_page_config(page_title="Utenti & Permessi · OrthoFlow",page_icon="👥",layout="wide")
+configure_page(page_title="Utenti & Permessi · OrthoFlow",page_icon="👥",layout="wide")
 if not st.session_state.get("user"): st.stop()
 perms=set(st.session_state.get("permessi",[]) or [])
 if str(st.session_state.get("ruolo",""))!="Admin" and "DIREZIONE" not in perms:

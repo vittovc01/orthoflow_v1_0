@@ -2,6 +2,7 @@ import re
 from datetime import date
 import pandas as pd
 import streamlit as st
+from orthoflow_branding import configure_page
 from supabase import create_client
 
 try:
@@ -17,7 +18,7 @@ except Exception:
     analyze_image=None
     normalize_ai_items=lambda x: []
 
-st.set_page_config(page_title='DDT Mobile · OrthoFlow Control Tower', page_icon='🚚', layout='wide')
+configure_page(page_title='DDT Mobile · OrthoFlow Control Tower', page_icon='🚚', layout='wide')
 
 st.markdown('''
 <style>

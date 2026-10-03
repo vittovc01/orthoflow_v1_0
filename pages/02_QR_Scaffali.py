@@ -3,9 +3,10 @@ import zipfile
 import pandas as pd
 import qrcode
 import streamlit as st
+from orthoflow_branding import configure_page
 from supabase import create_client
 
-st.set_page_config(page_title='QR Scaffali · OrthoFlow', page_icon='🏷️', layout='wide')
+configure_page(page_title='QR Scaffali · OrthoFlow', page_icon='🏷️', layout='wide')
 
 # OrthoFlow permission gate
 _p=set(st.session_state.get("permessi",[]) or [])

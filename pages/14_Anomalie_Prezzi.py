@@ -2,9 +2,10 @@ import os
 from datetime import datetime, timezone
 import pandas as pd
 import streamlit as st
+from orthoflow_branding import configure_page
 from supabase import create_client
 
-st.set_page_config(page_title="Anomalie Prezzi e Giacenze · OrthoFlow", page_icon="⚠️", layout="wide")
+configure_page(page_title="Anomalie Prezzi e Giacenze · OrthoFlow", page_icon="⚠️", layout="wide")
 perms=set(st.session_state.get("permessi",[]) or [])
 role=str(st.session_state.get("ruolo","")).strip().lower()
 allowed=role in ["admin","amministrazione"] or "DIREZIONE" in perms or "AMMINISTRAZIONE" in perms

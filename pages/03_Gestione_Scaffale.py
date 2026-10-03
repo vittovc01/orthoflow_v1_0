@@ -2,6 +2,7 @@ import re
 from datetime import date
 import pandas as pd
 import streamlit as st
+from orthoflow_branding import configure_page
 from supabase import create_client
 
 try:
@@ -9,7 +10,7 @@ try:
 except Exception:
     qrcode_scanner = None
 
-st.set_page_config(page_title='Gestione Scaffale · OrthoFlow', page_icon='📚', layout='wide')
+configure_page(page_title='Gestione Scaffale · OrthoFlow', page_icon='📚', layout='wide')
 
 # OrthoFlow permission gate
 _p=set(st.session_state.get("permessi",[]) or [])

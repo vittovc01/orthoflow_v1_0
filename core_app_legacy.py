@@ -3,6 +3,7 @@ from datetime import date
 from pathlib import Path
 import pandas as pd
 import streamlit as st
+from orthoflow_branding import configure_page
 from supabase import create_client
 
 try:
@@ -12,7 +13,7 @@ except Exception:
     analyze_image=None
     normalize_ai_items=lambda x: []
 
-st.set_page_config(page_title='OrthoFlow 7.2 Enterprise', layout='wide')
+configure_page(page_title='OrthoFlow 7.2 Enterprise', layout='wide')
 
 
 st.markdown("""

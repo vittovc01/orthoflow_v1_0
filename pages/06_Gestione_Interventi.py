@@ -5,9 +5,10 @@ from functools import lru_cache
 
 import pandas as pd
 import streamlit as st
+from orthoflow_branding import configure_page
 from supabase import create_client
 
-st.set_page_config(page_title="Gestione Interventi · OrthoFlow", page_icon="🛠️", layout="wide")
+configure_page(page_title="Gestione Interventi · OrthoFlow", page_icon="🛠️", layout="wide")
 
 perms=set(st.session_state.get("permessi",[]) or [])
 allowed=str(st.session_state.get("ruolo",""))=="Admin" or "DIREZIONE" in perms or "AMMINISTRAZIONE" in perms
