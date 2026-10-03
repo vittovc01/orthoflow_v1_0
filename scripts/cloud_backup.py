@@ -51,11 +51,22 @@ def command(args, env, timeout=900):
 def digest(data): return hashlib.sha256(data).hexdigest()
 
 
+def stream_digest(stream):
+    h=hashlib.sha256();size=0
+    while chunk:=stream.read(CHUNK):h.update(chunk);size+=len(chunk)
+    return h.hexdigest(),size
+
+
 def build_archive(destination, database_dump, inventory, download):
     """No source paths become local paths or ZIP entry names."""
     records=[]
     with zipfile.ZipFile(destination,'w',compression=zipfile.ZIP_DEFLATED,compresslevel=6) as z:
-        z.writestr('database.dump',database_dump)
+        if isinstance(database_dump,Path):
+            z.write(database_dump,'database.dump')
+            with database_dump.open('rb') as source: dump_hash=stream_digest(source)[0]
+        else:
+            z.writestr('database.dump',database_dump)
+            dump_hash=digest(database_dump)
         for index,item in enumerate(inventory['files']):
             content=download(item['bucket'],item['path'])
             size=item.get('metadata',{}).get('size')
@@ -66,7 +77,7 @@ def build_archive(destination, database_dump, inventory, download):
             records.append({**item,'entry':entry,'size':len(content),'sha256':digest(content)})
         manifest={'format':1,'created_at':datetime.now(timezone.utc).isoformat(),
             'scope':'public schema and storage files; provider configuration and auth schema excluded',
-            'database_sha256':digest(database_dump),'buckets':inventory['buckets'],'files':records}
+            'database_sha256':dump_hash,'buckets':inventory['buckets'],'files':records}
         z.writestr('manifest.json',json.dumps(manifest,ensure_ascii=False))
     return manifest
 
@@ -75,12 +86,13 @@ def verify_archive(path):
     with zipfile.ZipFile(path) as z:
         if z.testzip() is not None: raise ValueError('Archive integrity failure.')
         m=json.loads(z.read('manifest.json'))
-        if digest(z.read('database.dump'))!=m['database_sha256']: raise ValueError('Database hash mismatch.')
+        with z.open('database.dump') as source:
+            if stream_digest(source)[0]!=m['database_sha256']: raise ValueError('Database hash mismatch.')
         for f in m['files']:
             if not f['entry'].startswith('objects/') or '..' in f['entry'].split('/'):
                 raise ValueError('Unsafe archive entry.')
-            content=z.read(f['entry'])
-            if len(content)!=f['size'] or digest(content)!=f['sha256']:
+            with z.open(f['entry']) as source: file_hash,size=stream_digest(source)
+            if size!=f['size'] or file_hash!=f['sha256']:
                 raise ValueError('Document hash mismatch.')
     return m
 
@@ -127,7 +139,8 @@ def run_backup(output):
     sb=create_client(os.environ['SUPABASE_URL'],os.environ['SUPABASE_SERVICE_KEY'])
     with tempfile.TemporaryDirectory() as temp:
         inventory=json.loads(command(['psql','-X','-t','-A','-v','ON_ERROR_STOP=1','-c',INVENTORY],env))
-        dump=command(['pg_dump','--format=custom','--schema=public','--no-owner','--no-acl'],env)
+        dump=Path(temp)/'database.dump'
+        command(['pg_dump','--format=custom','--schema=public','--no-owner','--no-acl','--file',str(dump)],env)
         archive=Path(temp)/'backup.zip'
         manifest=build_archive(archive,dump,inventory,lambda b,p:sb.storage.from_(b).download(p))
         # A changing inventory requires a retry at a quiet time, never a false success.

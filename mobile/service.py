@@ -62,7 +62,7 @@ def mission(sb, row, mid):
     return m
 
 
-def validated_file(data, filename, allow_pdf=False):
+def validated_file(data, filename, allow_pdf=False, preserve_png=False):
     if not data or len(data) > MAX_FILE:
         raise HTTPException(422, 'Ogni file deve essere compreso tra 1 byte e 20 MB.')
     if allow_pdf and data.startswith(b'%PDF-'):
@@ -82,6 +82,11 @@ def validated_file(data, filename, allow_pdf=False):
         # Re-encode: strip EXIF/embedded content. PDFs retain the signed source bytes.
         with Image.open(io.BytesIO(data)) as im:
             out = io.BytesIO()
+            if preserve_png:
+                clean = ImageOps.exif_transpose(im).convert('RGBA')
+                clean.info.clear()
+                clean.save(out, format='PNG', optimize=True)
+                return out.getvalue(), 'image/png', '.png'
             ImageOps.exif_transpose(im).convert('RGB').save(out, format='JPEG', quality=88, subsampling=0, optimize=True)
             return out.getvalue(), 'image/jpeg', '.jpg'
     except Exception as exc:

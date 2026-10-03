@@ -253,7 +253,7 @@ def create_app(backend_factory=None, session_path=None):
         try:
             for key in ('file', 'signature'):
                 file = form[key]
-                data, mime, ext = s.validated_file(await file.read(s.MAX_FILE + 1), file.filename, allow_pdf=key == 'file')
+                data, mime, ext = s.validated_file(await file.read(s.MAX_FILE + 1), file.filename, allow_pdf=key == 'file', preserve_png=key == 'signature')
                 if key == 'signature':
                     from PIL import Image, ImageStat
                     image = Image.open(io.BytesIO(data)).convert('L')
