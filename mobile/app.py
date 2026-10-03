@@ -120,7 +120,9 @@ def create_app(backend_factory=None, session_path=None):
 
     @app.get('/health')
     def health():
-        return {'status': 'ok', 'version': os.getenv('RENDER_GIT_COMMIT') or os.getenv('GIT_SHA') or 'unconfigured'}
+        configured = bool(backend_factory) or bool(os.getenv('SUPABASE_URL') and os.getenv('SUPABASE_SERVICE_KEY') and os.getenv('MOBILE_PUBLIC_ORIGIN'))
+        data = {'status': 'ok' if configured else 'not_configured', 'version': os.getenv('RENDER_GIT_COMMIT') or os.getenv('GIT_SHA') or 'unconfigured'}
+        return JSONResponse(data, status_code=200 if configured else 503)
 
     @app.post('/api/login')
     def login(body: Login, request: Request, response: Response):

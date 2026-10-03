@@ -8,13 +8,13 @@ Il secondo controllo crea un PostgreSQL 15 temporaneo con uno schema minimo di c
 
 Streamlit Community Cloud segue main: un controllo eseguito dopo un push diretto non impedisce quel deploy. Le modifiche devono passare da branch e pull request; attendere entrambi i controlli prima del merge.
 
-Un amministratore GitHub deve attivare in Settings → Branches (o Rulesets) la protezione di main:
+La protezione di main è stata configurata e verificata il 3 ottobre 2026 in Settings → Branches:
 - Require a pull request before merging.
 - Require status checks to pass before merging: Python e interfaccia e Magazzino e prezzi.
 - Require branches to be up to date before merging.
 - Bloccare i force push e applicare le regole anche agli amministratori, senza bypass per l'integrazione.
 
-Il connettore attuale restituisce 403 sulle impostazioni di protezione: questa parte non è configurabile da questa sessione. La sola presenza del workflow non rende main protetto.
+La regola è applicata anche agli amministratori. Per la nuova app mobile, CI verifica inoltre accessi API, sessioni, caricamenti e interfaccia Chromium con dati sintetici, oltre alle transazioni SQL per timbrature e scarichi idempotenti. Il workflow separato Verifica app pubblicata controlla l’indirizzo pubblico configurato: per mobile richiede anche il commit atteso. Le variabili e gli eventi di pubblicazione da configurare sono descritti in docs/mobile_app.md; finché non sono impostati, il controllo è saltato e non dimostra che l’app sia online.
 
 ## Staging
 

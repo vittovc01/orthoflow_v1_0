@@ -137,3 +137,11 @@ def test_api_never_cached_and_worker_caches_only_public_shell(setup):
     worker=client.get('/sw.js').text
     assert '!SHELL.includes(url.pathname)' in worker
     assert '/api/' not in json.loads(client.get('/static/manifest.webmanifest').text)['start_url']
+
+
+def test_public_health_does_not_report_ready_without_server_config(tmp_path,monkeypatch):
+    for name in ('SUPABASE_URL','SUPABASE_SERVICE_KEY','MOBILE_PUBLIC_ORIGIN'):
+        monkeypatch.delenv(name,raising=False)
+    client=TestClient(create_app(session_path=tmp_path/'unconfigured.sqlite'))
+    response=client.get('/health')
+    assert response.status_code==503 and response.json()['status']=='not_configured'
