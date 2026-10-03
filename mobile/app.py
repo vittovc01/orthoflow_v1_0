@@ -121,8 +121,14 @@ def create_app(backend_factory=None, session_path=None):
     @app.get('/health')
     def health():
         configured = bool(backend_factory) or bool(os.getenv('SUPABASE_URL') and os.getenv('SUPABASE_SERVICE_KEY') and os.getenv('MOBILE_PUBLIC_ORIGIN'))
-        data = {'status': 'ok' if configured else 'not_configured', 'version': os.getenv('RENDER_GIT_COMMIT') or os.getenv('GIT_SHA') or 'unconfigured'}
-        return JSONResponse(data, status_code=200 if configured else 503)
+        status = 'ok' if configured else 'not_configured'
+        if configured:
+            try:
+                backend().table('clienti').select('codice_cliente').limit(1).execute()
+            except Exception:
+                status = 'backend_unavailable'
+        data = {'status': status, 'version': os.getenv('RENDER_GIT_COMMIT') or os.getenv('GIT_SHA') or 'unconfigured'}
+        return JSONResponse(data, status_code=200 if status == 'ok' else 503)
 
     @app.post('/api/login')
     def login(body: Login, request: Request, response: Response):
@@ -247,7 +253,7 @@ def create_app(backend_factory=None, session_path=None):
         try:
             for key in ('file', 'signature'):
                 file = form[key]
-                data, mime, ext = s.validated_file(await file.read(s.MAX_FILE + 1), file.filename, allow_pdf=key == 'file')
+                data, mime, ext = s.validated_file(await file.read(s.MAX_FILE + 1), file.filename, allow_pdf=key == 'file', preserve_png=key == 'signature')
                 if key == 'signature':
                     from PIL import Image, ImageStat
                     image = Image.open(io.BytesIO(data)).convert('L')

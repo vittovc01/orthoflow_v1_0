@@ -4,7 +4,7 @@ COPY requirements-mobile.lock ./
 RUN pip install --no-cache-dir -r requirements-mobile.lock
 RUN useradd --create-home --uid 10001 orthoflow && mkdir /data && chown orthoflow:orthoflow /data
 COPY mobile ./mobile
-COPY ai_ocr.py ./ai_ocr.py
+COPY ai_ocr.py document_compression.py ./
 USER orthoflow
 ENV MOBILE_DATA_DIR=/data
 EXPOSE 8000

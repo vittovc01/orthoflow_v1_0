@@ -5,6 +5,7 @@ La app v0.5 mantiene SQLite locale come fallback.
 Questo file permette di migrare gradualmente i moduli a Supabase.
 """
 
+from document_compression import compress_document
 from supabase_client import get_supabase, supabase_enabled
 
 def insert_row(table: str, data: dict):
@@ -26,7 +27,8 @@ def upload_document(bucket: str, path: str, data: bytes, content_type: str | Non
     if not supabase_enabled():
         return None
     sb = get_supabase()
-    opts = {}
-    if content_type:
-        opts["content-type"] = content_type
+    compressed = compress_document(data, path, content_type)
+    data = compressed.data
+    opts = {"content-type": compressed.content_type}
     return sb.storage.from_(bucket).upload(path, data, file_options=opts)
+

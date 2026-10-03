@@ -155,3 +155,25 @@ def test_logout_invalidates_previous_cookie(setup):
     client.cookies.set(COOKIE,old,domain='testserver.local',path='/')
     assert app.state.sessions.get(old) is None
     assert client.get('/api/me').status_code==401
+
+
+def test_health_detects_backend_failure_without_leaking_details(setup,monkeypatch):
+    client,backend,_=setup
+    def fail(*args):raise RuntimeError('private credential or clinical data')
+    monkeypatch.setattr(backend,'table',fail)
+    response=client.get('/health')
+    assert response.status_code==503 and response.json()['status']=='backend_unavailable'
+    assert 'private' not in response.text
+
+
+def test_concurrent_courier_sessions_keep_missions_separate(setup):
+    from concurrent.futures import ThreadPoolExecutor
+    _,backend,app=setup
+    def inspect(name):
+        with TestClient(app,base_url='https://testserver') as client:
+            client.headers['Origin']='https://testserver'
+            assert login(client,name).status_code==200
+            return [m['id'] for m in client.get('/api/missions').json()['missions']]
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        results=list(pool.map(inspect,['mario','luigi']))
+    assert results==[[101],[102]]

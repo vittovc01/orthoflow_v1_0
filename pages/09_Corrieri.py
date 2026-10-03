@@ -1,4 +1,6 @@
 import io
+import uuid
+from document_compression import compress_document
 from PIL import Image
 from datetime import date, datetime, timezone
 import pandas as pd
@@ -199,7 +201,10 @@ else:
     photos=st.file_uploader("📷 Foto consegna/ritiro",type=["jpg","jpeg","png"],accept_multiple_files=True,key=f"ph{r.id}")
     if photos and st.button("Carica foto"):
         for ph in photos:
-            path=f'missioni/{r.id}/foto/{ph.name}'; sb().storage.from_("orthoflow-impianti").upload(path,ph.getvalue(),{"content-type":ph.type,"upsert":"true"}); sb().table("foto_missioni").insert({"missione_id":int(r.id),"tipo":str(r.tipo),"storage_path":path}).execute()
+            compressed=compress_document(ph.getvalue(), ph.name, ph.type)
+            path=f'missioni/{r.id}/foto/{uuid.uuid4().hex}_{ph.name.replace(chr(47), chr(95))}'
+            sb().storage.from_("orthoflow-impianti").upload(path,compressed.data,{"content-type":compressed.content_type,"upsert":"false"})
+            sb().table("foto_missioni").insert({"missione_id":int(r.id),"tipo":str(r.tipo),"storage_path":path}).execute()
         st.success("Foto archiviate.")
     certok=True
     _pickup_signature_status=None
@@ -214,10 +219,12 @@ else:
             sign=st_canvas(fill_color="rgba(255,255,255,0)",stroke_width=3,stroke_color="#000000",background_color="#FFFFFF",height=180,width=500,drawing_mode="freedraw",key=f"signature_{int(r.id)}")
             _has_signature=bool(sign.json_data and sign.json_data.get("objects"))
             if cert and firm.strip() and ruolo.strip() and _has_signature and st.button("🔐 Firma e archivia certificazione",type="primary",key=f"archive_cert_{r.id}"):
-                path=f'missioni/{r.id}/documenti/decontaminazione_{cert.name}'
-                sb().storage.from_("orthoflow-impianti").upload(path,cert.getvalue(),{"content-type":cert.type,"upsert":"true"})
-                _img=Image.fromarray(sign.image_data.astype("uint8"),"RGBA"); _buf=io.BytesIO(); _img.save(_buf,format="PNG")
-                _sigpath=f'missioni/{r.id}/documenti/firma_decontaminazione.png'
+                compressed=compress_document(cert.getvalue(), cert.name, cert.type)
+                _docid=uuid.uuid4().hex
+                path=f'missioni/{r.id}/documenti/decontaminazione_{_docid}_{cert.name.replace(chr(47), chr(95))}'
+                sb().storage.from_("orthoflow-impianti").upload(path,compressed.data,{"content-type":compressed.content_type,"upsert":"false"})
+                _img=Image.fromarray(sign.image_data.astype("uint8"),"RGBA"); _buf=io.BytesIO(); _img.save(_buf,format="PNG",optimize=True)
+                _sigpath=f'missioni/{r.id}/documenti/firma_decontaminazione_{_docid}.png'
                 sb().storage.from_("orthoflow-impianti").upload(_sigpath,_buf.getvalue(),{"content-type":"image/png","upsert":"true"})
                 sb().table("documenti_missioni").insert({"missione_id":int(r.id),"tipo_documento":"CERTIFICAZIONE_LAVAGGIO_DECONTAMINAZIONE","storage_path":path,"firma_storage_path":_sigpath,"nome_firmatario":firm.strip(),"ruolo_firmatario":ruolo.strip(),"firmato_at":datetime.now(timezone.utc).isoformat()}).execute()
                 sb().table("missioni_corrieri").update({"esito_firma_ritiro":"CON_FIRMA","nota_firma_ritiro":None}).eq("id",int(r.id)).execute()

@@ -9,6 +9,7 @@ from functools import lru_cache
 import pandas as pd
 import streamlit as st
 from orthoflow_branding import configure_page
+from document_compression import compress_document
 from supabase import create_client
 
 try:
@@ -82,7 +83,7 @@ def generate_implant_document(intervention_id, header):
           Spacer(1,18),Paragraph("Documento generato da OrthoFlow in attesa dell'integrazione con Business.",styles["Italic"])]
         doc.build(story); buf.seek(0)
         path=f"documenti_impianto/{division.lower()}/{year}/{numero}.pdf"
-        sb().storage.from_("orthoflow-impianti").upload(path,buf.getvalue(),file_options={"content-type":"application/pdf","upsert":"true"})
+        sb().storage.from_("orthoflow-impianti").upload(path,compress_document(buf.getvalue(), path).data,file_options={"content-type":"application/pdf","upsert":"true"})
         rec={"intervento_id":intervention_id,"divisione":division,"numero_documento":numero,"data_documento":header.get("data_intervento"),"storage_path":path}
         return sb().table("documenti_impianto").insert(rec).execute().data[0]
     except Exception as e:
@@ -136,13 +137,14 @@ def storage_upload(local_path, intervention_id):
     safe_name = Path(local_path).name
     storage_path = f"impianti/{pd.Timestamp.now().strftime('%Y/%m')}/intervento_{intervention_id}_{safe_name}"
     try:
-        data = Path(local_path).read_bytes()
+        compressed = compress_document(Path(local_path).read_bytes(), local_path)
+        data = compressed.data
         if str(local_path).lower().endswith(".pdf") and data[:5] != b"%PDF-":
             raise ValueError("Il file dichiarato PDF non contiene un PDF valido")
         try:
-            sb().storage.from_(bucket).upload(storage_path, data, file_options={"upsert": "true"})
+            sb().storage.from_(bucket).upload(storage_path, data, file_options={"upsert": "true", "content-type": compressed.content_type})
         except Exception:
-            sb().storage.from_(bucket).update(storage_path, data, file_options={"upsert": "true"})
+            sb().storage.from_(bucket).update(storage_path, data, file_options={"upsert": "true", "content-type": compressed.content_type})
         return bucket, storage_path
     except Exception:
         return "", ""
@@ -734,5 +736,6 @@ if confirm:
             st.error("Giacenza modificata o insufficiente al momento della conferma. La transazione è stata annullata: nessun intervento, riga o movimento è stato salvato.")
         else:
             st.error(f"Scarico non completato. La transazione è stata annullata: {e}")
+
 
 
