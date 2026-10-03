@@ -116,7 +116,7 @@ def test_export_is_real_excel_and_formula_is_text(setup):
     from openpyxl import load_workbook
     client,_,_=setup
     login(client,'agente')
-    response=client.post('/api/scarico/export',json=payload(items=[dict(code='=1+1',lot='B',quantity=2)]))
+    response=client.post('/api/scarico/export',json={'items':[dict(code='=1+1',lot='B',quantity=2)]})
     assert response.status_code==200
     sheet=load_workbook(io.BytesIO(response.content)).active
     assert sheet['A2'].value=='=1+1' and sheet['A2'].data_type=='s'
@@ -145,3 +145,13 @@ def test_public_health_does_not_report_ready_without_server_config(tmp_path,monk
     client=TestClient(create_app(session_path=tmp_path/'unconfigured.sqlite'))
     response=client.get('/health')
     assert response.status_code==503 and response.json()['status']=='not_configured'
+
+
+def test_logout_invalidates_previous_cookie(setup):
+    client,backend,app=setup
+    login(client)
+    old=client.cookies[COOKIE]
+    assert client.post('/api/logout',json={}).status_code==200
+    client.cookies.set(COOKIE,old,domain='testserver.local',path='/')
+    assert app.state.sessions.get(old) is None
+    assert client.get('/api/me').status_code==401

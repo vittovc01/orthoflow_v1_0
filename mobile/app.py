@@ -14,7 +14,7 @@ from fastapi.staticfiles import StaticFiles
 from supabase import create_client
 from starlette.concurrency import run_in_threadpool
 
-from mobile.models import Complete, Login, Scarico, Stamp
+from mobile.models import Complete, ExportItems, Login, Scarico, Stamp
 from mobile.security import Sessions, TTL, fingerprint, password_ok
 from mobile import service as s
 
@@ -306,7 +306,7 @@ def create_app(backend_factory=None, session_path=None):
                       'p_header': header, 'p_rows': items}).execute().data
 
     @app.post('/api/scarico/export')
-    def export(body: Scarico, ctx=Depends(context)):
+    def export(body: ExportItems, ctx=Depends(context)):
         s.agent_access(ctx[1])
         from openpyxl import Workbook
         book = Workbook()
