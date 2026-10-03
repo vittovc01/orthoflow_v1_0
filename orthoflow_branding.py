@@ -7,11 +7,14 @@ _ASSETS = Path(__file__).resolve().parent / "assets"
 _ICON = _ASSETS / "orthoflow-icon.png"
 _LOGO = _ASSETS / "orthoflow-logo.svg"
 
-# Hide hosting controls, while keeping the header and sidebar toggle usable.
+# Hide only hosting actions: the toolbar also contains the mobile menu toggle.
 _HOSTING_CSS = """
 <style>
-[data-testid="stToolbar"],
-.stAppToolbar,
+[data-testid="stToolbarActions"],
+.stToolbarActions,
+[data-testid="stAppDeployButton"],
+.stAppDeployButton,
+[data-testid="stMainMenu"],
 #MainMenu,
 [data-testid="stAppViewerBadge"],
 [data-testid="stViewerBadge"],

@@ -2,7 +2,7 @@
 
 Every page configuration uses `orthoflow_branding.configure_page`: existing titles and layouts are preserved; the browser favicon and sidebar/header logo use the local OrthoFlow assets. Keep new pages on this helper.
 
-`client.toolbarMode="minimal"` limits host controls. Narrow CSS hides the toolbar (Fork/GitHub/menu) and Streamlit viewer badge. The header and sidebar navigation toggle are kept. CSS selectors may need adjustment after Streamlit frontend changes.
+`client.toolbarMode="minimal"` limits host controls. Narrow CSS hides only ToolbarActions (Fork/GitHub), DeployButton, MainMenu and the Streamlit viewer badge. Never hide stToolbar or stAppToolbar: the mobile Expand sidebar button is a descendant of that container in current Streamlit. Both the header and full toolbar stay available for the product logo and sidebar toggle. CSS selectors may need adjustment after Streamlit frontend changes.
 
 Verification before declaring the hosted UI complete:
 - Open login, Control Tower, Scarico Sala AI, DDT and Controllo di Gestione on desktop and mobile.
