@@ -1,4 +1,5 @@
 import os
+from pathlib import Path
 import socket
 import subprocess
 import sys
@@ -39,6 +40,9 @@ def test_courier_navigation_and_role_filter(mobile_server):
         browser=p.chromium.launch()
         page=browser.new_page(viewport={'width':390,'height':844},is_mobile=True,has_touch=True)
         sign_in(page,mobile_server,'mario')
+        if os.getenv('MOBILE_PREVIEW_DIR'):
+            Path(os.environ['MOBILE_PREVIEW_DIR']).mkdir(parents=True,exist_ok=True)
+            page.screenshot(path=str(Path(os.environ['MOBILE_PREVIEW_DIR'])/'mobile-courier-home.png'),full_page=True)
         nav=page.get_by_role('navigation',name='Funzioni principali')
         expect(nav).to_be_visible()
         expect(nav.get_by_role('link',name='Scarico')).to_have_count(0)
@@ -74,6 +78,9 @@ def test_agent_edits_delete_and_persistent_smarttrack(mobile_server):
         page.get_by_role('button',name='Verifica prezzi e riepilogo').click()
         expect(page.get_by_text('MANUALE_MEMORIZZATO · Materiale struttura')).to_be_visible()
         expect(page.get_by_role('button',name='Salva intervento e scarica materiale')).to_be_enabled()
+        if os.getenv('MOBILE_PREVIEW_DIR'):
+            Path(os.environ['MOBILE_PREVIEW_DIR']).mkdir(parents=True,exist_ok=True)
+            page.screenshot(path=str(Path(os.environ['MOBILE_PREVIEW_DIR'])/'mobile-agent-scarico.png'),full_page=True)
         page.get_by_label('Codice',exact=True).fill('150400126')
         expect(page.get_by_role('button',name='Salva intervento e scarica materiale')).to_be_disabled()
         page.get_by_role('button',name='Elimina riga 1',exact=True).click()

@@ -44,3 +44,23 @@ jobs:
           CHECK_RESULT: ${{ job.status }}
         run: |
           printf 'Verifica dell’app pubblicata: %s\n' "$CHECK_RESULT" >> "$GITHUB_STEP_SUMMARY"
+
+  desktop-health:
+    if: >-
+      vars.DESKTOP_PUBLIC_URL != '' &&
+      (github.event_name == 'workflow_dispatch' ||
+       (github.event_name == 'deployment_status' && github.event.deployment_status.state == 'success' && github.event.deployment.environment == 'orthoflow-desktop'))
+    name: Gestionale PC raggiungibile
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: main
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: '3.13'
+      - name: Verifica salute Streamlit dopo la pubblicazione
+        env:
+          DEPLOYMENT_URL: ${{ vars.DESKTOP_PUBLIC_URL }}
+        run: python scripts/check_deployment.py --kind streamlit --timeout 60

@@ -1,4 +1,6 @@
 -- TEST ONLY: contract subset of live schema, without production rows.
+-- Match Supabase service_role semantics in the disposable local database.
+ALTER ROLE service_role BYPASSRLS;
 CREATE TABLE utenti_app(id bigserial PRIMARY KEY,username text NOT NULL,attivo boolean NOT NULL DEFAULT true,
  stato_accesso text NOT NULL DEFAULT 'APPROVATO',ruolo text NOT NULL,permessi text[] NOT NULL DEFAULT '{}',agente_nome text);
 CREATE TABLE corrieri(id bigserial PRIMARY KEY,user_id bigint,attivo boolean NOT NULL DEFAULT true);

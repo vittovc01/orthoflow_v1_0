@@ -34,7 +34,7 @@ Hosting/domain is not yet selected. The repository includes a provider-neutral D
 6. Enable automatic deployment on that branch or emit a deployment event from the chosen platform. A failed health run signals a release that is unavailable or still serving the previous version. It does not roll back automatically.
 7. On iPhone: Safari → Share → Add to Home Screen; on Android: browser → Install app. Verify camera, GPS, uploads and signature on actual phones with a test mission before rollout.
 
-`python scripts/check_deployment.py --kind streamlit --url https://actual-desktop-origin --timeout 60` additionally checks the desktop's `/_stcore/health`; this proves reachability only, not a commit version. No desktop address is assumed valid from an old Render configuration.
+`python scripts/check_deployment.py --kind streamlit --url https://actual-desktop-origin --timeout 60` additionally checks the desktop's `/_stcore/health`; this proves reachability only, not a commit version. Configure `DESKTOP_PUBLIC_URL` to the verified desktop origin for the separate PC health job, triggered manually or after a successful GitHub deployment event in `orthoflow-desktop`. The selected hosting pipeline must emit that event. No desktop address is assumed valid from an old Render configuration.
 
 ## Sessions and connectivity
 
