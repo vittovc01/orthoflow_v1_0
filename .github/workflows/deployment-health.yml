@@ -1,5 +1,7 @@
 name: Verifica app pubblicata
 on:
+  schedule:
+    - cron: '*/30 * * * *'
   workflow_run:
     workflows: [OrthoFlow CI]
     types: [completed]
@@ -20,7 +22,7 @@ jobs:
   public-health:
     if: >-
       vars.MOBILE_PUBLIC_URL != '' &&
-      (github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' ||
        (github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push') ||
        (github.event_name == 'deployment_status' && github.event.deployment_status.state == 'success' && github.event.deployment.environment == 'orthoflow-mobile'))
     name: App online e versione pubblicata
@@ -48,7 +50,7 @@ jobs:
   desktop-health:
     if: >-
       vars.DESKTOP_PUBLIC_URL != '' &&
-      (github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' ||
        (github.event_name == 'deployment_status' && github.event.deployment_status.state == 'success' && github.event.deployment.environment == 'orthoflow-desktop'))
     name: Gestionale PC raggiungibile
     runs-on: ubuntu-latest

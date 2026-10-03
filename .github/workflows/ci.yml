@@ -38,7 +38,7 @@ jobs:
       - name: Smoke test delle pagine reali
         run: python -m pytest -q tests/test_pages_smoke.py
       - name: Accessi e API app mobile
-        run: python -m pytest -q tests/test_mobile_api.py tests/test_deployment_health.py
+        run: python -m pytest -q tests/test_mobile_api.py tests/test_deployment_health.py tests/test_document_compression.py tests/test_cloud_protection.py
       - name: Browser per test mobile
         run: python -m playwright install --with-deps chromium
       - name: Menu su telefono e desktop
@@ -78,3 +78,5 @@ jobs:
       - name: Test SQL su database temporaneo
         run: bash tests/run_database_tests.sh
 
+      - name: Prova ripristino backup su database isolato
+        run: bash tests/backup_restore.sh

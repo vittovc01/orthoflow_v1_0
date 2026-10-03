@@ -4,6 +4,7 @@ from pathlib import Path
 import pandas as pd
 import streamlit as st
 from orthoflow_branding import configure_page
+from document_compression import compress_document
 from supabase import create_client
 
 try:
@@ -305,11 +306,12 @@ def svuota_tabella(tab):
 
 def storage_upload_file(local_path, storage_path, bucket="orthoflow-impianti"):
     try:
-        data = Path(local_path).read_bytes()
+        compressed = compress_document(Path(local_path).read_bytes(), local_path)
+        data = compressed.data
         try:
-            sb().storage.from_(bucket).upload(storage_path, data, file_options={"upsert": "true"})
+            sb().storage.from_(bucket).upload(storage_path, data, file_options={"upsert": "true", "content-type": compressed.content_type})
         except Exception:
-            sb().storage.from_(bucket).update(storage_path, data, file_options={"upsert": "true"})
+            sb().storage.from_(bucket).update(storage_path, data, file_options={"upsert": "true", "content-type": compressed.content_type})
         return True
     except Exception as e:
         st.warning(f"Storage non disponibile: {e}")
@@ -723,6 +725,10 @@ if menu=='Dashboard':
         if st.button('🔄 Aggiorna', use_container_width=True):
             st.cache_data.clear()
             st.rerun()
+
+    if is_admin():
+        from cloud_capacity import render_capacity
+        render_capacity(sb())
 
     revenue = revenue_dataset()
     clienti_df=df('clienti')
@@ -1472,3 +1478,4 @@ elif menu=='Anomalie':
             else:
                 st.info('Nessuna modifica da salvare.')
             st.rerun()
+

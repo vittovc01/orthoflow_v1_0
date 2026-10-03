@@ -22,3 +22,8 @@ ALTER TABLE kit_logistici ADD COLUMN codice text,ADD COLUMN stato text DEFAULT '
 ALTER TABLE reintegri_kit ADD COLUMN lotto_consumato text,ADD COLUMN stato text,ADD COLUMN utente text;
 GRANT ALL ON ALL TABLES IN SCHEMA public TO service_role;
 GRANT USAGE,SELECT ON ALL SEQUENCES IN SCHEMA public TO service_role;
+CREATE SCHEMA storage;
+CREATE TABLE storage.objects(id uuid,bucket_id text,name text,metadata jsonb,updated_at timestamptz);
+CREATE TABLE storage.buckets(id text,public boolean DEFAULT false);
+GRANT USAGE ON SCHEMA storage TO service_role;
+GRANT SELECT ON ALL TABLES IN SCHEMA storage TO service_role;
