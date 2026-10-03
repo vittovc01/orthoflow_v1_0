@@ -14,7 +14,7 @@ A dedicated installable web application (PWA) for couriers and agents. The deskt
 ## Run locally
 
 ```
-python -m pip install -r requirements-mobile.txt
+python -m pip install -r requirements-mobile.lock
 export MOBILE_LOCAL_DEV=true
 export MOBILE_PUBLIC_ORIGIN=http://localhost:8000
 uvicorn mobile.app:app --host 127.0.0.1 --port 8000
