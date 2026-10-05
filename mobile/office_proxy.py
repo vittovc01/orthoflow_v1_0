@@ -42,9 +42,14 @@ def install_office(app, backend, public_origin):
         url = httpx.URL(UPSTREAM).copy_with(raw_path=request.url.path.encode() +
             (b'?' + request.scope.get('query_string', b'') if request.scope.get('query_string') else b''))
         headers = {k: v for k, v in request.headers.items() if k.lower() not in HOP}
+        # Render can leave a body-less request's receive channel pending until
+        # the client disconnects. Never read that channel for page/asset GETs.
+        body = None if request.method in {'GET', 'HEAD'} else request.stream()
+        if body is None:
+            headers.pop('content-length', None)
         client = httpx.AsyncClient(timeout=httpx.Timeout(90, connect=5), follow_redirects=False, trust_env=False)
         try:
-            response = await client.send(client.build_request(request.method, url, headers=headers, content=request.stream()), stream=True)
+            response = await client.send(client.build_request(request.method, url, headers=headers, content=body), stream=True)
         except httpx.HTTPError:
             await client.aclose()
             raise HTTPException(503, 'Modulo in avvio. Riprova tra pochi secondi.')
