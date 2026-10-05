@@ -26,10 +26,10 @@ def compress_document(data, filename='', content_type=None):
     JPEG is re-encoded at quality 88 with full chroma resolution; PNG/PDF lossless.
     Validation/rejection of input belongs to the upload flow, not this optimiser.
     """
-    mime = content_type or {'.pdf':'application/pdf','.png':'image/png',
+    started = time.perf_counter()\n    mime = content_type or {'.pdf':'application/pdf','.png':'image/png',
         '.jpg':'image/jpeg','.jpeg':'image/jpeg','.webp':'image/webp'}.get(Path(filename).suffix.lower(), 'application/octet-stream')
     def result(payload=data, method='original'):
-        return CompressedDocument(payload, mime, len(data), method)
+        return CompressedDocument(payload, mime, len(data), method, round((time.perf_counter() - started) * 1000, 2))
     if not data or len(data) > 20 * 1024 * 1024:
         return result()
     try:
@@ -39,7 +39,7 @@ def compress_document(data, filename='', content_type=None):
             if re.search(rb'/(?:ByteRange|FT\s*/Sig|Type\s*/Sig)\b', data):
                 return result(method='signed_pdf_preserved')
             reader = PdfReader(io.BytesIO(data))
-            if reader.is_encrypted or not 1 <= len(reader.pages) <= 100:
+            if reader.is_encrypted or not 1 <= len(reader.pages) <= MAX_PDF_PAGES:
                 return result()
             fields = reader.get_fields() or {}
             if any(f.get('/FT') == '/Sig' for f in fields.values()):
