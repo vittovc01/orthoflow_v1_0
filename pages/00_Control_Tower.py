@@ -1,137 +1,163 @@
-from datetime import date
+from datetime import datetime, timedelta
+from html import escape
+from pathlib import Path
+from zoneinfo import ZoneInfo
+import os
+
 import pandas as pd
 import streamlit as st
-from orthoflow_branding import configure_page
 from supabase import create_client
+from home_data import load_home
+from orthoflow_branding import configure_page
 
-configure_page(page_title='OrthoFlow Control Tower', page_icon='🛰️', layout='wide')
+configure_page(page_title='Home · OrthoFlow', layout='wide')
 
-# Role landing: profili operativi entrano direttamente nel proprio lavoro.
-_p=set(st.session_state.get("permessi",[]) or [])
-_r=str(st.session_state.get("ruolo",""))
-if st.session_state.get("user") and _r!="Admin" and "DIREZIONE" not in _p:
-    if _p == {"CORRIERE"}: st.switch_page("pages/09_Corrieri.py")
-    elif _p == {"LOGISTICA"}: st.switch_page("pages/01_WMS.py")
-    elif _p == {"AGENTE"}: st.switch_page("pages/05_Scarico_Sala_AI.py")
-    elif _p == {"AMMINISTRAZIONE"}: st.switch_page("pages/06_Gestione_Interventi.py")
+# Preserve role landing and one direct-URL authorization check.
+perms = set(st.session_state.get('permessi', []) or [])
+role = str(st.session_state.get('ruolo', ''))
+director = role == 'Admin' or 'DIREZIONE' in perms
+if not st.session_state.get('user'):
+    st.error('Sessione non autenticata.'); st.stop()
+if not director:
+    landing = {'CORRIERE': 'pages/09_Corrieri.py', 'LOGISTICA': 'pages/01_WMS.py',
+               'AGENTE': 'pages/05_Scarico_Sala_AI.py', 'AMMINISTRAZIONE': 'pages/06_Gestione_Interventi.py'}
+    if len(perms) == 1 and next(iter(perms)) in landing:
+        st.switch_page(landing[next(iter(perms))])
+    st.error('Non sei autorizzato ad accedere a questa area.'); st.stop()
 
-# OrthoFlow RBAC: protegge anche l'accesso diretto via URL.
-if not st.session_state.get("user"):
-    st.error("Sessione non autenticata."); st.stop()
-_of_perms=set(st.session_state.get("permessi",[]) or [])
-_of_director=str(st.session_state.get("ruolo",""))=="Admin" or "DIREZIONE" in _of_perms
-if not _of_director and not (_of_perms & set(["DIREZIONE"])):
-    st.error("Non sei autorizzato ad accedere a questa area."); st.stop()
+st.markdown('<style>' + (Path(__file__).parents[1] / 'assets/home.css').read_text() + '</style>', unsafe_allow_html=True)
 
-# OrthoFlow RBAC: blocca anche l'accesso diretto via URL.
-if not st.session_state.get("user"):
-    st.error("Sessione non autenticata."); st.stop()
-_of_perms=set(st.session_state.get("permessi",[]) or [])
-_of_director=str(st.session_state.get("ruolo",""))=="Admin" or "DIREZIONE" in _of_perms
-_of_required=set(["DIREZIONE"])
-if not _of_director and not (_of_perms & _of_required):
-    st.error("Non sei autorizzato ad accedere a questa area."); st.stop()
-
-st.markdown('''
-<style>
-.block-container{max-width:1500px;padding-top:1.1rem;padding-bottom:3rem}
-[data-testid="stAppViewContainer"]{background:radial-gradient(circle at 15% 0%,rgba(23,128,95,.10),transparent 28%),linear-gradient(180deg,#F8FBFA 0%,#F3F7F6 100%)}
-[data-testid="stSidebar"]{background:#0B1F2A;border-right:1px solid rgba(255,255,255,.08)}
-[data-testid="stSidebar"] *{color:#F2FAF7!important}
-.ct-hero{padding:26px 28px;border-radius:24px;background:linear-gradient(135deg,#0B1F2A,#123B41 55%,#17805F);color:white;box-shadow:0 18px 40px rgba(11,31,42,.14);margin-bottom:20px}
-.ct-kicker{font-size:.78rem;letter-spacing:.16em;text-transform:uppercase;opacity:.72;font-weight:800}
-.ct-hero h1{font-size:2.15rem;margin:.35rem 0 .45rem;font-weight:800;letter-spacing:-.035em;color:white!important}
-.ct-hero p{margin:0;opacity:.82;font-size:1rem}
-[data-testid="stMetric"]{background:white;border:1px solid rgba(16,38,46,.08);border-radius:18px;padding:16px 18px;box-shadow:0 8px 24px rgba(16,38,46,.05);min-height:108px}
-[data-testid="stMetricLabel"]{font-weight:700;color:#4D666B}
-[data-testid="stMetricValue"]{font-weight:800;color:#10262E}
-.ct-section{margin-top:8px;margin-bottom:8px;font-size:1.05rem;font-weight:800;color:#10262E}
-.stButton>button,.stLinkButton>a{border-radius:13px!important;min-height:46px;font-weight:750}
-[data-testid="stDataFrame"]{border:1px solid rgba(16,38,46,.08);border-radius:16px;overflow:hidden}
-@media(max-width:760px){.block-container{padding:.8rem}.ct-hero{padding:20px}.ct-hero h1{font-size:1.65rem}[data-testid="stMetric"]{min-height:92px;padding:13px}}
-</style>
-''', unsafe_allow_html=True)
-
+@st.cache_resource
 def sb():
-    url=st.secrets.get('SUPABASE_URL')
-    key=st.secrets.get('SUPABASE_SERVICE_KEY') or st.secrets.get('SUPABASE_ANON_KEY') or st.secrets.get('SUPABASE_KEY')
+    url = st.secrets.get('SUPABASE_URL') or os.getenv('SUPABASE_URL')
+    key = (st.secrets.get('SUPABASE_SERVICE_KEY') or st.secrets.get('SUPABASE_SERVICE_ROLE_KEY')
+           or st.secrets.get('SUPABASE_KEY') or os.getenv('SUPABASE_SERVICE_KEY'))
     if not url or not key:
-        st.error('Supabase non configurato nei Secrets.'); st.stop()
-    return create_client(str(url).rstrip('/'),str(key))
+        st.error('Collegamento dati non configurato.'); st.stop()
+    return create_client(str(url).rstrip('/'), str(key))
 
-def user(): return str(st.session_state.get('user',''))
-def role(): return str(st.session_state.get('ruolo',''))
-def agent(): return str(st.session_state.get('agente_nome',''))
+now = datetime.now(ZoneInfo('Europe/Rome'))
+today = now.date()
+# A session-local short cache avoids repeated loads while navigating. Never cache writes.
+if st.session_state.get('_home_snapshot_day') != today.isoformat():
+    st.session_state.pop('_home_snapshot', None)
+header, refresh = st.columns([6, 1], vertical_alignment='center')
+with header:
+    st.markdown(f'<div class="home-heading"><div class="home-eyebrow">ORTHOFLOW / OPERATIVITÀ</div><h1>Panoramica operativa</h1><p>Il lavoro da seguire, tutto a portata di mano.</p></div>', unsafe_allow_html=True)
+with refresh:
+    st.markdown(f'<div class="home-date">{today.strftime("%d.%m.%Y")}</div>', unsafe_allow_html=True)
+    if st.button('Aggiorna', icon=':material/refresh:', use_container_width=True):
+        st.session_state.pop('_home_snapshot', None)
+previous = st.session_state.get('_home_snapshot_at')
+if '_home_snapshot' not in st.session_state or not previous or (now - previous).total_seconds() > 30:
+    st.session_state['_home_snapshot'] = load_home(sb(), today)
+    st.session_state['_home_snapshot_at'] = now
+    st.session_state['_home_snapshot_day'] = today.isoformat()
+data = st.session_state['_home_snapshot']
 
-if not user():
-    st.warning('Accedi prima dalla pagina principale di OrthoFlow.'); st.stop()
 
-def get_table(name):
-    try: return pd.DataFrame(sb().table(name).select('*').execute().data or [])
-    except Exception: return pd.DataFrame()
+def number(value):
+    return '—' if value is None else f'{int(value):,}'.replace(',', '.')
 
-st.markdown(f'''<div class="ct-hero"><div class="ct-kicker">ORTHOFLOW CONTROL TOWER</div><h1>Command center operativo</h1><p>{role()} · {agent() or user()} · {date.today().strftime('%d/%m/%Y')}</p></div>''',unsafe_allow_html=True)
 
-interventi=get_table('interventi'); righe=get_table('righe_intervento'); giacenze=get_table('giacenze'); anomalie=get_table('anomalie'); movimenti=get_table('movimenti_magazzino')
-if role()=='Agente' and agent():
-    if not interventi.empty and 'agente' in interventi.columns: interventi=interventi[interventi['agente'].astype(str).str.casefold()==agent().casefold()]
-    if not righe.empty and 'intervento_id' in righe.columns and not interventi.empty:
-        ids=set(interventi['id'].astype(str)); righe=righe[righe['intervento_id'].astype(str).isin(ids)]
-aperti=len(anomalie) if not anomalie.empty else 0
-if not anomalie.empty and 'risolta' in anomalie.columns: aperti=len(anomalie[~anomalie['risolta'].fillna(False).astype(bool)])
+def metric(label, value, caption, icon, accent=''):
+    st.markdown(f'<div class="home-metric {accent}"><div class="home-metric-top"><span>{escape(label)}</span><span class="home-symbol">{icon}</span></div><strong>{number(value)}</strong><small>{escape(caption)}</small></div>', unsafe_allow_html=True)
 
-c1,c2,c3,c4=st.columns(4)
-c1.metric('Interventi',len(interventi)); c2.metric('Giacenze',len(giacenze) if role()!='Agente' else '—'); c3.metric('Anomalie aperte',aperti); c4.metric('Movimenti',len(movimenti) if role() in {'Admin','Magazzino'} else '—')
 
-st.markdown('<div class="ct-section">Azioni rapide</div>',unsafe_allow_html=True)
-if role() in {'Admin','Magazzino'}:
-    a,b,c,d=st.columns(4)
-    a.page_link('pages/05_Scarico_Sala_AI.py',label='📸 Scarico Sala AI',use_container_width=True)
-    b.page_link('pages/04_DDT_Carico_v2.py',label='🚚 DDT Carico Mobile',use_container_width=True)
-    c.page_link('pages/01_WMS.py',label='📦 Scanner & WMS',use_container_width=True)
-    d.page_link('pages/03_Gestione_Scaffale.py',label='📚 Gestione Scaffale',use_container_width=True)
-else:
-    a,b=st.columns(2)
-    a.page_link('pages/05_Scarico_Sala_AI.py',label='📸 Scarico Sala AI',use_container_width=True)
-    b.page_link('core_app.py',label='📊 Controllo di Gestione',use_container_width=True)
+missions = data['missions']
+pending = None if missions is None else len(missions)
+mission_today = [] if missions is None else [m for m in missions if m.get('data_missione') == today.isoformat()]
+icons = {
+    'calendar': '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="5" width="18" height="16" rx="3"/><path d="M3 10h18M8 3v4M16 3v4m-8 8h3"/></svg>',
+    'activity': '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 12h4l3-7 4 14 3-7h4"/></svg>',
+    'truck': '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 5h12v12H3zm12 4h3l3 4v4h-6"/><circle cx="7" cy="18" r="2"/><circle cx="18" cy="18" r="2"/></svg>',
+    'alert': '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m12 3 10 18H2zM12 9v5m0 3v1"/></svg>'}
+for col, (label, value, caption, icon, accent) in zip(st.columns(4), [
+    ('Interventi di oggi', data['today'], 'Data dell’intervento', 'activity', 'featured'),
+    ('Interventi del mese', data['month'], today.strftime('%m / %Y'), 'calendar', ''),
+    ('Missioni da completare', pending, f'{len(mission_today)} previste oggi' if missions is not None else 'Dati non disponibili', 'truck', ''),
+    ('Anomalie da verificare', data['anomalies'], 'Prezzi e giacenze', 'alert', 'warning' if data['anomalies'] else ''),
+]):
+    with col:
+        metric(label, value, caption, icons[icon], accent)
+if data['errors']:
+    st.warning('Dati non disponibili: ' + ', '.join(data['errors']) + '. Premi Aggiorna per riprovare.')
 
-if role() in {'Admin','Magazzino'}:
-    st.markdown('<div class="ct-section">Logistica in evidenza</div>',unsafe_allow_html=True)
-    try: sc=pd.DataFrame(sb().table('v_scadenze_ubicazioni').select('*').execute().data or [])
-    except Exception: sc=pd.DataFrame()
-    x1,x2,x3=st.columns(3)
-    if not sc.empty:
-        x1.metric('Scaduti',len(sc[sc['stato_scadenza']=='SCADUTO'])); x2.metric('Urgenti ≤30 gg',len(sc[sc['stato_scadenza']=='URGENTE'])); x3.metric('Attenzione ≤90 gg',len(sc[sc['stato_scadenza']=='ATTENZIONE']))
-        priority=sc[sc['stato_scadenza'].isin(['SCADUTO','URGENTE','ATTENZIONE'])].copy()
-        if not priority.empty:
-            cols=[c for c in ['codice','descrizione','lotto','scadenza','quantita_disponibile','codice_magazzino','corsia','scaffale','ripiano','posizione'] if c in priority.columns]
-            st.dataframe(priority[cols].head(30),use_container_width=True,hide_index=True)
-        else: st.success('Nessuna scadenza critica nelle ubicazioni registrate.')
-    else:
-        x1.metric('Scaduti',0); x2.metric('Urgenti ≤30 gg',0); x3.metric('Attenzione ≤90 gg',0)
-        st.info('Le metriche logistiche compariranno quando inizierai a ubicare i prodotti sugli scaffali.')
+st.markdown('<div class="home-section"><h2>Inizia un’attività</h2><span>Le funzioni che usi ogni giorno</span></div>', unsafe_allow_html=True)
+actions = [
+    ('pages/05_Scarico_Sala_AI.py', 'Nuovo scarico sala', 'Analizza foto e PDF degli impianti', ':material/document_scanner:'),
+    ('pages/04_DDT_Carico_v2.py', 'Carica un DDT', 'Registra il materiale in entrata', ':material/upload_file:'),
+    ('pages/06_Gestione_Interventi.py', 'Gestisci interventi', 'Consulta e correggi gli scarichi', ':material/assignment:'),
+    ('pages/09_Corrieri.py', 'Missioni corrieri', 'Organizza consegne e ritiri', ':material/local_shipping:')]
+for col, (page, label, caption, icon) in zip(st.columns(4), actions):
+    with col.container(border=True):
+        st.page_link(page, label=label, icon=icon, use_container_width=True)
+        st.caption(caption)
 
-if _of_director:
-    st.markdown('<div class="ct-section">🤖 Consumi OCR AI</div>',unsafe_allow_html=True)
-    try:
-        usage=pd.DataFrame(sb().table('ocr_usage').select('*').order('created_at',desc=True).limit(1000).execute().data or [])
-        if usage.empty:
-            st.info('Il monitoraggio OCR parte dalle prossime scansioni.')
+left, right = st.columns([1.7, 1], gap='large')
+with left:
+    with st.container(border=True):
+        st.markdown('<div class="home-section"><h2>Ultimi interventi</h2><span>Gli ultimi 6 registrati per data</span></div>', unsafe_allow_html=True)
+        recent = data['recent']
+        if recent is None:
+            st.info('Elenco momentaneamente non disponibile.')
+        elif not recent:
+            st.markdown('<div class="home-empty">Nessun intervento registrato.<br><small>Inizia da Nuovo scarico sala.</small></div>', unsafe_allow_html=True)
         else:
-            _cost=pd.to_numeric(usage['costo_usd'],errors='coerce').fillna(0).sum()
-            _tok=pd.to_numeric(usage['total_tokens'],errors='coerce').fillna(0).sum()
-            o1,o2,o3=st.columns(3)
-            o1.metric('Scansioni registrate',len(usage)); o2.metric('Token AI',f"{int(_tok):,}".replace(',','.')); o3.metric('Costo stimato',f"$ {_cost:.4f}")
-            st.caption('Il monitor registra le nuove scansioni OCR. Il saldo effettivo resta quello della piattaforma OpenAI.')
-            st.dataframe(usage[['created_at','utente','modulo','modello','file_tipo','total_tokens','costo_usd']].head(50),use_container_width=True,hide_index=True)
-    except Exception:
-        st.caption('Monitor OCR in inizializzazione.')
+            # Patient/cartella identifiers and prices belong to the detailed pages.
+            for item in recent:
+                label = item.get('cliente') or item.get('struttura') or 'Struttura non indicata'
+                day = str(item.get('data_intervento') or '')
+                try:
+                    day = datetime.strptime(day, '%Y-%m-%d').strftime('%d/%m')
+                except ValueError:
+                    day = '—'
+                st.markdown(f'<div class="home-activity"><div class="home-day">{escape(day)}</div><div><strong>{escape(str(label))}</strong><small>{escape(str(item.get("agente") or "Agente non indicato"))} · {escape(str(item.get("linea") or "Linea non indicata"))}</small></div><span class="home-record">#{escape(str(item["id"]))}</span></div>', unsafe_allow_html=True)
+        st.page_link('pages/06_Gestione_Interventi.py', label='Apri tutti gli interventi', icon=':material/arrow_forward:', use_container_width=True)
+    with st.container(border=True):
+        st.markdown('<div class="home-section"><h2>Magazzino</h2><span>Disponibilità e tracciabilità</span></div>', unsafe_allow_html=True)
+        st.markdown(f'<div class="home-stock"><strong>{number(data["lots"])}</strong><div>Lotti / posizioni con quantità positiva<small>Conteggio completo per codice, lotto e magazzino</small></div></div>', unsafe_allow_html=True)
+        st.page_link('pages/01_WMS.py', label='Apri magazzino e scanner', icon=':material/inventory_2:', use_container_width=True)
+with right:
+    with st.container(border=True):
+        st.markdown('<div class="home-section"><h2>Da seguire</h2><span>Controlli operativi</span></div>', unsafe_allow_html=True)
+        st.markdown(f'<div class="home-check"><span>Anomalie prezzi</span><strong>{number(data["price_anomalies"])}</strong></div><div class="home-check"><span>Anomalie giacenza</span><strong>{number(data["stock_anomalies"])}</strong></div>', unsafe_allow_html=True)
+        st.page_link('pages/14_Anomalie_Prezzi.py', label='Verifica le anomalie', icon=':material/fact_check:', use_container_width=True)
+        st.divider()
+        expiries = data['expiring']
+        if expiries is None:
+            st.info('Scadenze momentaneamente non disponibili.')
+        else:
+            expired = sum(str(x['scadenza']) < today.isoformat() for x in expiries)
+            urgent = sum(today.isoformat() <= str(x['scadenza']) <= (today + timedelta(days=30)).isoformat() for x in expiries)
+            later = len(expiries) - expired - urgent
+            st.markdown(f'<div class="home-check"><span><i class="home-dot red"></i>Lotti scaduti</span><strong>{number(expired)}</strong></div><div class="home-check"><span><i class="home-dot amber"></i>In scadenza entro 30 giorni</span><strong>{number(urgent)}</strong></div><div class="home-check"><span><i class="home-dot green"></i>Tra 31 e 90 giorni</span><strong>{number(later)}</strong></div>', unsafe_allow_html=True)
+            if not expiries:
+                st.caption('Nessun lotto con quantità positiva in scadenza entro 90 giorni.')
+            else:
+                with st.expander('Mostra codici e lotti in scadenza'):
+                    st.dataframe(pd.DataFrame(expiries).drop(columns=['id']).rename(columns={'codice':'Codice','lotto':'Lotto','scadenza':'Scadenza','quantita':'Quantità','codice_magazzino':'Magazzino'}), hide_index=True, use_container_width=True)
+        st.page_link('pages/01_WMS.py', label='Controlla disponibilità e lotti', icon=':material/inventory_2:', use_container_width=True)
+    with st.container(border=True):
+        st.markdown('<div class="home-section"><h2>Consegne e ritiri</h2></div>', unsafe_allow_html=True)
+        if missions is None:
+            st.caption('Missioni momentaneamente non disponibili.')
+        elif not missions:
+            st.caption('Nessuna missione da completare.')
+        else:
+            for mission in missions[:3]:
+                st.markdown(f'<div class="home-mission"><strong>{escape(str(mission.get("codice") or "Missione"))}</strong><small>{escape(str(mission.get("tipo") or ""))} · {escape(str(mission.get("data_missione") or ""))}</small><span>{escape(str(mission.get("stato") or "").replace("_", " ").capitalize())}</span></div>', unsafe_allow_html=True)
+        st.page_link('pages/09_Corrieri.py', label='Apri le missioni', icon=':material/arrow_forward:', use_container_width=True)
 
-st.markdown('<div class="ct-section">Attività recente</div>',unsafe_allow_html=True)
-if role() in {'Admin','Magazzino'} and not movimenti.empty:
-    cols=[c for c in ['data_movimento','tipo_movimento','codice_magazzino','codice','lotto','quantita','utente'] if c in movimenti.columns]
-    st.dataframe(movimenti[cols].tail(20).iloc[::-1],use_container_width=True,hide_index=True)
-elif not interventi.empty:
-    cols=[c for c in ['data_intervento','cliente','agente','linea','fatturato'] if c in interventi.columns]
-    st.dataframe(interventi[cols].tail(20).iloc[::-1],use_container_width=True,hide_index=True)
-else: st.info('Nessuna attività recente da mostrare.')
+with st.expander('Dettagli di utilizzo OCR'):
+    st.caption('Ultime 50 scansioni registrate. Il saldo effettivo è disponibile sulla piattaforma OpenAI.')
+    try:
+        usage = sb().table('ocr_usage').select('created_at,utente,modulo,modello,file_tipo,total_tokens,costo_usd').order('created_at', desc=True).limit(50).execute().data or []
+        if usage:
+            st.dataframe(pd.DataFrame(usage), hide_index=True, use_container_width=True)
+        else:
+            st.caption('Nessuna scansione registrata.')
+    except Exception:
+        st.info('Dettagli OCR momentaneamente non disponibili.')
+
+st.markdown(f'<div class="home-footer">Orthopedic Service · OrthoFlow<span>Dati aggiornati alle {st.session_state["_home_snapshot_at"].strftime("%H:%M:%S")}</span></div>', unsafe_allow_html=True)
