@@ -27,3 +27,5 @@ CREATE TABLE storage.objects(id uuid,bucket_id text,name text,metadata jsonb,upd
 CREATE TABLE storage.buckets(id text,public boolean DEFAULT false);
 GRANT USAGE ON SCHEMA storage TO service_role;
 GRANT SELECT ON ALL TABLES IN SCHEMA storage TO service_role;
+
+CREATE VIEW public.v_wms_scaffali AS SELECT id FROM public.corrieri;
