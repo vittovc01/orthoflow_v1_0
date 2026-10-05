@@ -42,7 +42,7 @@ def install_office(app, backend, public_origin):
         url = httpx.URL(UPSTREAM).copy_with(raw_path=request.url.path.encode() +
             (b'?' + request.scope.get('query_string', b'') if request.scope.get('query_string') else b''))
         headers = {k: v for k, v in request.headers.items() if k.lower() not in HOP}
-        client = httpx.AsyncClient(timeout=httpx.Timeout(90, connect=5), follow_redirects=False)
+        client = httpx.AsyncClient(timeout=httpx.Timeout(90, connect=5), follow_redirects=False, trust_env=False)
         try:
             response = await client.send(client.build_request(request.method, url, headers=headers, content=request.stream()), stream=True)
         except httpx.HTTPError:
@@ -79,7 +79,7 @@ def install_office(app, backend, public_origin):
             target += '?' + ws.scope['query_string'].decode()
         try:
             async with connect(target, additional_headers=headers, subprotocols=protocols,
-                               max_size=45 * 1024 * 1024, compression=None) as upstream:
+                               max_size=45 * 1024 * 1024, compression=None, proxy=None) as upstream:
                 await ws.accept(subprotocol=upstream.subprotocol)
                 async def to_office():
                     while True:

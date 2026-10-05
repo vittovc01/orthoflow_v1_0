@@ -138,7 +138,7 @@ def create_app(backend_factory=None, session_path=None):
                 backend().table('clienti').select('codice_cliente').limit(1).execute()
                 if os.getenv('ORTHOFLOW_OFFICE_RUNTIME') == 'true':
                     import httpx
-                    r = httpx.get('http://127.0.0.1:8501/office/_stcore/health', timeout=5)
+                    r = httpx.get('http://127.0.0.1:8501/office/_stcore/health', timeout=5, trust_env=False)
                     r.raise_for_status()
             except Exception:
                 status = 'backend_unavailable'

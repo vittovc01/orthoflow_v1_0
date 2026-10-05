@@ -64,7 +64,13 @@ def test_director_opens_real_users_and_ddt_without_second_login(unified_server,w
             page.screenshot(path=str(directory/f'unified-users-{width}.png'),full_page=True)
         page.get_by_role('link',name='Torna alle funzioni').click()
         page.get_by_role('link',name='DDT e carichi',exact=False).click()
-        expect(frame.get_by_role('heading',name='DDT',exact=False).first).to_be_visible(timeout=30000)
+        try:
+            expect(frame.get_by_role('heading',name='DDT',exact=False).first).to_be_visible(timeout=30000)
+        except AssertionError:
+            print('Office frame contents:',frame.locator('body').inner_text())
+            if os.getenv('MOBILE_PREVIEW_DIR'):
+                page.screenshot(path=str(Path(os.environ['MOBILE_PREVIEW_DIR'])/f'unified-ddt-error-{width}.png'),full_page=True)
+            raise
         expect(frame.get_by_test_id('stException')).to_have_count(0)
         assert page.evaluate('document.documentElement.scrollWidth <= innerWidth')
         browser.close()
