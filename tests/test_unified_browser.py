@@ -59,6 +59,7 @@ def test_director_opens_real_users_and_ddt_without_second_login(unified_server,w
         expect(frame.get_by_role('heading',name='👥 Utenti & Permessi')).to_be_visible(timeout=30000)
         expect(frame.get_by_text('Accesso scaduto',exact=False)).to_have_count(0)
         expect(frame.get_by_test_id('stException')).to_have_count(0)
+        expect(frame.get_by_text('Page not found',exact=True)).to_have_count(0)
         if os.getenv('MOBILE_PREVIEW_DIR'):
             directory=Path(os.environ['MOBILE_PREVIEW_DIR']);directory.mkdir(parents=True,exist_ok=True)
             page.screenshot(path=str(directory/f'unified-users-{width}.png'),full_page=True)
@@ -72,5 +73,6 @@ def test_director_opens_real_users_and_ddt_without_second_login(unified_server,w
                 page.screenshot(path=str(Path(os.environ['MOBILE_PREVIEW_DIR'])/f'unified-ddt-error-{width}.png'),full_page=True)
             raise
         expect(frame.get_by_test_id('stException')).to_have_count(0)
+        expect(frame.get_by_text('Page not found',exact=True)).to_have_count(0)
         assert page.evaluate('document.documentElement.scrollWidth <= innerWidth')
         browser.close()

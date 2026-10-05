@@ -35,8 +35,8 @@ def install_office(app, backend, public_origin):
     @app.api_route('/office/{path:path}', methods=['GET', 'HEAD', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'])
     async def office(request: Request, path: str):
         row = await run_in_threadpool(identity, request.cookies)
-        route = path.strip('/')
-        if route in {m[0] for m in MODULES} and route not in {m['path'] for m in modules_for(row)}:
+        route = request.query_params.get('module') or path.strip('/')
+        if (request.query_params.get('module') or route in {m[0] for m in MODULES}) and route not in {m['path'] for m in modules_for(row)}:
             raise HTTPException(403, 'Funzione non autorizzata per il tuo utente.')
         # Join on a fixed loopback origin; path is never interpreted as a URL.
         url = httpx.URL(UPSTREAM).copy_with(raw_path=request.url.path.encode() +
