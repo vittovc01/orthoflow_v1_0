@@ -110,6 +110,7 @@ else:
         pages["CORRIERI"] = [courier_page]
     if is_director:
         pages["DIREZIONE"] = [operations_page, price_anomalies_page, users_page, courier_data_page]
-    nav = st.navigation(pages, position="sidebar", expanded=True)
+    nav = st.navigation(pages, position="hidden" if st.session_state.get("office_runtime") else "sidebar", expanded=True)
 
 nav.run()
+

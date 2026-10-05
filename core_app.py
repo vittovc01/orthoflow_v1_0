@@ -40,6 +40,24 @@ if quick_menu == "DDT carico / Loan":
     st.switch_page(DDT_PAGE)
     st.stop()
 
+_original_button = DeltaGenerator.button
+
+
+def _office_button(self, label, *args, **kwargs):
+    pressed = _original_button(self, label, *args, **kwargs)
+    if pressed and str(label).strip() == 'Esci' and st.session_state.get('office_runtime'):
+        from mobile.access import COOKIE, session_file
+        from mobile.security import Sessions
+        Sessions(session_file()).revoke(st.context.cookies.get(COOKIE, ''))
+        st.session_state.clear()
+        st.info('Accesso terminato. Torna alla schermata principale dell’app.')
+        st.stop()
+    return pressed
+
+
+if st.session_state.get('office_runtime'):
+    DeltaGenerator.button = _office_button
+
 _original_radio = DeltaGenerator.radio
 
 
@@ -93,5 +111,7 @@ try:
     runpy.run_path("core_app_legacy.py", run_name="__main__")
 finally:
     DeltaGenerator.radio = _original_radio
+    DeltaGenerator.button = _original_button
     if _radio_mixin is not None and _original_mixin_radio is not None:
         _radio_mixin.radio = _original_mixin_radio
+

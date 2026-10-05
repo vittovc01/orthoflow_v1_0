@@ -1,5 +1,5 @@
 // Cache only the public shell. Operational data, signed URLs and API never cached.
-const CACHE = 'orthoflow-shell-v2';
+const CACHE = 'orthoflow-shell-v3';
 const SHELL = ['/', '/static/index.html', '/static/app.js', '/static/styles.css', '/static/icon-192.png', '/static/icon-512.png', '/static/manifest.webmanifest'];
 self.addEventListener('install', event => { event.waitUntil(caches.open(CACHE).then(c => c.addAll(SHELL))); self.skipWaiting(); });
 self.addEventListener('activate', event => event.waitUntil(caches.keys().then(keys => Promise.all(keys.filter(k => k !== CACHE).map(k => caches.delete(k)))).then(() => self.clients.claim())));
