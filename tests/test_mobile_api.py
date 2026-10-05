@@ -177,3 +177,19 @@ def test_concurrent_courier_sessions_keep_missions_separate(setup):
     with ThreadPoolExecutor(max_workers=2) as pool:
         results=list(pool.map(inspect,['mario','luigi']))
     assert results==[[101],[102]]
+
+
+def test_render_origin_is_used_without_trusting_request_host(setup,monkeypatch):
+    client,_,_=setup
+    monkeypatch.delenv('MOBILE_PUBLIC_ORIGIN')
+    monkeypatch.setenv('RENDER_EXTERNAL_URL','https://testserver')
+    assert login(client).status_code==200
+    assert client.post('/api/logout',json={},headers={'Origin':'https://attacker.invalid'}).status_code==403
+
+
+@pytest.mark.parametrize('invalid',['http://example.com','https://user:secret@example.com','https://example.com/path','https://example.com?key=value'])
+def test_invalid_public_origin_fails_closed(setup,monkeypatch,invalid):
+    client,_,_=setup
+    monkeypatch.setenv('MOBILE_PUBLIC_ORIGIN',invalid)
+    monkeypatch.delenv('RENDER_EXTERNAL_URL',raising=False)
+    assert login(client).status_code==503

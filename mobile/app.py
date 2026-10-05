@@ -24,6 +24,15 @@ USER_COLUMNS = 'id,username,nome_completo,ruolo,permessi,agente_nome,attivo,stat
 log = logging.getLogger('orthoflow.mobile')
 
 
+def public_origin():
+    """Trust configured server environment, never the incoming Host header."""
+    value = (os.getenv('MOBILE_PUBLIC_ORIGIN') or os.getenv('RENDER_EXTERNAL_URL') or '').rstrip('/')
+    parsed = urlsplit(value)
+    if parsed.scheme != 'https' or not parsed.netloc or parsed.username or parsed.password or parsed.path or parsed.query or parsed.fragment:
+        return ''
+    return value
+
+
 class BodyLimit:
     def __init__(self, app):
         self.app = app
@@ -82,7 +91,7 @@ def create_app(backend_factory=None, session_path=None):
     @app.middleware('http')
     async def headers_and_origin(request, call_next):
         if request.method not in ('GET', 'HEAD', 'OPTIONS'):
-            expected = os.getenv('MOBILE_PUBLIC_ORIGIN', '').rstrip('/')
+            expected = public_origin()
             if not expected and os.getenv('MOBILE_LOCAL_DEV') == 'true':
                 expected = str(request.base_url).rstrip('/')
             if not expected:
@@ -120,7 +129,7 @@ def create_app(backend_factory=None, session_path=None):
 
     @app.get('/health')
     def health():
-        configured = bool(backend_factory) or bool(os.getenv('SUPABASE_URL') and os.getenv('SUPABASE_SERVICE_KEY') and os.getenv('MOBILE_PUBLIC_ORIGIN'))
+        configured = bool(backend_factory) or bool(os.getenv('SUPABASE_URL') and os.getenv('SUPABASE_SERVICE_KEY') and public_origin())
         status = 'ok' if configured else 'not_configured'
         if configured:
             try:

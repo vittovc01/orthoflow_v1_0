@@ -45,3 +45,32 @@ Only public shell assets are cached. Clinical documents, API data and signed URL
 ## Tests
 
 CI runs API authorization/session/file validation and real Chromium mobile navigation/editing tests with synthetic data. SQL tests use a disposable PostgreSQL instance and verify atomic/idempotent stamps/completion and scarico, rollback, Malzoni, nonsterile lotless stock, manual-price history and denial of public RPC execution. No production users/passwords or medical records are used. OCR calls are not made during CI; actual recognition still needs document review. `/health` proves service/version availability, not the full Supabase/OCR business workflow.
+
+## Home operativa e avvio Render Free
+
+La Home desktop riassume interventi di oggi e del mese, missioni aperte, anomalie
+operative e scadenze dei lotti con quantità positiva. Il fatturato rimane in
+Controllo di Gestione. I contatori usano conteggi esatti o letture paginate;
+una lettura fallita appare come dato sconosciuto, non come zero.
+La classificazione delle anomalie giacenza è condivisa con la pagina di risoluzione,
+che esclude lo storico scollegato e il materiale conto deposito struttura Malzoni.
+La Home mantiene uno snapshot nella sessione per massimo 30 secondi, aggiornabile
+con il pulsante Aggiorna. I dettagli OCR sono raccolti in un pannello richiudibile.
+
+`render-mobile.yaml` seleziona esplicitamente **Free**, regione Frankfurt, branch
+main e auto-deploy `checksPass`. Non crea un database Render e non sposta i dati
+Supabase. I due valori segreti richiesti sono SUPABASE_SERVICE_KEY e OPENAI_API_KEY:
+inserirli solo nei campi protetti del servizio, mai nel repository o in chat.
+L'origine HTTPS usa MOBILE_PUBLIC_ORIGIN se impostata, altrimenti la variabile
+server RENDER_EXTERNAL_URL fornita da Render. Per un dominio personalizzato impostare
+MOBILE_PUBLIC_ORIGIN all'origine HTTPS esatta. L'Host della richiesta non viene
+usato per autorizzare le operazioni. ORTHOFLOW_DESKTOP_URL può essere impostato
+separatamente al vero indirizzo del gestionale PC.
+
+Prima dell'avvio applicare `sql/mobile_operations.sql` con il connettore di
+amministrazione, verificare grant e funzioni, quindi verificare `/health`, il commit
+pubblicato e l'accesso di un utente approvato. Richiede l'account Render e il
+collegamento GitHub autorizzato dall'intestatario. Questa configurazione non
+attiva da sola un servizio e non certifica il collaudo in produzione.
+Free può sospendersi per inattività e ha file system effimero: documenti e dati
+operativi restano in Supabase; le sessioni locali possono richiedere nuovo login.
