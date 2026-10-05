@@ -34,3 +34,7 @@ Ripristinare database.dump prima in un progetto Supabase di prova compatibile: p
 La CI prova realmente pg_dump/pg_restore su PostgreSQL isolato e integrità/cifratura dei documenti sintetici. Questo non certifica il ripristino dell'archivio di produzione: resta da provare con il primo backup reale.
 
 Collaudo utenti: due corrieri simultanei vedono esclusivamente proprie missioni; agente e ufficio inseriscono operazioni distinte; doppio tap sullo stesso scarico deve produrre un solo addebito; due scarichi sullo stesso codice/lotto devono rispettare i lock del magazzino; nessun prezzo o anomalia deve andare perso. Su telefoni reali controllare leggibilità codici/lotti/QR dopo compressione, GPS, firma, caricamenti multipli e riapertura dopo sospensione. Nessun uso operativo definitivo dichiarato prima di queste prove.
+
+## Accesso server al database
+
+Applicare `sql/server_only_security.sql`: tabelle public con RLS, permessi diretti revocati ad anon/authenticated, RPC SECURITY DEFINER disponibili solo al server, vista WMS con security_invoker e search_path del trigger stock fissato. Questa architettura usa login/permessi OrthoFlow nel server Python; non aggiungere policy "allow all" per risolvere un errore. I client server devono avere la chiave service_role/secret; la publishable/anon key non può gestire dati applicativi. Mai inviare la chiave privilegiata al browser. La migrazione preserva gli accessi dei proprietari e di service_role; non elimina dati e non cambia quantità/prezzi.
