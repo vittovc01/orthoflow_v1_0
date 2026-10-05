@@ -3,10 +3,15 @@ Never change dimensions, PDF pages, text, annotations or signed PDF bytes.
 """
 import io
 import re
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from PIL import Image, ImageOps
 from pypdf import PdfReader, PdfWriter
+
+MAX_SYNC_BYTES = 8 * 1024 * 1024
+MAX_SYNC_IMAGE_PIXELS = 12_000_000
+MAX_PDF_PAGES = 60
 
 
 @dataclass(frozen=True)
@@ -15,6 +20,7 @@ class CompressedDocument:
     content_type: str
     original_bytes: int
     method: str
+    elapsed_ms: float = 0.0
 
     @property
     def saved_bytes(self):
@@ -22,25 +28,31 @@ class CompressedDocument:
 
 
 def compress_document(data, filename='', content_type=None):
-    """Keep the original when unsupported, signed, protected or not smaller.
-    JPEG is re-encoded at quality 88 with full chroma resolution; PNG/PDF lossless.
-    Validation/rejection of input belongs to the upload flow, not this optimiser.
-    """
-    started = time.perf_counter()\n    mime = content_type or {'.pdf':'application/pdf','.png':'image/png',
-        '.jpg':'image/jpeg','.jpeg':'image/jpeg','.webp':'image/webp'}.get(Path(filename).suffix.lower(), 'application/octet-stream')
+    """Keep interactive compression bounded; upload large inputs unchanged."""
+    started = time.perf_counter()
+    mime = content_type or {'.pdf':'application/pdf','.png':'image/png',
+        '.jpg':'image/jpeg','.jpeg':'image/jpeg','.webp':'image/webp'}.get(
+            Path(filename).suffix.lower(), 'application/octet-stream')
+
     def result(payload=data, method='original'):
-        return CompressedDocument(payload, mime, len(data), method, round((time.perf_counter() - started) * 1000, 2))
-    if not data or len(data) > 20 * 1024 * 1024:
+        return CompressedDocument(
+            payload, mime, len(data), method,
+            round((time.perf_counter() - started) * 1000, 2))
+
+    if not data:
         return result()
+    if len(data) > MAX_SYNC_BYTES:
+        return result(method='original_sync_limit')
     try:
         if data.startswith(b'%PDF-'):
             mime = 'application/pdf'
-            # Any signature field / byte range: preserve entire source, including revisions.
             if re.search(rb'/(?:ByteRange|FT\s*/Sig|Type\s*/Sig)\b', data):
                 return result(method='signed_pdf_preserved')
             reader = PdfReader(io.BytesIO(data))
-            if reader.is_encrypted or not 1 <= len(reader.pages) <= MAX_PDF_PAGES:
+            if reader.is_encrypted:
                 return result()
+            if not 1 <= len(reader.pages) <= MAX_PDF_PAGES:
+                return result(method='original_sync_limit' if len(reader.pages) > MAX_PDF_PAGES else 'original')
             fields = reader.get_fields() or {}
             if any(f.get('/FT') == '/Sig' for f in fields.values()):
                 return result(method='signed_pdf_preserved')
@@ -54,8 +66,12 @@ def compress_document(data, filename='', content_type=None):
             if len(PdfReader(io.BytesIO(payload)).pages) != len(reader.pages):
                 return result()
             return result(payload, 'pdf_lossless') if len(payload) < len(data) else result()
+
         with Image.open(io.BytesIO(data)) as image:
-            if image.width * image.height > 40_000_000 or getattr(image, 'n_frames', 1) != 1:
+            pixels = image.width * image.height
+            if pixels > MAX_SYNC_IMAGE_PIXELS:
+                return result(method='original_sync_limit')
+            if getattr(image, 'n_frames', 1) != 1:
                 return result()
             kind = image.format
             out = io.BytesIO()
@@ -73,5 +89,4 @@ def compress_document(data, filename='', content_type=None):
             payload = out.getvalue()
             return result(payload, method) if len(payload) < len(data) else result()
     except Exception:
-        # Optimisation must never cause document loss or block a previously valid upload.
         return result()
