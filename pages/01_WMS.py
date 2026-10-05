@@ -81,7 +81,7 @@ def require_access():
     if not user():
         st.warning("Accedi prima dalla pagina principale di OrthoFlow.")
         st.stop()
-    if role() not in {"Admin", "Magazzino"}:
+    if role() != 'Admin' and not (set(st.session_state.get('permessi', []) or []) & {'DIREZIONE', 'LOGISTICA'}):
         st.error("Il WMS è riservato ad Amministratore e Logistica/Magazzino.")
         st.caption("Gli agenti continuano a usare Scarico sala senza vedere ubicazioni, quantità o scaffali.")
         st.stop()
@@ -551,3 +551,4 @@ elif section == "Movimenti":
             mime="text/csv",
             use_container_width=True,
         )
+

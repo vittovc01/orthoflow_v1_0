@@ -17,6 +17,8 @@ from starlette.concurrency import run_in_threadpool
 from mobile.models import Complete, ExportItems, Login, Scarico, Stamp
 from mobile.security import Sessions, TTL, fingerprint, password_ok
 from mobile import service as s
+from mobile.access import authenticated, modules_for
+from mobile.office_proxy import install_office
 
 STATIC = Path(__file__).parent / 'static'
 COOKIE = 'orthoflow_mobile'
@@ -78,15 +80,8 @@ def create_app(backend_factory=None, session_path=None):
 
     def context(request: Request):
         token = request.cookies.get(COOKIE, '')
-        session = app.state.sessions.get(token)
-        if not session:
-            raise HTTPException(401, 'Accedi per continuare.')
         sb = backend()
-        found = s.rows(sb.table('utenti_app').select(USER_COLUMNS).eq('id', session[0]).limit(1))
-        if not found or not found[0].get('attivo') or found[0].get('stato_accesso') != 'APPROVATO' or fingerprint(found[0]) != session[1]:
-            app.state.sessions.revoke(token)
-            raise HTTPException(401, 'Sessione non più valida. Accedi nuovamente.')
-        return sb, found[0]
+        return sb, authenticated(token, app.state.sessions, sb)
 
     @app.middleware('http')
     async def headers_and_origin(request, call_next):
@@ -101,8 +96,15 @@ def create_app(backend_factory=None, session_path=None):
         response = await call_next(request)
         response.headers['X-Content-Type-Options'] = 'nosniff'
         response.headers['Referrer-Policy'] = 'no-referrer'
-        response.headers['X-Frame-Options'] = 'DENY'
-        response.headers['Content-Security-Policy'] = "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' blob: data: https:; connect-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'; object-src 'none'"
+        if request.url.path.startswith('/office/'):
+            # Streamlit office components require their own inline runtime and
+            # same-origin frames. This exception never applies to the app shell.
+            response.headers['X-Frame-Options'] = 'SAMEORIGIN'
+            response.headers['Content-Security-Policy'] = "frame-ancestors 'self'; base-uri 'self'; object-src 'none'"
+            response.headers['Cache-Control'] = 'no-store'
+        else:
+            response.headers['X-Frame-Options'] = 'DENY'
+            response.headers['Content-Security-Policy'] = "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' blob: data: https:; connect-src 'self'; frame-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'; object-src 'none'"
         response.headers['Permissions-Policy'] = 'geolocation=(self), camera=(self), microphone=()'
         if request.url.path.startswith('/api/'):
             response.headers['Cache-Control'] = 'no-store'
@@ -134,6 +136,10 @@ def create_app(backend_factory=None, session_path=None):
         if configured:
             try:
                 backend().table('clienti').select('codice_cliente').limit(1).execute()
+                if os.getenv('ORTHOFLOW_OFFICE_RUNTIME') == 'true':
+                    import httpx
+                    r = httpx.get('http://127.0.0.1:8501/office/_stcore/health', timeout=5, trust_env=False)
+                    r.raise_for_status()
             except Exception:
                 status = 'backend_unavailable'
         data = {'status': status, 'version': os.getenv('RENDER_GIT_COMMIT') or os.getenv('GIT_SHA') or 'unconfigured'}
@@ -175,7 +181,9 @@ def create_app(backend_factory=None, session_path=None):
         link = os.getenv('ORTHOFLOW_DESKTOP_URL', '')
         if urlsplit(link).scheme != 'https':
             link = ''
-        return {'desktop_url': link}
+        return {'desktop_url': link, 'modules': modules_for(ctx[1])}
+
+    install_office(app, backend, public_origin)
 
     @app.get('/api/missions')
     def missions(ctx=Depends(context)):

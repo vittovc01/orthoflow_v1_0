@@ -77,7 +77,7 @@ if not user():
     st.warning("Accedi prima a OrthoFlow Control Tower.")
     st.stop()
 
-if role() not in {"Admin", "Amministrazione"}:
+if role() != 'Admin' and not (set(st.session_state.get('permessi', []) or []) & {'DIREZIONE', 'AMMINISTRAZIONE'}):
     st.error("Questa pagina è riservata ad Admin e Amministrazione.")
     st.stop()
 
@@ -601,4 +601,5 @@ if st.button("💾 Salva tutte le modifiche", type="primary", use_container_widt
     except Exception as e:
         st.error(f"Aggiornamento non completato: {e}")
         st.warning("Se l'errore è avvenuto durante una rettifica di magazzino, controlla i movimenti dell'intervento prima di riprovare.")
+
 

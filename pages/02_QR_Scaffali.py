@@ -44,7 +44,7 @@ def sb():
 def require_access():
     if not st.session_state.get('user'):
         st.warning('Accedi prima dalla pagina principale di OrthoFlow.'); st.stop()
-    if str(st.session_state.get('ruolo','')) not in {'Admin','Magazzino'} and 'LOGISTICA' not in set(st.session_state.get('permessi',[]) or []):
+    if str(st.session_state.get('ruolo','')) != 'Admin' and not (set(st.session_state.get('permessi',[]) or []) & {'DIREZIONE','LOGISTICA'}):
         st.error('Area riservata ad Admin e Magazzino.'); st.stop()
 
 

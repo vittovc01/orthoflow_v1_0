@@ -74,3 +74,27 @@ collegamento GitHub autorizzato dall'intestatario. Questa configurazione non
 attiva da sola un servizio e non certifica il collaudo in produzione.
 Free può sospendersi per inattività e ha file system effimero: documenti e dati
 operativi restano in Supabase; le sessioni locali possono richiedere nuovo login.
+
+## App unica e moduli ufficio
+
+Il servizio Render espone la PWA e i moduli del gestionale allo stesso indirizzo.
+Il catalogo `/api/config` contiene solo le funzioni autorizzate. Direzione/Admin
+vede tutte le sezioni, il corriere vede solo il flusso missioni, l'agente scarico
+sala e Customer Connect. Le sezioni ufficio si aprono dentro l'app e riutilizzano
+le pagine esistenti, senza copiare i flussi di prezzi, giacenze o documenti.
+
+`mobile.serve` supervisiona FastAPI e Streamlit; Streamlit ascolta solo su
+127.0.0.1:8501 con percorso `/office`. Il gateway controlla sessione, account e
+permessi per ogni richiesta e all'apertura del WebSocket. Le sessioni aperte
+sono ricontrollate ogni 15 secondi e a ogni messaggio dal browser; le pagine
+aggiornano l'identità dal database a ogni interazione. La password e i permessi
+non sono trasferiti nell'URL. Non è esposto il login admin di emergenza storico.
+I moduli ufficio, gli allegati e le risposte operative non sono salvati nella
+cache della PWA. Il CSP del solo percorso `/office/` consente i componenti del
+gestionale e l'integrazione in un frame della stessa origine.
+
+Il Dockerfile usa requirements-unified.lock, mantiene un solo worker API per
+contenere la memoria dell'istanza Free e arresta il servizio se termina uno dei
+due processi. `/health` verifica database e processo ufficio. Su Free restano
+avvio a freddo e risorse limitate: l'integrazione non garantisce prestazioni
+adeguate per molti utenti simultanei senza una prova di carico.

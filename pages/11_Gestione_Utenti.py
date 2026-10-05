@@ -1,6 +1,8 @@
 import streamlit as st
 from orthoflow_branding import configure_page
 import pandas as pd
+import hashlib
+import os
 from datetime import datetime, timezone
 from supabase import create_client
 
@@ -26,7 +28,44 @@ LABELS={
 st.title("👥 Utenti & Permessi")
 st.caption("Approva gli accessi e assegna una o più funzioni. Ogni utente visualizza soltanto le aree autorizzate.")
 
-rows=sb().table("utenti_app").select("id,username,nome_completo,ruolo,permessi,stato_accesso,attivo,ultimo_accesso,created_at").order("created_at",desc=True).execute().data or []
+try:
+    agent_names=[str(x['nome']) for x in sb().table('agenti').select('nome').order('nome').execute().data or [] if x.get('nome')]
+except Exception:
+    agent_names=[]
+
+with st.expander('Crea un nuovo accesso'):
+    with st.form('create_managed_account',clear_on_submit=True):
+        new_name=st.text_input('Nome e cognome del nuovo utente')
+        new_username=st.text_input('Nome utente del nuovo accesso')
+        new_password=st.text_input('Password del nuovo accesso',type='password')
+        repeated_password=st.text_input('Conferma password del nuovo accesso',type='password')
+        new_permissions=st.multiselect('Funzioni del nuovo accesso',list(LABELS),format_func=lambda x:LABELS[x])
+        new_agent=st.selectbox('Agente del nuovo accesso',['']+agent_names)
+        create_account=st.form_submit_button('Crea e abilita accesso',type='primary')
+    if create_account:
+        if not new_name.strip() or not new_username.strip() or len(new_password)<8:
+            st.error('Inserisci nome, username e una password di almeno 8 caratteri.')
+        elif new_password!=repeated_password:
+            st.error('Le password non coincidono.')
+        elif not new_permissions:
+            st.error('Assegna almeno una funzione.')
+        elif 'AGENTE' in new_permissions and not new_agent:
+            st.error('Collega il nuovo accesso a un agente.')
+        else:
+            new_role='Admin' if 'DIREZIONE' in new_permissions else ('Amministrazione' if 'AMMINISTRAZIONE' in new_permissions else ('Magazzino' if 'LOGISTICA' in new_permissions else ('Agente' if 'AGENTE' in new_permissions else ('Corriere' if 'CORRIERE' in new_permissions else 'Operatore'))))
+            salt=os.urandom(16).hex()
+            digest=hashlib.pbkdf2_hmac('sha256',new_password.encode(),salt.encode(),210_000).hex()
+            try:
+                sb().table('utenti_app').insert({'username':new_username.strip(),'nome_completo':new_name.strip(),
+                    'password_salt':salt,'password_hash':digest,'ruolo':new_role,'permessi':new_permissions,
+                    'agente_nome':new_agent if 'AGENTE' in new_permissions else '',
+                    'stato_accesso':'APPROVATO','attivo':True,'approvato_da':str(st.session_state.get('user','')),
+                    'approvato_at':datetime.now(timezone.utc).isoformat()}).execute()
+                st.success('Accesso creato e abilitato.');st.rerun()
+            except Exception:
+                st.error('Accesso non creato. Verifica che il nome utente non sia già presente.')
+
+rows=sb().table("utenti_app").select("id,username,nome_completo,ruolo,permessi,agente_nome,stato_accesso,attivo,ultimo_accesso,created_at").order("created_at",desc=True).execute().data or []
 df=pd.DataFrame(rows)
 if df.empty: st.info("Nessun utente."); st.stop()
 pending=df[df["stato_accesso"].fillna("APPROVATO")=="IN_ATTESA"]
@@ -39,13 +78,16 @@ st.subheader(r.get("nome_completo") or r["username"])
 st.caption(f'Username: {r["username"]} · Ultimo accesso: {r.get("ultimo_accesso") or "mai"}')
 current=list(r.get("permessi") or [])
 selected=st.multiselect("Funzioni autorizzate",list(LABELS),default=[x for x in current if x in LABELS],format_func=lambda x:LABELS[x])
+agent_options=['']+list(dict.fromkeys(agent_names+([str(r.get('agente_nome'))] if r.get('agente_nome') else [])))
+assigned_agent=st.selectbox('Agente collegato alle strutture',agent_options,index=agent_options.index(str(r.get('agente_nome') or '')),disabled='AGENTE' not in selected)
 col1,col2,col3=st.columns(3)
 if col1.button("✅ Approva / Salva",type="primary",use_container_width=True):
     if not selected: st.error("Assegna almeno una funzione.")
+    elif 'AGENTE' in selected and not assigned_agent: st.error('Collega l’utente a un agente per assegnare le strutture.')
     else:
         ruolo="Admin" if "DIREZIONE" in selected else ("Amministrazione" if "AMMINISTRAZIONE" in selected else ("Magazzino" if "LOGISTICA" in selected else ("Agente" if "AGENTE" in selected else ("Corriere" if "CORRIERE" in selected else "Operatore"))))
         try:
-            sb().table("utenti_app").update({"permessi":selected,"ruolo":ruolo,"stato_accesso":"APPROVATO","attivo":True,"approvato_da":str(st.session_state.get("user","")),"approvato_at":datetime.now(timezone.utc).isoformat()}).eq("id",int(r["id"])).execute()
+            sb().table("utenti_app").update({"permessi":selected,"ruolo":ruolo,"agente_nome":assigned_agent,"stato_accesso":"APPROVATO","attivo":True,"approvato_da":str(st.session_state.get("user","")),"approvato_at":datetime.now(timezone.utc).isoformat()}).eq("id",int(r["id"])).execute()
             st.success("Utente approvato e permessi aggiornati."); st.rerun()
         except Exception as exc:
             st.error("Impossibile salvare i permessi. Controlla configurazione e vincoli dell'utente.")
