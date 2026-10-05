@@ -45,8 +45,14 @@ MODULES = [
 
 
 def modules_for(row):
-    return [dict(path=p, title=t, group=g, description=d) for p, t, perm, g, d in MODULES
+    modules=[dict(path=p, title=t, group=g, description=d) for p, t, perm, g, d in MODULES
             if allowed(row, perm) or (p == 'customer-connect' and allowed(row, 'AGENTE'))]
+    if not allowed(row,'DIREZIONE'):
+        if allowed(row,'AMMINISTRAZIONE'):
+            modules.append(dict(path='gestionale',title='Offerte e controlli di gestione',group='Amministrazione',description='Prezzi, offerte, archivio e fatturato'))
+        elif allowed(row,'LOGISTICA'):
+            modules.append(dict(path='gestionale',title='Inventario',group='Magazzino',description='Consulta e aggiorna le disponibilità'))
+    return modules
 
 
 def office_allowed(row):

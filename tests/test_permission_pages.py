@@ -25,3 +25,22 @@ def test_assigned_function_is_not_blocked_by_primary_role(monkeypatch,page,permi
     assert not any('riservat' in x.value.lower() or 'non autorizzato' in x.value.lower() for x in at.error)
     assert at.title
     st.cache_resource.clear();st.cache_data.clear()
+
+
+@pytest.mark.parametrize('permissions,expected',[
+    (['LOGISTICA'],['Inventario']),
+    (['AMMINISTRAZIONE'],['Clienti','Offerte','Archivio impianti','KPI e Fatturato']),
+    (['LOGISTICA','AMMINISTRAZIONE'],['Inventario','Clienti','Offerte','Archivio impianti','KPI e Fatturato'])])
+def test_management_menu_excludes_director_tools(monkeypatch,permissions,expected):
+    st.cache_resource.clear();st.cache_data.clear()
+    monkeypatch.setattr(supabase,'create_client',lambda *a,**kw:ReadOnlyBackend())
+    at=AppTest.from_file(Path(__file__).resolve().parents[1]/'core_app.py',default_timeout=30)
+    at.secrets['SUPABASE_URL']='http://127.0.0.1:1'
+    at.secrets['SUPABASE_SERVICE_KEY']='ci-only'
+    for key,value in dict(user='test',ruolo='Agente',permessi=permissions,agente_nome='',utente_id=1).items():
+        at.session_state[key]=value
+    at.run()
+    assert not at.exception
+    menu=next(x for x in at.radio if x.label=='Menu')
+    assert menu.options==expected
+    st.cache_resource.clear();st.cache_data.clear()
