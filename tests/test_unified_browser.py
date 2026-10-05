@@ -8,6 +8,7 @@ import time
 from urllib.request import urlopen
 import pytest
 from playwright.sync_api import sync_playwright, expect
+from mobile.access import MODULES
 
 
 @pytest.fixture(scope='module')
@@ -75,4 +76,14 @@ def test_director_opens_real_users_and_ddt_without_second_login(unified_server,w
         expect(frame.get_by_test_id('stException')).to_have_count(0)
         expect(frame.get_by_text('Page not found',exact=True)).to_have_count(0)
         assert page.evaluate('document.documentElement.scrollWidth <= innerWidth')
+        # Exercise every Director route, rather than assuming a working menu
+        # means the underlying management pages can actually be opened.
+        for path, title, _, _, _ in MODULES:
+            page.goto(f'{unified_server}/#office/{path}')
+            expect(page.get_by_role('heading', name=title, exact=True)).to_be_visible()
+            frame = page.frame_locator('#office-frame')
+            expect(frame.locator('h1').first).to_be_visible(timeout=30000)
+            expect(frame.get_by_test_id('stException')).to_have_count(0)
+            expect(frame.get_by_text('Page not found', exact=True)).to_have_count(0)
+            expect(frame.get_by_text('Accesso scaduto', exact=False)).to_have_count(0)
         browser.close()
