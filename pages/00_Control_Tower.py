@@ -61,7 +61,7 @@ def number(value):
 
 
 def metric(label, value, caption, icon, accent=''):
-    st.markdown(f'<div class="home-metric {accent}"><div class="home-metric-top"><span>{escape(label)}</span><span class="home-symbol">{icon}</span></div><strong>{number(value)}</strong><small>{escape(caption)}</small></div>', unsafe_allow_html=True)
+    return f'<div class="home-metric {accent}"><div class="home-metric-top"><span>{escape(label)}</span><span class="home-symbol">{icon}</span></div><strong>{number(value)}</strong><small>{escape(caption)}</small></div>'
 
 
 missions = data['missions']
@@ -72,14 +72,15 @@ icons = {
     'activity': '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 12h4l3-7 4 14 3-7h4"/></svg>',
     'truck': '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 5h12v12H3zm12 4h3l3 4v4h-6"/><circle cx="7" cy="18" r="2"/><circle cx="18" cy="18" r="2"/></svg>',
     'alert': '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m12 3 10 18H2zM12 9v5m0 3v1"/></svg>'}
-for col, (label, value, caption, icon, accent) in zip(st.columns(4), [
+cards = []
+for label, value, caption, icon, accent in [
     ('Interventi di oggi', data['today'], 'Data dell’intervento', 'activity', 'featured'),
     ('Interventi del mese', data['month'], today.strftime('%m / %Y'), 'calendar', ''),
     ('Missioni da completare', pending, f'{len(mission_today)} previste oggi' if missions is not None else 'Dati non disponibili', 'truck', ''),
     ('Anomalie da verificare', data['anomalies'], 'Prezzi e giacenze', 'alert', 'warning' if data['anomalies'] else ''),
-]):
-    with col:
-        metric(label, value, caption, icons[icon], accent)
+]:
+    cards.append(metric(label, value, caption, icons[icon], accent))
+st.markdown('<div class="home-metrics-grid">' + ''.join(cards) + '</div>', unsafe_allow_html=True)
 if data['errors']:
     st.warning('Dati non disponibili: ' + ', '.join(data['errors']) + '. Premi Aggiorna per riprovare.')
 
@@ -89,14 +90,14 @@ actions = [
     ('pages/04_DDT_Carico_v2.py', 'Carica un DDT', 'Registra il materiale in entrata', ':material/upload_file:'),
     ('pages/06_Gestione_Interventi.py', 'Gestisci interventi', 'Consulta e correggi gli scarichi', ':material/assignment:'),
     ('pages/09_Corrieri.py', 'Missioni corrieri', 'Organizza consegne e ritiri', ':material/local_shipping:')]
-for col, (page, label, caption, icon) in zip(st.columns(4), actions):
-    with col.container(border=True):
+for i, (col, (page, label, caption, icon)) in enumerate(zip(st.columns(4), actions)):
+    with col.container(border=True, key=f'home_panel_action_{i}'):
         st.page_link(page, label=label, icon=icon, use_container_width=True)
         st.caption(caption)
 
 left, right = st.columns([1.7, 1], gap='large')
 with left:
-    with st.container(border=True):
+    with st.container(border=True, key='home_panel_recent'):
         st.markdown('<div class="home-section"><h2>Ultimi interventi</h2><span>Gli ultimi 6 registrati per data</span></div>', unsafe_allow_html=True)
         recent = data['recent']
         if recent is None:
@@ -114,12 +115,12 @@ with left:
                     day = '—'
                 st.markdown(f'<div class="home-activity"><div class="home-day">{escape(day)}</div><div><strong>{escape(str(label))}</strong><small>{escape(str(item.get("agente") or "Agente non indicato"))} · {escape(str(item.get("linea") or "Linea non indicata"))}</small></div><span class="home-record">#{escape(str(item["id"]))}</span></div>', unsafe_allow_html=True)
         st.page_link('pages/06_Gestione_Interventi.py', label='Apri tutti gli interventi', icon=':material/arrow_forward:', use_container_width=True)
-    with st.container(border=True):
+    with st.container(border=True, key='home_panel_stock'):
         st.markdown('<div class="home-section"><h2>Magazzino</h2><span>Disponibilità e tracciabilità</span></div>', unsafe_allow_html=True)
         st.markdown(f'<div class="home-stock"><strong>{number(data["lots"])}</strong><div>Lotti / posizioni con quantità positiva<small>Conteggio completo per codice, lotto e magazzino</small></div></div>', unsafe_allow_html=True)
         st.page_link('pages/01_WMS.py', label='Apri magazzino e scanner', icon=':material/inventory_2:', use_container_width=True)
 with right:
-    with st.container(border=True):
+    with st.container(border=True, key='home_panel_checks'):
         st.markdown('<div class="home-section"><h2>Da seguire</h2><span>Controlli operativi</span></div>', unsafe_allow_html=True)
         st.markdown(f'<div class="home-check"><span>Anomalie prezzi</span><strong>{number(data["price_anomalies"])}</strong></div><div class="home-check"><span>Anomalie giacenza</span><strong>{number(data["stock_anomalies"])}</strong></div>', unsafe_allow_html=True)
         st.page_link('pages/14_Anomalie_Prezzi.py', label='Verifica le anomalie', icon=':material/fact_check:', use_container_width=True)
@@ -138,7 +139,7 @@ with right:
                 with st.expander('Mostra codici e lotti in scadenza'):
                     st.dataframe(pd.DataFrame(expiries).drop(columns=['id']).rename(columns={'codice':'Codice','lotto':'Lotto','scadenza':'Scadenza','quantita':'Quantità','codice_magazzino':'Magazzino'}), hide_index=True, use_container_width=True)
         st.page_link('pages/01_WMS.py', label='Controlla disponibilità e lotti', icon=':material/inventory_2:', use_container_width=True)
-    with st.container(border=True):
+    with st.container(border=True, key='home_panel_missions'):
         st.markdown('<div class="home-section"><h2>Consegne e ritiri</h2></div>', unsafe_allow_html=True)
         if missions is None:
             st.caption('Missioni momentaneamente non disponibili.')
