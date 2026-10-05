@@ -16,7 +16,7 @@ BEGIN
  THEN RAISE EXCEPTION 'Public stock RPC access'; END IF;
  IF NOT has_function_privilege('service_role','public.crea_intervento_scarico_ai_flessibile(jsonb,jsonb,text)','EXECUTE')
  THEN RAISE EXCEPTION 'Stock RPC not available to server'; END IF;
- IF NOT ('security_invoker=true'=ANY((SELECT reloptions FROM pg_class WHERE oid='public.v_wms_scaffali'::regclass)))
+ IF NOT EXISTS (SELECT 1 FROM pg_class WHERE oid='public.v_wms_scaffali'::regclass AND reloptions @> ARRAY['security_invoker=true']::text[])
  THEN RAISE EXCEPTION 'View bypasses RLS'; END IF;
 END $$;
 SET LOCAL ROLE service_role;
