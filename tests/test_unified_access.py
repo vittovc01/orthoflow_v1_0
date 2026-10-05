@@ -37,6 +37,7 @@ def test_agent_and_warehouse_cannot_open_director_pages(setup):
     for name in ('agente','magazzino'):
         login(client,name)
         assert client.get('/office/utenti-permessi').status_code == 403
+        assert client.get('/office/?module=utenti-permessi').status_code == 403
         if name=='agente':
             assert client.get('/office/gestionale').status_code == 403
     assert {x['path'] for x in client.get('/api/config').json()['modules']} == {
