@@ -66,7 +66,7 @@ if not user():
     st.warning("Accedi prima a OrthoFlow Control Tower.")
     st.stop()
 
-if role() not in {"Admin", "Amministrazione"}:
+if role() != 'Admin' and not (set(st.session_state.get('permessi', []) or []) & {'DIREZIONE', 'AMMINISTRAZIONE'}):
     st.error("Questa pagina è riservata ad Admin e Amministrazione.")
     st.stop()
 
@@ -286,3 +286,4 @@ for week_start in week_values:
         else:
             st.dataframe(export_columns(altre), use_container_width=True, hide_index=True, height=min(520, 110 + len(altre) * 35),
                          column_config={"Data intervento": st.column_config.DateColumn("Data intervento", format="DD/MM/YYYY"), "Scadenza": st.column_config.DateColumn("Scadenza", format="DD/MM/YYYY"), "Prezzo": st.column_config.NumberColumn("Prezzo", format="€ %.2f"), "Totale": st.column_config.NumberColumn("Totale", format="€ %.2f")})
+

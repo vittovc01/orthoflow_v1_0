@@ -39,7 +39,7 @@ jobs:
       - name: Smoke test delle pagine reali
         run: python -m pytest -q tests/test_pages_smoke.py
       - name: Accessi e API app mobile
-        run: python -m pytest -q tests/test_mobile_api.py tests/test_unified_access.py tests/test_home_data.py tests/test_deployment_health.py tests/test_document_compression.py tests/test_cloud_protection.py
+        run: python -m pytest -q tests/test_mobile_api.py tests/test_unified_access.py tests/test_permission_pages.py tests/test_home_data.py tests/test_deployment_health.py tests/test_document_compression.py tests/test_cloud_protection.py
       - name: Browser per test mobile
         run: python -m playwright install --with-deps chromium
       - name: Menu su telefono e desktop

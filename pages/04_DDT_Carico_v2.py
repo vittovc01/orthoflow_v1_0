@@ -55,7 +55,7 @@ def clean(v): return '' if v is None or (isinstance(v, float) and pd.isna(v)) el
 if not user():
     st.warning('Accedi prima a OrthoFlow Control Tower.')
     st.stop()
-if role() not in {'Admin', 'Magazzino'}:
+if role() != 'Admin' and not (set(st.session_state.get('permessi', []) or []) & {'DIREZIONE', 'LOGISTICA'}):
     st.error('Area riservata ad Admin e Magazzino.')
     st.stop()
 
@@ -445,3 +445,4 @@ else:
     with st.expander('Storico back order evasi'):
         evasi=bo_all[bo_all['stato']=='EVASO'] if 'stato' in bo_all.columns else pd.DataFrame()
         st.dataframe(evasi,use_container_width=True,hide_index=True)
+

@@ -18,7 +18,7 @@ def bootstrap(backend=None):
         st.error('Accesso scaduto. Torna all’app ed effettua nuovamente l’accesso.')
         st.stop()
     # Refreshed on every rerun, including after a director changes permissions.
-    st.session_state.update(user=row['username'], ruolo=row['ruolo'],
+    st.session_state.update(user=row['username'], ruolo='Admin' if 'DIREZIONE' in (row.get('permessi') or []) else row['ruolo'],
         permessi=row.get('permessi') or [], agente_nome=row.get('agente_nome') or '',
         utente_id=row['id'], office_runtime=True)
     return row

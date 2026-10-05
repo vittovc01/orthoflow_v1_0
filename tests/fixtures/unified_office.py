@@ -11,6 +11,7 @@ class OfficeBackend(Backend):
         self.tables['utenti_app'].append(user(4,'direzione',['DIREZIONE']))
         for row in self.tables['utenti_app']:
             row['created_at']='2026-10-01T09:00:00Z'
+            row['ultimo_accesso']=None
     def table(self,name):
         return super().table(name) if name=='utenti_app' else ReadOnlyBackend().table(name)
 

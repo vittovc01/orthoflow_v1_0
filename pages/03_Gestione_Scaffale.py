@@ -40,7 +40,7 @@ def sb():
 def require_access():
     if not st.session_state.get('user'):
         st.warning('Accedi prima dalla pagina principale di OrthoFlow.'); st.stop()
-    if str(st.session_state.get('ruolo','')) not in {'Admin','Magazzino'} and 'LOGISTICA' not in set(st.session_state.get('permessi',[]) or []):
+    if str(st.session_state.get('ruolo','')) != 'Admin' and not (set(st.session_state.get('permessi',[]) or []) & {'DIREZIONE','LOGISTICA'}):
         st.error('Area riservata ad Admin e Magazzino.'); st.stop()
 
 
@@ -217,3 +217,4 @@ if stock.empty: st.info('Lo scaffale non contiene ancora prodotti registrati.')
 else:
     cols=[c for c in ['codice','lotto','scadenza','quantita','ripiano','posizione','codice_ubicazione'] if c in stock.columns]
     st.dataframe(stock[cols].sort_values([c for c in ['ripiano','posizione','codice'] if c in cols]),use_container_width=True,hide_index=True)
+
