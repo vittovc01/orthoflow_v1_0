@@ -48,7 +48,8 @@ h1 { font-weight: 760 !important; }
     min-height: 112px;
 }
 [data-testid="stMetricLabel"] { font-weight: 650; }
-[data-testid="stMetricValue"] { font-weight: 760; }
+[data-testid="stMetricValue"] { font-weight: 760; font-size:clamp(1.35rem,2.1vw,2.4rem); overflow:visible; }
+[data-testid="stMetricValue"] > div { white-space:normal !important; overflow:visible !important; text-overflow:clip !important; overflow-wrap:anywhere; }
 .stButton > button, .stDownloadButton > button, .stLinkButton > a {
     border-radius: 12px !important;
     min-height: 42px;
@@ -740,7 +741,8 @@ if menu=='Dashboard':
     valore_medio=float(revenue.groupby('intervento_id')['totale'].sum().mean()) if not revenue.empty and 'intervento_id' in revenue.columns else 0.0
     anomalie_aperte = len(anomalie_df[anomalie_df['stato'].astype(str).str.casefold()!='risolta']) if not anomalie_df.empty and 'stato' in anomalie_df.columns else len(anomalie_df)
 
-    c1,c2,c3,c4,c5,c6=st.columns(6)
+    c1,c2,c3=st.columns(3)
+    c4,c5,c6=st.columns(3)
     c1.metric('Fatturato totale', euro(fatt))
     c2.metric('Interventi',len(interventi_df))
     c3.metric('Valore medio',euro(valore_medio))

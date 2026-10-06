@@ -434,9 +434,12 @@ with upload_tab:
             st.session_state["scarico_pending_files"] = {}
             st.session_state["scarico_upload_revision"] = upload_revision + 1
             st.rerun()
-        with st.expander("Anteprima foto"):
-            for entry in pending.values():
-                if not entry["name"].lower().endswith(".pdf"):
+        with st.expander("Anteprima documenti (foto e PDF)", expanded=True):
+            for file_id, entry in pending.items():
+                st.caption(entry["name"])
+                if entry["name"].lower().endswith(".pdf") or entry.get("type") == "application/pdf":
+                    st.pdf(entry["data"], height=600, key=f"scarico_pdf_{file_id}", alt=entry["name"])
+                else:
                     st.image(entry["data"], caption=entry["name"], use_container_width=True)
         if st.button("🤖 Analizza tutti i file e crea lista codici", type="primary", use_container_width=True, key="analyze_upload"):
             documents = []
