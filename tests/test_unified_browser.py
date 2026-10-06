@@ -82,7 +82,14 @@ def test_director_opens_real_users_and_ddt_without_second_login(unified_server,w
             page.goto(f'{unified_server}/#office/{path}')
             expect(page.get_by_role('heading', name=title, exact=True)).to_be_visible()
             frame = page.frame_locator('#office-frame')
-            expect(frame.locator('h1').first).to_be_visible(timeout=30000)
+            # The legacy dashboard renders its title as an h2 hero.
+            heading = (frame.get_by_role('heading', name='Controllo di Gestione', exact=True)
+                       if path == 'gestionale' else frame.locator('h1').first)
+            try:
+                expect(heading).to_be_visible(timeout=30000)
+            except AssertionError:
+                print('Failed office module:', path, frame.locator('body').inner_text())
+                raise
             expect(frame.get_by_test_id('stException')).to_have_count(0)
             expect(frame.get_by_text('Page not found', exact=True)).to_have_count(0)
             expect(frame.get_by_text('Accesso scaduto', exact=False)).to_have_count(0)
