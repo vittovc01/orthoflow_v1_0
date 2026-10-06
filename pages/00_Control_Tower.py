@@ -43,7 +43,7 @@ if st.session_state.get('_home_snapshot_day') != today.isoformat():
     st.session_state.pop('_home_snapshot', None)
 header, refresh = st.columns([6, 1], vertical_alignment='center')
 with header:
-    st.markdown(f'<div class="home-heading"><div class="home-eyebrow">ORTHOFLOW / OPERATIVITÀ</div><h1>Panoramica operativa</h1><p>Il lavoro da seguire, tutto a portata di mano.</p></div>', unsafe_allow_html=True)
+    st.markdown(f'<div class="home-heading"><div class="home-eyebrow">P.M. MEDICAL / OPERATIVITÀ</div><h1>Panoramica operativa</h1><p>Il lavoro da seguire, tutto a portata di mano.</p></div>', unsafe_allow_html=True)
 with refresh:
     st.markdown(f'<div class="home-date">{today.strftime("%d.%m.%Y")}</div>', unsafe_allow_html=True)
     if st.button('Aggiorna', icon=':material/refresh:', use_container_width=True):
