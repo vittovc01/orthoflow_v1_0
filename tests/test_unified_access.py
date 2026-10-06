@@ -105,4 +105,5 @@ def test_office_pages_and_assets_do_not_wait_for_an_inbound_body(setup, monkeypa
     assert client.get('/office/static/js/index.js').content == b'office asset'
     assert client.head('/office/static/js/index.js').status_code == 200
     assert len(seen) == 3
-    assert all('transfer-encoding' not in headers for _, _, headers, _ in seen)\n    assert all('content-length' not in headers for _, _, headers, _ in seen)
+    assert all('transfer-encoding' not in headers for _, _, headers in seen)
+    assert all('content-length' not in headers for _, _, headers in seen)
