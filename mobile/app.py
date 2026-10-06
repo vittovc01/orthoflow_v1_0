@@ -4,15 +4,17 @@ Privileged Supabase credentials are read only here, on the server.
 import io
 import logging
 import os
+import httpx
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from threading import Lock
+from contextlib import asynccontextmanager
 from urllib.parse import urlsplit
 
 from fastapi import Depends, FastAPI, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
-from supabase import create_client
+from supabase import ClientOptions, create_client
 from starlette.concurrency import run_in_threadpool
 
 from mobile.models import Complete, ExportItems, Login, Scarico, Stamp
@@ -68,10 +70,11 @@ def create_app(backend_factory=None, session_path=None):
     app.add_middleware(BodyLimit)
     app.state.sessions = Sessions(session_path or Path(os.getenv('MOBILE_DATA_DIR', '/tmp/orthoflow-mobile')) / 'sessions.sqlite')
     backend_client = None
+    backend_transport = None
     backend_lock = Lock()
 
     def backend():
-        nonlocal backend_client
+        nonlocal backend_client, backend_transport
         if backend_factory:
             return backend_factory()
         with backend_lock:
@@ -80,8 +83,25 @@ def create_app(backend_factory=None, session_path=None):
                 if not url or not key:
                     raise HTTPException(503, 'Servizio mobile non ancora configurato.')
                 # Share the thread-safe HTTP pool; never cache user permissions.
-                backend_client = create_client(url.rstrip('/'), key)
+                # Concurrent permission checks must not share one HTTP/2
+                # stream connection that Supabase can terminate mid-burst.
+                transport = httpx.Client(http2=False,
+                    timeout=httpx.Timeout(20, connect=5),
+                    limits=httpx.Limits(max_connections=32, max_keepalive_connections=16))
+                backend_client = create_client(url.rstrip('/'), key,
+                    options=ClientOptions(httpx_client=transport))
+                backend_transport = transport
             return backend_client
+
+    @asynccontextmanager
+    async def backend_lifespan(application):
+        try:
+            yield
+        finally:
+            if backend_transport is not None:
+                await run_in_threadpool(backend_transport.close)
+
+    app.router.lifespan_context = backend_lifespan
 
     def secure_cookie():
         return os.getenv('MOBILE_LOCAL_DEV', 'false').lower() != 'true'

@@ -143,8 +143,11 @@ def test_supabase_pool_reused_without_caching_permissions(tmp_path, monkeypatch)
     backend = Backend()
     backend.tables['utenti_app'].append(user(4, 'direzione', ['DIREZIONE']))
     created = []
-    def factory(url, key):
-        created.append(True)
+    for name in ('ALL_PROXY', 'HTTP_PROXY', 'HTTPS_PROXY', 'all_proxy', 'http_proxy', 'https_proxy'):
+        monkeypatch.delenv(name, raising=False)
+    def factory(url, key, options):
+        assert options.httpx_client._transport._pool._http2 is False
+        created.append(options.httpx_client)
         return backend
     monkeypatch.setenv('SUPABASE_URL', 'https://test.invalid')
     monkeypatch.setenv('SUPABASE_SERVICE_KEY', 'synthetic-test-key')
@@ -158,6 +161,7 @@ def test_supabase_pool_reused_without_caching_permissions(tmp_path, monkeypatch)
         backend.tables['utenti_app'][-1]['attivo'] = False
         assert client.get('/api/config').status_code == 401
     assert len(created) == 1
+    assert created[0].is_closed
 
 
 def test_packaged_assets_bypass_loopback_but_require_live_permissions(setup, tmp_path, monkeypatch):
