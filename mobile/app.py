@@ -66,7 +66,7 @@ class BodyLimit:
 
 
 def create_app(backend_factory=None, session_path=None):
-    app = FastAPI(title='OrthoFlow mobile', docs_url=None, redoc_url=None, openapi_url=None)
+    app = FastAPI(title='P.M. Medical Control Tower', docs_url=None, redoc_url=None, openapi_url=None)
     app.add_middleware(BodyLimit)
     app.state.sessions = Sessions(session_path or Path(os.getenv('MOBILE_DATA_DIR', '/tmp/orthoflow-mobile')) / 'sessions.sqlite')
     backend_client = None
@@ -373,7 +373,7 @@ def create_app(backend_factory=None, session_path=None):
         output = io.BytesIO()
         book.save(output)
         return Response(output.getvalue(), media_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-                        headers={'Content-Disposition': 'attachment; filename="OrthoFlow_Codici.xlsx"'})
+                        headers={'Content-Disposition': 'attachment; filename="PM_Medical_Codici.xlsx"'})
 
     @app.post('/api/scarico/{intervention_id}/originals')
     async def originals(intervention_id: int, request: Request, ctx=Depends(context)):
@@ -402,7 +402,7 @@ def create_app(backend_factory=None, session_path=None):
                        'codice_cliente': h['codice_cliente'], 'cliente': h['cliente'], 'agente': h['agente'],
                        'cartella_clinica': h['cartella_clinica'], 'nome_file': Path(file.filename or 'documento').name[:200],
                        'tipo_file': mime, 'storage_bucket': s.BUCKET, 'storage_path': path,
-                       'note': 'Documento originale acquisito da OrthoFlow mobile'}
+                       'note': 'Documento originale acquisito da P.M. Medical Control Tower'}
                 await run_in_threadpool(lambda: sb.table('documenti_impianto').insert(rec).execute())
                 saved += 1
             except Exception:

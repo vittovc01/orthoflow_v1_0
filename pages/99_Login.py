@@ -4,7 +4,7 @@ import streamlit as st
 from orthoflow_branding import configure_page
 from supabase import create_client
 
-configure_page(page_title='OrthoFlow 7.2 Enterprise', page_icon='🏥', layout='centered')
+configure_page(page_title='P.M. Medical Control Tower', page_icon='🏥', layout='centered')
 
 
 def secret(name, default=None):
@@ -108,7 +108,7 @@ st.markdown('''
 ''', unsafe_allow_html=True)
 
 with st.form('orthoflow_login'):
-    st.markdown('<div class="of-login-title">Accedi a OrthoFlow</div>', unsafe_allow_html=True)
+    st.markdown('<div class="of-login-title">Accedi a P.M. Medical</div>', unsafe_allow_html=True)
     st.markdown('<div class="of-login-sub">Inserisci le credenziali fornite dall’amministratore.</div>', unsafe_allow_html=True)
     username = st.text_input('Nome utente', placeholder='Nome utente')
     password = st.text_input('Password', type='password', placeholder='Password')
@@ -159,5 +159,5 @@ with st.expander('📝 Richiedi accesso'):
             except Exception:
                 st.error('Non è stato possibile inviare la richiesta.')
 
-st.markdown('<div class="of-secure">🔒 Accesso protetto · OrthoFlow Control Tower</div>', unsafe_allow_html=True)
-st.markdown('<div class="of-footer">OrthoFlow 7.2 Enterprise</div>', unsafe_allow_html=True)
+st.markdown('<div class="of-secure">🔒 Accesso protetto · P.M. Medical Control Tower</div>', unsafe_allow_html=True)
+st.markdown('<div class="of-footer">P.M. Medical Control Tower</div>', unsafe_allow_html=True)

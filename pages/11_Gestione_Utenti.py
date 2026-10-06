@@ -6,7 +6,7 @@ import os
 from datetime import datetime, timezone
 from supabase import create_client
 
-configure_page(page_title="Utenti & Permessi · OrthoFlow",page_icon="👥",layout="wide")
+configure_page(page_title="Utenti & Permessi · P.M. Medical",page_icon="👥",layout="wide")
 if not st.session_state.get("user"): st.stop()
 perms=set(st.session_state.get("permessi",[]) or [])
 if str(st.session_state.get("ruolo",""))!="Admin" and "DIREZIONE" not in perms:

@@ -6,15 +6,15 @@ import streamlit as st
 from orthoflow_branding import configure_page
 from supabase import create_client
 
-configure_page(page_title='QR Scaffali · OrthoFlow', page_icon='🏷️', layout='wide')
+configure_page(page_title='QR Scaffali · P.M. Medical', page_icon='🏷️', layout='wide')
 
-# OrthoFlow permission gate
+# P.M. Medical permission gate
 _p=set(st.session_state.get("permessi",[]) or [])
 _ok=str(st.session_state.get("ruolo",""))=="Admin" or "DIREZIONE" in _p or "LOGISTICA" in _p
 if not st.session_state.get("user") or not _ok:
     st.error("Accesso non autorizzato."); st.stop()
 
-# OrthoFlow RBAC: protegge anche l'accesso diretto via URL.
+# P.M. Medical RBAC: protegge anche l'accesso diretto via URL.
 if not st.session_state.get("user"):
     st.error("Sessione non autenticata."); st.stop()
 _of_perms=set(st.session_state.get("permessi",[]) or [])
@@ -22,7 +22,7 @@ _of_director=str(st.session_state.get("ruolo",""))=="Admin" or "DIREZIONE" in _o
 if not _of_director and not (_of_perms & set(["LOGISTICA"])):
     st.error("Non sei autorizzato ad accedere a questa area."); st.stop()
 
-# OrthoFlow RBAC: blocca anche l'accesso diretto via URL.
+# P.M. Medical RBAC: blocca anche l'accesso diretto via URL.
 if not st.session_state.get("user"):
     st.error("Sessione non autenticata."); st.stop()
 _of_perms=set(st.session_state.get("permessi",[]) or [])
@@ -43,7 +43,7 @@ def sb():
 
 def require_access():
     if not st.session_state.get('user'):
-        st.warning('Accedi prima dalla pagina principale di OrthoFlow.'); st.stop()
+        st.warning('Accedi prima dalla pagina principale di P.M. Medical.'); st.stop()
     if str(st.session_state.get('ruolo','')) != 'Admin' and not (set(st.session_state.get('permessi',[]) or []) & {'DIREZIONE','LOGISTICA'}):
         st.error('Area riservata ad Admin e Magazzino.'); st.stop()
 

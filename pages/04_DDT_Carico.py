@@ -18,7 +18,7 @@ except Exception:
     analyze_image=None
     normalize_ai_items=lambda x: []
 
-configure_page(page_title='DDT Mobile · OrthoFlow Control Tower', page_icon='🚚', layout='wide')
+configure_page(page_title='DDT Mobile · P.M. Medical Control Tower', page_icon='🚚', layout='wide')
 
 st.markdown('''
 <style>
@@ -46,7 +46,7 @@ def role(): return str(st.session_state.get('ruolo','')).strip()
 def user(): return str(st.session_state.get('user','')).strip()
 
 if not user():
-    st.warning('Accedi prima a OrthoFlow Control Tower.'); st.stop()
+    st.warning('Accedi prima a P.M. Medical Control Tower.'); st.stop()
 if role() not in {'Admin','Magazzino'}:
     st.error('Area riservata ad Admin e Magazzino.'); st.stop()
 

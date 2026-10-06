@@ -3,7 +3,7 @@ import pandas as pd
 import streamlit as st
 from orthoflow_branding import configure_page
 from supabase import create_client
-configure_page(page_title="Controllo Ordini J&J · OrthoFlow",page_icon="🔎",layout="wide")
+configure_page(page_title="Controllo Ordini J&J · P.M. Medical",page_icon="🔎",layout="wide")
 if not st.session_state.get("user"): st.switch_page("pages/99_Login.py")
 p=set(st.session_state.get("permessi",[]) or []); director=str(st.session_state.get("ruolo",""))=="Admin" or "DIREZIONE" in p
 if not director and "AMMINISTRAZIONE" not in p: st.error("Accesso non autorizzato."); st.stop()
@@ -12,7 +12,7 @@ def sb():
  return create_client(str(st.secrets.get("SUPABASE_URL")).rstrip("/"),str(st.secrets.get("SUPABASE_SERVICE_KEY") or st.secrets.get("SUPABASE_ANON_KEY") or st.secrets.get("SUPABASE_KEY")))
 def get(t): return pd.DataFrame(sb().table(t).select("*").execute().data or [])
 st.title("🔎 Controllo Ordini J&J")
-st.caption("Riconcilia consumi/interventi OrthoFlow con ordini, fatture e chiusure J&J. Residui e anomalie restano aperti e passano al mese successivo.")
+st.caption("Riconcilia consumi/interventi P.M. Medical con ordini, fatture e chiusure J&J. Residui e anomalie restano aperti e passano al mese successivo.")
 up=st.file_uploader("⬆️ Importa dataset J&J consolidato (CSV/Excel)",type=["xlsx","xls","csv"])
 if up and st.button("Importa / aggiorna J&J",type="primary"):
  try:
@@ -125,12 +125,12 @@ show=[x for x in ["data_intervento","cartella_clinica","struttura","codice_clien
 st.dataframe(inter[show].sort_values("data_intervento",ascending=False),use_container_width=True,hide_index=True)
 out=io.BytesIO()
 with pd.ExcelWriter(out,engine="xlsxwriter") as w: inter[show].to_excel(w,index=False,sheet_name="Riconciliazione")
-st.download_button("⬇️ Esporta controllo Excel",out.getvalue(),"OrthoFlow_Controllo_Ordini_JJ.xlsx","application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+st.download_button("⬇️ Esporta controllo Excel",out.getvalue(),"PM_Medical_Controllo_Ordini_JJ.xlsx","application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
 st.warning("Gli abbinamenti sono automatici e servono come pre-controllo: i casi PARZIALE / DA VERIFICARE / NESSUN ORDINE richiedono verifica amministrativa.")
 
 st.divider()
 st.subheader("🔗 Riconciliazione analitica")
-st.caption("Incrocio Codice + Lotto + Quantità + Prezzo tra righe intervento OrthoFlow e righe ordine J&J.")
+st.caption("Incrocio Codice + Lotto + Quantità + Prezzo tra righe intervento P.M. Medical e righe ordine J&J.")
 c1,c2=st.columns(2)
 if c1.button("🔄 Esegui riconciliazione automatica",type="primary"):
  try:
@@ -184,7 +184,7 @@ if not ordj.empty:
 
 st.divider()
 st.subheader("📦 Controllo reintegri da DDT Carico Mobile")
-st.caption("Il DDT ricevuto in OrthoFlow è la fonte primaria del reintegro fisico. I DDT Customer Connect restano solo una fonte opzionale di controllo.")
+st.caption("Il DDT ricevuto in P.M. Medical è la fonte primaria del reintegro fisico. I DDT Customer Connect restano solo una fonte opzionale di controllo.")
 if st.button("🔄 Incrocia consumi → ordini J&J → DDT ricevuti"):
  try:
   n=sb().rpc("riconcilia_reintegri_jj",{}).execute().data
@@ -210,7 +210,7 @@ if not rein.empty:
 
 st.divider()
 st.subheader("🏁 Chiusura mensile ufficiale J&J")
-st.caption("Carica il file finale mensile Johnson separatamente per TRAUMA e PROTESICA. È il consuntivo ufficiale da confrontare con la previsione OrthoFlow.")
+st.caption("Carica il file finale mensile Johnson separatamente per TRAUMA e PROTESICA. È il consuntivo ufficiale da confrontare con la previsione P.M. Medical.")
 cm1,cm2=st.columns(2)
 div=cm1.selectbox("Divisione",["TRAUMA","PROTESICA"],key="close_div")
 mese_close=cm2.date_input("Mese di chiusura",value=pd.Timestamp.today().replace(day=1).date(),key="close_month")
@@ -248,7 +248,7 @@ if closefile and st.button("📥 Importa e confronta chiusura",type="primary"):
    st.success(f"Chiusura {div} importata: {len(valid)} righe · NIS € {nis_tot:,.2f} · Invoiced Sales € {is_tot:,.2f}."); st.rerun()
  except Exception as e: st.error(f"Chiusura non importata: {e}")
 
-st.subheader("📈 Previsione OrthoFlow vs consuntivo J&J")
+st.subheader("📈 Previsione P.M. Medical vs consuntivo J&J")
 _m0=pd.Timestamp(mese_close).to_period("M").start_time.date(); _m1=(pd.Timestamp(_m0)+pd.offsets.MonthEnd(1)).date()
 ints=get("interventi"); ris=get("righe_intervento"); clos=get("chiusure_mensili_johnson")
 prev=0
@@ -262,12 +262,12 @@ if not clos.empty:
  cm=pd.to_datetime(clos["mese"],errors="coerce").dt.to_period("M")
  sel=clos[(cm==pd.Timestamp(_m0).to_period("M"))]
  cons=float(pd.to_numeric(sel["importo_totale_jj"],errors="coerce").fillna(0).sum())
-a1,a2,a3=st.columns(3); a1.metric("Previsione OrthoFlow",f"€ {prev:,.2f}"); a2.metric("Chiusura J&J caricata",f"€ {cons:,.2f}"); a3.metric("Differenza",f"€ {cons-prev:,.2f}")
-st.caption("La previsione deriva dall'operatività OrthoFlow; il file finale J&J è il consuntivo ufficiale. Le differenze dovranno essere analizzate per ordine/codice/lotto/quantità/prezzo, senza considerare automaticamente il dato J&J corretto.")
+a1,a2,a3=st.columns(3); a1.metric("Previsione P.M. Medical",f"€ {prev:,.2f}"); a2.metric("Chiusura J&J caricata",f"€ {cons:,.2f}"); a3.metric("Differenza",f"€ {cons-prev:,.2f}")
+st.caption("La previsione deriva dall'operatività P.M. Medical; il file finale J&J è il consuntivo ufficiale. Le differenze dovranno essere analizzate per ordine/codice/lotto/quantità/prezzo, senza considerare automaticamente il dato J&J corretto.")
 
 st.divider()
 st.subheader("🔬 Controllo dettagliato file finale")
-st.caption("Dopo il caricamento, OrthoFlow conserva ogni riga del file finale J&J per il confronto con consumi, ordini, prezzi e reintegri.")
+st.caption("Dopo il caricamento, P.M. Medical conserva ogni riga del file finale J&J per il confronto con consumi, ordini, prezzi e reintegri.")
 if not clos.empty:
  _mc=pd.to_datetime(clos["mese"],errors="coerce").dt.to_period("M")
  _fc=clos[_mc==pd.Timestamp(_m0).to_period("M")]
@@ -279,8 +279,8 @@ if not clos.empty:
    st.download_button("⬇️ Esporta dettaglio acquisito",_det.to_csv(index=False).encode("utf-8-sig"),"Dettaglio_chiusura_JJ.csv","text/csv")
 
 st.divider()
-st.subheader("🎯 Previsione chiusura OrthoFlow")
-st.caption("Previsione indipendente dai consuntivi J&J: nasce dagli interventi e consumi registrati in OrthoFlow.")
+st.subheader("🎯 Previsione chiusura P.M. Medical")
+st.caption("Previsione indipendente dai consuntivi J&J: nasce dagli interventi e consumi registrati in P.M. Medical.")
 pf_i=get("interventi"); pf_r=get("righe_intervento")
 if not pf_i.empty and not pf_r.empty:
  pf_i["_data"]=pd.to_datetime(pf_i["data_intervento"],errors="coerce")
@@ -305,7 +305,7 @@ if not pf_i.empty and not pf_r.empty:
    if "nis_totale" in mc: nis=float(pd.to_numeric(mc["nis_totale"],errors="coerce").fillna(0).sum())
    if "invoiced_sales_totale" in mc: inv=float(pd.to_numeric(mc["invoiced_sales_totale"],errors="coerce").fillna(0).sum())
   a,b,d,e=st.columns(4)
-  a.metric("Previsione OrthoFlow",f"€ {tot:,.2f}")
+  a.metric("Previsione P.M. Medical",f"€ {tot:,.2f}")
   b.metric("Ordini J&J rilevati",f"€ {ordtot:,.2f}",f"€ {ordtot-tot:,.2f}")
   d.metric("NIS chiusura J&J",f"€ {nis:,.2f}",f"€ {nis-tot:,.2f}")
   e.metric("Invoiced Sales J&J",f"€ {inv:,.2f}")
@@ -313,4 +313,4 @@ if not pf_i.empty and not pf_r.empty:
   st.dataframe(by.sort_values("Previsione_EUR",ascending=False),use_container_width=True,hide_index=True)
   miss=pr[pr["linea"].isna() | pr["codice_cliente"].isna()]
   if not miss.empty: st.warning(f"{len(miss)} righe senza Linea o Codice Cliente: incluse nel totale, ma da classificare per il confronto J&J preciso.")
-  st.download_button("⬇️ Esporta previsione dettagliata",pr.to_csv(index=False).encode("utf-8-sig"),f"Previsione_OrthoFlow_{pm}.csv","text/csv")
+  st.download_button("⬇️ Esporta previsione dettagliata",pr.to_csv(index=False).encode("utf-8-sig"),f"Previsione_PM_Medical_{pm}.csv","text/csv")

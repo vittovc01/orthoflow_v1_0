@@ -14,7 +14,7 @@ except Exception:
     analyze_image=None
     normalize_ai_items=lambda x: []
 
-configure_page(page_title='OrthoFlow 7.2 Enterprise', layout='wide')
+configure_page(page_title='P.M. Medical Control Tower', layout='wide')
 
 
 st.markdown("""
@@ -645,7 +645,7 @@ def render_revenue_charts(data, key_prefix='rev'):
 
 # Login
 if 'user' not in st.session_state:
-    st.sidebar.title('OrthoFlow 7.1')
+    st.sidebar.title('P.M. Medical Control Tower')
     st.sidebar.caption('Accesso protetto')
     with st.sidebar.form('login'):
         u=st.text_input('Utente')
@@ -674,11 +674,11 @@ if 'user' not in st.session_state:
             st.rerun()
         else:
             st.sidebar.error('Credenziali errate o utente disattivato')
-    st.title('OrthoFlow 7.2 Enterprise')
+    st.title('P.M. Medical Control Tower')
     st.info('Inserisci le credenziali fornite dall’amministratore.')
     st.stop()
 
-st.sidebar.markdown('## 🏥 OrthoFlow 7.2')
+st.sidebar.markdown('## 🏥 P.M. Medical Control Tower')
 st.sidebar.caption('Gestionale ortopedico cloud')
 label_accesso = f"{st.session_state.user} - {st.session_state.ruolo}"
 if current_agent():

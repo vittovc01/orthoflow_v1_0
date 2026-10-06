@@ -2,7 +2,7 @@ import pandas as pd
 import streamlit as st
 from orthoflow_branding import configure_page
 from supabase import create_client
-configure_page(page_title="Gestione Dati Corrieri · OrthoFlow",page_icon="🗂️",layout="wide")
+configure_page(page_title="Gestione Dati Corrieri · P.M. Medical",page_icon="🗂️",layout="wide")
 if not st.session_state.get("user"): st.switch_page("pages/99_Login.py")
 p=set(st.session_state.get("permessi",[]) or [])
 if str(st.session_state.get("ruolo",""))!="Admin" and "DIREZIONE" not in p: st.error("Area riservata alla Direzione."); st.stop()

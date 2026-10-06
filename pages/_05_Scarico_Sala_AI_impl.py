@@ -20,7 +20,7 @@ except Exception:
     analyze_document = None
     normalize_ai_items = lambda x: []
 
-configure_page(page_title="Scarico Sala AI · OrthoFlow", page_icon="📸", layout="wide")
+configure_page(page_title="Scarico Sala AI · P.M. Medical", page_icon="📸", layout="wide")
 
 
 def secret(name, default=None):
@@ -80,7 +80,7 @@ def generate_implant_document(intervention_id, header):
         story += [tb,Spacer(1,14),
           Table([["Causale del Trasporto",f"AVVENUTO IMPIANTO {division}"],["Note",f"cc {cc} del {dt}"]],colWidths=[130,385],style=TableStyle([("GRID",(0,0),(-1,-1),.35,colors.grey),("BACKGROUND",(0,0),(0,-1),colors.lightgrey),("FONTSIZE",(0,0),(-1,-1),8)])),
           Spacer(1,22),Paragraph("Firma destinatario per accettazione: ____________________________________",styles["Normal"]),
-          Spacer(1,18),Paragraph("Documento generato da OrthoFlow in attesa dell'integrazione con Business.",styles["Italic"])]
+          Spacer(1,18),Paragraph("Documento generato da P.M. Medical in attesa dell'integrazione con Business.",styles["Italic"])]
         doc.build(story); buf.seek(0)
         path=f"documenti_impianto/{division.lower()}/{year}/{numero}.pdf"
         sb().storage.from_("orthoflow-impianti").upload(path,compress_document(buf.getvalue(), path).data,file_options={"content-type":"application/pdf","upsert":"true"})
@@ -101,7 +101,7 @@ def ncode(v): return re.sub(r"[^A-Z0-9]", "", clean(v).upper())
 
 
 if not user():
-    st.warning("Accedi prima a OrthoFlow Control Tower.")
+    st.warning("Accedi prima a P.M. Medical Control Tower.")
     st.stop()
 
 
@@ -479,7 +479,7 @@ is_malzoni = clean(selected_client.get("codice_cliente")) == "9010013"
 if source_rows:
     st.caption(f"OCR: {len(source_rows)} righe riconosciute · {len(rows)} righe nella lista modificabile · {len(excluded_rows)} righe di altri produttori escluse.")
 if excluded_rows:
-    st.warning(f"{len(excluded_rows)} righe di altri produttori escluse dallo scarico, dal fatturato e dagli ordini OrthoFlow.")
+    st.warning(f"{len(excluded_rows)} righe di altri produttori escluse dallo scarico, dal fatturato e dagli ordini P.M. Medical.")
     with st.expander("Materiale di altre aziende escluso"):
         st.dataframe(pd.DataFrame(excluded_rows), use_container_width=True, hide_index=True)
 with st.form("scarico_ai_confirm"):

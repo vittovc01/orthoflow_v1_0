@@ -10,7 +10,7 @@ from streamlit_js_eval import get_geolocation
 from streamlit_drawable_canvas import st_canvas
 from supabase import create_client
 
-configure_page(page_title="Controllo Corrieri · OrthoFlow",page_icon="🚐",layout="wide")
+configure_page(page_title="Controllo Corrieri · P.M. Medical",page_icon="🚐",layout="wide")
 if not st.session_state.get("user"): st.switch_page("pages/99_Login.py")
 p=set(st.session_state.get("permessi",[]) or [])
 director=str(st.session_state.get("ruolo",""))=="Admin" or "DIREZIONE" in p
@@ -158,7 +158,7 @@ if manager:
                 stru.to_excel(w,index=False,sheet_name="Strutture")
                 mov[mov["tipo"]=="CONSEGNA"].to_excel(w,index=False,sheet_name="Kit_Usciti")
                 mov[mov["tipo"]=="RITIRO"].to_excel(w,index=False,sheet_name="Kit_Rientrati")
-            st.download_button("⬇️ Excel movimentazione corrieri",out.getvalue(),"OrthoFlow_Report_Corrieri.xlsx","application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+            st.download_button("⬇️ Excel movimentazione corrieri",out.getvalue(),"PM_Medical_Report_Corrieri.xlsx","application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
 else:
     uid=st.session_state.get("utente_id")
     link=cour[cour["user_id"].astype(str)==str(uid)] if (not cour.empty and "user_id" in cour) else pd.DataFrame()
@@ -181,7 +181,7 @@ else:
         if _loc and isinstance(_loc,dict) and _loc.get("error"):
             _err=_loc.get("error") or {}
             if int(_err.get("code",0) or 0)==1:
-                st.error("Posizione non autorizzata. Abilita la localizzazione per OrthoFlow nelle impostazioni del browser e riprova.")
+                st.error("Posizione non autorizzata. Abilita la localizzazione per P.M. Medical nelle impostazioni del browser e riprova.")
             else:
                 st.error("Non riesco ad acquisire la posizione GPS. Riprova in un punto con migliore ricezione.")
             st.session_state[_geo_key]=False

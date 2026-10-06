@@ -1,1 +1,25 @@
-{"id":"/","name":"OrthoFlow","short_name":"OrthoFlow","lang":"it","start_url":"/","scope":"/","display":"standalone","background_color":"#f4f8f7","theme_color":"#0e7466","icons":[{"src":"/static/icon-192.png","sizes":"192x192","type":"image/png","purpose":"any"},{"src":"/static/icon-512.png","sizes":"512x512","type":"image/png","purpose":"any"}]}
+{
+  "id": "/",
+  "name": "P.M. Medical Control Tower",
+  "short_name": "P.M. Medical",
+  "lang": "it",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#f4f8f7",
+  "theme_color": "#004aad",
+  "icons": [
+    {
+      "src": "/static/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/static/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    }
+  ]
+}

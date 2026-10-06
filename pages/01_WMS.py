@@ -14,15 +14,15 @@ try:
 except Exception:
     qrcode_scanner = None
 
-configure_page(page_title="OrthoFlow WMS", page_icon="📦", layout="wide")
+configure_page(page_title="P.M. Medical WMS", page_icon="📦", layout="wide")
 
-# OrthoFlow permission gate
+# P.M. Medical permission gate
 _p=set(st.session_state.get("permessi",[]) or [])
 _ok=str(st.session_state.get("ruolo",""))=="Admin" or "DIREZIONE" in _p or "LOGISTICA" in _p
 if not st.session_state.get("user") or not _ok:
     st.error("Accesso non autorizzato."); st.stop()
 
-# OrthoFlow RBAC: protegge anche l'accesso diretto via URL.
+# P.M. Medical RBAC: protegge anche l'accesso diretto via URL.
 if not st.session_state.get("user"):
     st.error("Sessione non autenticata."); st.stop()
 _of_perms=set(st.session_state.get("permessi",[]) or [])
@@ -30,7 +30,7 @@ _of_director=str(st.session_state.get("ruolo",""))=="Admin" or "DIREZIONE" in _o
 if not _of_director and not (_of_perms & set(["LOGISTICA"])):
     st.error("Non sei autorizzato ad accedere a questa area."); st.stop()
 
-# OrthoFlow RBAC: blocca anche l'accesso diretto via URL.
+# P.M. Medical RBAC: blocca anche l'accesso diretto via URL.
 if not st.session_state.get("user"):
     st.error("Sessione non autenticata."); st.stop()
 _of_perms=set(st.session_state.get("permessi",[]) or [])
@@ -79,7 +79,7 @@ def role():
 
 def require_access():
     if not user():
-        st.warning("Accedi prima dalla pagina principale di OrthoFlow.")
+        st.warning("Accedi prima dalla pagina principale di P.M. Medical.")
         st.stop()
     if role() != 'Admin' and not (set(st.session_state.get('permessi', []) or []) & {'DIREZIONE', 'LOGISTICA'}):
         st.error("Il WMS è riservato ad Amministratore e Logistica/Magazzino.")
@@ -230,7 +230,7 @@ def find_article(scan_data):
 
 
 require_access()
-st.title("📦 OrthoFlow WMS")
+st.title("📦 P.M. Medical WMS")
 st.caption("Area riservata a logistica: ubicazioni, QR, posizionamento, trasferimenti e scadenze FEFO.")
 section = st.sidebar.radio(
     "WMS",
@@ -340,9 +340,9 @@ elif section == "Ubicazioni":
         st.info("Stampa consigliata: QR minimo 30×30 mm sul ripiano/postazione; 40×40 mm sulla testata dello scaffale. Mantieni il codice ubicazione scritto anche in chiaro.")
 
 elif section == "Scanner":
-    mode = st.radio("Cosa vuoi scansionare?", ["Ubicazione OrthoFlow", "Prodotto Johnson / GS1"], horizontal=True)
-    if mode == "Ubicazione OrthoFlow":
-        raw = scan_widget("wms_location_scanner", "Inquadra il QR OrthoFlow dello scaffale, ripiano o postazione")
+    mode = st.radio("Cosa vuoi scansionare?", ["Ubicazione P.M. Medical", "Prodotto Johnson / GS1"], horizontal=True)
+    if mode == "Ubicazione P.M. Medical":
+        raw = scan_widget("wms_location_scanner", "Inquadra il QR P.M. Medical dello scaffale, ripiano o postazione")
         if raw:
             row = location_from_scan(raw)
             if not row:

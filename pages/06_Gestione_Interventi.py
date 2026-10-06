@@ -8,7 +8,7 @@ import streamlit as st
 from orthoflow_branding import configure_page
 from supabase import create_client
 
-configure_page(page_title="Gestione Interventi · OrthoFlow", page_icon="🛠️", layout="wide")
+configure_page(page_title="Gestione Interventi · P.M. Medical", page_icon="🛠️", layout="wide")
 
 perms=set(st.session_state.get("permessi",[]) or [])
 allowed=str(st.session_state.get("ruolo",""))=="Admin" or "DIREZIONE" in perms or "AMMINISTRAZIONE" in perms
@@ -21,7 +21,7 @@ _ofd=str(st.session_state.get("ruolo",""))=="Admin" or "DIREZIONE" in _ofp
 if not _ofd and not (_ofp & set(["AMMINISTRAZIONE"])):
     st.error("Non sei autorizzato ad accedere a questa area."); st.stop()
 
-# OrthoFlow RBAC: blocca anche l'accesso diretto via URL.
+# P.M. Medical RBAC: blocca anche l'accesso diretto via URL.
 if not st.session_state.get("user"):
     st.error("Sessione non autenticata."); st.stop()
 _of_perms=set(st.session_state.get("permessi",[]) or [])
@@ -74,7 +74,7 @@ def role():
 
 
 if not user():
-    st.warning("Accedi prima a OrthoFlow Control Tower.")
+    st.warning("Accedi prima a P.M. Medical Control Tower.")
     st.stop()
 
 if role() != 'Admin' and not (set(st.session_state.get('permessi', []) or []) & {'DIREZIONE', 'AMMINISTRAZIONE'}):
@@ -274,7 +274,7 @@ if save_header:
                 st.stop()
         old_mag = clean(intervention.get("magazzino_scarico") or intervention.get("magazzino"))
         if edit_mag != old_mag:
-            st.warning("Il cambio di magazzino va effettuato insieme alle righe materiali sotto, così OrthoFlow può rettificare correttamente le giacenze. Modifica il magazzino nella testata e poi salva anche le righe.")
+            st.warning("Il cambio di magazzino va effettuato insieme alle righe materiali sotto, così P.M. Medical può rettificare correttamente le giacenze. Modifica il magazzino nella testata e poi salva anche le righe.")
         sb().table("interventi").update({
             "data_intervento": edit_date.isoformat(),
             "codice_cliente": clean(edit_customer_code),
@@ -360,7 +360,7 @@ else:
     df = df.drop(columns=["conto_deposito_struttura"])
 
 st.subheader("Controllo completo materiali")
-st.info("Puoi correggere tutti i dati operativi della riga. Se cambi codice, lotto, quantità o magazzino, OrthoFlow crea automaticamente una rettifica: riporta a magazzino il vecchio materiale e scarica quello corretto. Prezzo e descrizione non muovono la giacenza.")
+st.info("Puoi correggere tutti i dati operativi della riga. Se cambi codice, lotto, quantità o magazzino, P.M. Medical crea automaticamente una rettifica: riporta a magazzino il vecchio materiale e scarica quello corretto. Prezzo e descrizione non muovono la giacenza.")
 
 edited = st.data_editor(
     df,
@@ -472,7 +472,7 @@ if st.button("💾 Salva tutte le modifiche", type="primary", use_container_widt
                 avail += old_qty
             if avail < qty:
                 # Non bloccare la rettifica: il materiale può essere già stato scaricato in Business
-                # prima dell'importazione della giacenza in OrthoFlow. La carenza viene inviata a Direzione.
+                # prima dell'importazione della giacenza in P.M. Medical. La carenza viene inviata a Direzione.
                 try:
                     existing = (sb().table("anomalie_giacenza").select("id")
                                 .eq("intervento_id", intervention_id)
