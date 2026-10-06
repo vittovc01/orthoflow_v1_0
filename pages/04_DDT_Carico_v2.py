@@ -19,15 +19,15 @@ except Exception:
     analyze_document = None
     normalize_ai_items = lambda x: []
 
-configure_page(page_title='DDT Mobile · OrthoFlow Control Tower', page_icon='🚚', layout='wide')
+configure_page(page_title='DDT Mobile · P.M. Medical Control Tower', page_icon='🚚', layout='wide')
 
-# OrthoFlow permission gate
+# P.M. Medical permission gate
 _p=set(st.session_state.get("permessi",[]) or [])
 _ok=str(st.session_state.get("ruolo",""))=="Admin" or "DIREZIONE" in _p or "LOGISTICA" in _p
 if not st.session_state.get("user") or not _ok:
     st.error("Accesso non autorizzato."); st.stop()
 
-# OrthoFlow RBAC: blocca anche l'accesso diretto via URL.
+# P.M. Medical RBAC: blocca anche l'accesso diretto via URL.
 if not st.session_state.get("user"):
     st.error("Sessione non autenticata."); st.stop()
 _of_perms=set(st.session_state.get("permessi",[]) or [])
@@ -53,7 +53,7 @@ def clean(v): return '' if v is None or (isinstance(v, float) and pd.isna(v)) el
 
 
 if not user():
-    st.warning('Accedi prima a OrthoFlow Control Tower.')
+    st.warning('Accedi prima a P.M. Medical Control Tower.')
     st.stop()
 if role() != 'Admin' and not (set(st.session_state.get('permessi', []) or []) & {'DIREZIONE', 'LOGISTICA'}):
     st.error('Area riservata ad Admin e Magazzino.')

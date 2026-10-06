@@ -22,7 +22,7 @@ def page(*args, **kwargs):
 
 login_page = page(
     "pages/99_Login.py",
-    title="OrthoFlow Control Tower",
+    title="P.M. Medical Control Tower",
     icon="🏥",
     url_path="login",
     default=not logged_in,

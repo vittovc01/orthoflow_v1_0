@@ -7,14 +7,14 @@ import streamlit as st
 from orthoflow_branding import configure_page
 from supabase import create_client
 
-configure_page(page_title="Customer Connect · OrthoFlow", page_icon="🔁", layout="wide")
+configure_page(page_title="Customer Connect · P.M. Medical", page_icon="🔁", layout="wide")
 
 perms=set(st.session_state.get("permessi",[]) or [])
 allowed=str(st.session_state.get("ruolo",""))=="Admin" or "DIREZIONE" in perms or "AMMINISTRAZIONE" in perms or "AGENTE" in perms
 if not st.session_state.get("user") or not allowed:
     st.error("Accesso non autorizzato."); st.stop()
 
-# OrthoFlow RBAC: blocca anche l'accesso diretto via URL.
+# P.M. Medical RBAC: blocca anche l'accesso diretto via URL.
 if not st.session_state.get("user"):
     st.error("Sessione non autenticata."); st.stop()
 _of_perms=set(st.session_state.get("permessi",[]) or [])
@@ -52,7 +52,7 @@ def role(): return clean(st.session_state.get("ruolo"))
 def agent_name(): return clean(st.session_state.get("agente_nome"))
 
 if not user():
-    st.warning("Accedi prima a OrthoFlow Control Tower.")
+    st.warning("Accedi prima a P.M. Medical Control Tower.")
     st.stop()
 
 

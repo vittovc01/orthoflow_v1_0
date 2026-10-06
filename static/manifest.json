@@ -1,13 +1,13 @@
 {
-  "name": "OrthoFlow Control Tower",
-  "short_name": "OrthoFlow",
+  "name": "P.M. Medical Control Tower",
+  "short_name": "P.M. Medical",
   "description": "Control Tower per logistica, magazzino, interventi e tracciabilità ortopedica.",
   "start_url": "/",
   "scope": "/",
   "display": "standalone",
   "orientation": "portrait-primary",
-  "background_color": "#071923",
-  "theme_color": "#071923",
+  "background_color": "#f4f8f7",
+  "theme_color": "#004aad",
   "icons": [
     {
       "src": "/app/static/icon-192.png",

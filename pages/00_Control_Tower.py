@@ -10,7 +10,7 @@ from supabase import create_client
 from home_data import load_home
 from orthoflow_branding import configure_page
 
-configure_page(page_title='Home · OrthoFlow', layout='wide')
+configure_page(page_title='Home · P.M. Medical', layout='wide')
 
 # Preserve role landing and one direct-URL authorization check.
 perms = set(st.session_state.get('permessi', []) or [])
@@ -161,4 +161,4 @@ with st.expander('Dettagli di utilizzo OCR'):
     except Exception:
         st.info('Dettagli OCR momentaneamente non disponibili.')
 
-st.markdown(f'<div class="home-footer">Orthopedic Service · OrthoFlow<span>Dati aggiornati alle {st.session_state["_home_snapshot_at"].strftime("%H:%M:%S")}</span></div>', unsafe_allow_html=True)
+st.markdown(f'<div class="home-footer">P.M. Medical Control Tower<span>Dati aggiornati alle {st.session_state["_home_snapshot_at"].strftime("%H:%M:%S")}</span></div>', unsafe_allow_html=True)
