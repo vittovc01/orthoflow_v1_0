@@ -13,9 +13,9 @@ def setup(tmp_path, monkeypatch):
     backend = Backend()
     backend.tables['utenti_app'] += [user(4,'direzione',['DIREZIONE']), user(5,'magazzino',['LOGISTICA'])]
     app = create_app(lambda:backend, tmp_path/'sessions.sqlite')
-    client = TestClient(app, base_url='https://testserver')
-    client.headers['Origin'] = 'https://testserver'
-    return client, backend, app
+    with TestClient(app, base_url='https://testserver') as client:
+        client.headers['Origin'] = 'https://testserver'
+        yield client, backend, app
 
 
 def login(client, name):
@@ -81,13 +81,12 @@ def test_office_headers_allow_only_same_origin_frame(setup):
     assert shell.headers['x-frame-options'] == 'DENY'
 
 
-def test_office_pages_and_assets_do_not_wait_for_an_inbound_body(setup, monkeypatch):
+def test_office_pages_and_assets_do_not_wait_for_an_inbound_body(tmp_path, monkeypatch):
     from starlette.requests import Request
     import mobile.office_proxy as gateway
-    client, _, _ = setup
-    login(client, 'direzione')
     original = httpx.AsyncClient
     seen = []
+    pools = []
 
     class AssetStream(httpx.AsyncByteStream):
         async def __aiter__(self):
@@ -96,24 +95,65 @@ def test_office_pages_and_assets_do_not_wait_for_an_inbound_body(setup, monkeypa
     async def upstream(request):
         seen.append((request.method, request.url.path, request.headers))
         assert await request.aread() == b''
-        return httpx.Response(200, stream=AssetStream())
+        assert 'upstream_private' not in request.headers.get('cookie', '')
+        return httpx.Response(200, stream=AssetStream(),
+                              headers={'set-cookie': 'upstream_private=test; Path=/'})
 
-    monkeypatch.setattr(gateway.httpx, 'AsyncClient', lambda **kw:
-                        original(transport=httpx.MockTransport(upstream), **kw))
+    def pooled_client(**kwargs):
+        pool = original(transport=httpx.MockTransport(upstream), **kwargs)
+        pools.append(pool)
+        return pool
+
+    monkeypatch.setattr(gateway.httpx, 'AsyncClient', pooled_client)
+    monkeypatch.setenv('MOBILE_PUBLIC_ORIGIN', 'https://testserver')
+    backend = Backend()
+    backend.tables['utenti_app'].append(user(4, 'direzione', ['DIREZIONE']))
+    app = create_app(lambda: backend, tmp_path/'sessions.sqlite')
 
     original_stream = Request.stream
 
     def pending_body(request):
         # Starlette's middleware may consume its own cached request to watch
         # disconnects. Only the proxy's request must never be streamed.
-        if type(request) is Request:
+        if type(request) is Request and request.method in {'GET', 'HEAD'}:
             raise AssertionError('Body-less page requests must not read the receive channel')
         return original_stream(request)
 
     monkeypatch.setattr(Request, 'stream', pending_body)
-    assert client.get('/office/?module=gestionale').status_code == 200
-    assert client.get('/office/static/js/index.js').content == b'office asset'
-    assert client.head('/office/static/js/index.js').status_code == 200
+    with TestClient(app, base_url='https://testserver') as client:
+        client.headers['Origin'] = 'https://testserver'
+        login(client, 'direzione')
+        assert client.get('/office/?module=gestionale').status_code == 200
+        # Simulate a different browser which did not receive the Set-Cookie.
+        client.cookies.delete('upstream_private')
+        assert client.get('/office/static/js/index.js').content == b'office asset'
+        client.cookies.delete('upstream_private')
+        assert client.head('/office/static/js/index.js').status_code == 200
+        assert len(pools) == 1
+        assert not pools[0].is_closed
+    assert pools[0].is_closed
     assert len(seen) == 3
     assert all('transfer-encoding' not in headers for _, _, headers in seen)
     assert all('content-length' not in headers for _, _, headers in seen)
+
+
+def test_supabase_pool_reused_without_caching_permissions(tmp_path, monkeypatch):
+    import mobile.app as mobile_app
+    backend = Backend()
+    backend.tables['utenti_app'].append(user(4, 'direzione', ['DIREZIONE']))
+    created = []
+    def factory(url, key):
+        created.append(True)
+        return backend
+    monkeypatch.setenv('SUPABASE_URL', 'https://test.invalid')
+    monkeypatch.setenv('SUPABASE_SERVICE_KEY', 'synthetic-test-key')
+    monkeypatch.setenv('MOBILE_PUBLIC_ORIGIN', 'https://testserver')
+    monkeypatch.setattr(mobile_app, 'create_client', factory)
+    app = create_app(session_path=tmp_path/'sessions.sqlite')
+    with TestClient(app, base_url='https://testserver') as client:
+        client.headers['Origin'] = 'https://testserver'
+        login(client, 'direzione')
+        assert client.get('/api/config').status_code == 200
+        backend.tables['utenti_app'][-1]['attivo'] = False
+        assert client.get('/api/config').status_code == 401
+    assert len(created) == 1

@@ -6,6 +6,7 @@ import logging
 import os
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from threading import Lock
 from urllib.parse import urlsplit
 
 from fastapi import Depends, FastAPI, HTTPException, Request, UploadFile
@@ -66,14 +67,21 @@ def create_app(backend_factory=None, session_path=None):
     app = FastAPI(title='OrthoFlow mobile', docs_url=None, redoc_url=None, openapi_url=None)
     app.add_middleware(BodyLimit)
     app.state.sessions = Sessions(session_path or Path(os.getenv('MOBILE_DATA_DIR', '/tmp/orthoflow-mobile')) / 'sessions.sqlite')
+    backend_client = None
+    backend_lock = Lock()
 
     def backend():
+        nonlocal backend_client
         if backend_factory:
             return backend_factory()
-        url, key = os.getenv('SUPABASE_URL'), os.getenv('SUPABASE_SERVICE_KEY')
-        if not url or not key:
-            raise HTTPException(503, 'Servizio mobile non ancora configurato.')
-        return create_client(url.rstrip('/'), key)
+        with backend_lock:
+            if backend_client is None:
+                url, key = os.getenv('SUPABASE_URL'), os.getenv('SUPABASE_SERVICE_KEY')
+                if not url or not key:
+                    raise HTTPException(503, 'Servizio mobile non ancora configurato.')
+                # Share the thread-safe HTTP pool; never cache user permissions.
+                backend_client = create_client(url.rstrip('/'), key)
+            return backend_client
 
     def secure_cookie():
         return os.getenv('MOBILE_LOCAL_DEV', 'false').lower() != 'true'
