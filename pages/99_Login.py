@@ -1,4 +1,4 @@
-import os, re, hashlib, hmac
+import os, re, hashlib, hmac, base64
 from pathlib import Path
 import streamlit as st
 from orthoflow_branding import configure_page
@@ -97,18 +97,20 @@ st.markdown('''
 [data-testid="stSidebar"], [data-testid="collapsedControl"] { display:none; }
 .block-container { max-width:520px; padding-top:2.2rem; padding-bottom:2.5rem; }
 [data-testid="stAppViewContainer"] { background:radial-gradient(circle at 85% 12%,rgba(17,126,98,.12),transparent 30%),radial-gradient(circle at 10% 85%,rgba(17,126,98,.08),transparent 30%),linear-gradient(180deg,#f7fbfa 0%,#fff 48%,#f4faf8 100%); }
-.of-brand{text-align:center;margin:1.4rem auto 1rem}.of-brand h1{margin:0;font-size:clamp(2.25rem,9vw,3.55rem);letter-spacing:-.055em;color:#0b2730;line-height:.98}.of-brand .version{color:#147f68}.enterprise{margin-top:8px;font-size:1rem;letter-spacing:.32em;text-transform:uppercase;color:#61757d}.of-tagline{text-align:center;color:#51656d;font-size:1.03rem;margin:1.5rem auto 1.35rem;max-width:390px}.of-features{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin:0 auto 1.6rem}.of-feature{text-align:center;padding:10px 4px;border-radius:16px;color:#31505a;font-size:.78rem;font-weight:650}.of-feature span{display:block;font-size:1.45rem;margin-bottom:4px}.of-login-title{text-align:center;margin:.25rem 0 .1rem;color:#0b2730;font-size:1.55rem;font-weight:780}.of-login-sub{text-align:center;color:#6a7c83;margin:0 0 .9rem;font-size:.94rem}[data-testid="stForm"]{background:rgba(255,255,255,.92);border:1px solid rgba(15,118,110,.13);border-radius:24px;padding:1.25rem 1.15rem 1.1rem;box-shadow:0 18px 50px rgba(27,58,63,.10)}.stTextInput input{min-height:52px;border-radius:14px!important;border:1px solid rgba(33,72,78,.15)!important;background:#fbfdfc!important}[data-testid="stFormSubmitButton"]>button{width:100%;min-height:52px;border-radius:14px!important;border:none!important;background:linear-gradient(135deg,#0f766e,#16966f)!important;color:#fff!important;font-weight:760!important;font-size:1.02rem!important}.of-secure{text-align:center;margin-top:1rem;color:#71838a;font-size:.82rem}.of-footer{text-align:center;color:#8a9aa0;font-size:.76rem;margin-top:1.55rem}@media(max-width:600px){.block-container{padding:1.1rem 1rem 2rem}.of-brand{margin-top:.8rem}.of-features{gap:2px}.of-feature{font-size:.72rem;padding:8px 2px}}
+.of-brand{text-align:center;margin:1.4rem auto 1rem}.of-brand h1{margin:0;font-size:clamp(2.25rem,9vw,3.55rem);letter-spacing:-.055em;color:#0b2730;line-height:.98}.of-brand img{display:block;width:230px;max-width:80%;height:auto;margin:0 auto 18px}.of-brand .version{color:#004aad}.enterprise{margin-top:8px;font-size:1rem;letter-spacing:.32em;text-transform:uppercase;color:#61757d}.of-tagline{text-align:center;color:#51656d;font-size:1.03rem;margin:1.5rem auto 1.35rem;max-width:390px}.of-features{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin:0 auto 1.6rem}.of-feature{text-align:center;padding:10px 4px;border-radius:16px;color:#31505a;font-size:.78rem;font-weight:650}.of-feature span{display:block;font-size:1.45rem;margin-bottom:4px}.of-login-title{text-align:center;margin:.25rem 0 .1rem;color:#0b2730;font-size:1.55rem;font-weight:780}.of-login-sub{text-align:center;color:#6a7c83;margin:0 0 .9rem;font-size:.94rem}[data-testid="stForm"]{background:rgba(255,255,255,.92);border:1px solid rgba(15,118,110,.13);border-radius:24px;padding:1.25rem 1.15rem 1.1rem;box-shadow:0 18px 50px rgba(27,58,63,.10)}.stTextInput input{min-height:52px;border-radius:14px!important;border:1px solid rgba(33,72,78,.15)!important;background:#fbfdfc!important}[data-testid="stFormSubmitButton"]>button{width:100%;min-height:52px;border-radius:14px!important;border:none!important;background:linear-gradient(135deg,#004aad,#1662bb)!important;color:#fff!important;font-weight:760!important;font-size:1.02rem!important}.of-secure{text-align:center;margin-top:1rem;color:#71838a;font-size:.82rem}.of-footer{text-align:center;color:#8a9aa0;font-size:.76rem;margin-top:1.55rem}@media(max-width:600px){.block-container{padding:1.1rem 1rem 2rem}.of-brand{margin-top:.8rem}.of-features{gap:2px}.of-feature{font-size:.72rem;padding:8px 2px}}
 </style>
 ''', unsafe_allow_html=True)
 
-st.markdown('''
-<div class="of-brand"><h1>Ortho<span class="version">Flow</span> 7.2</h1><div class="enterprise">Enterprise</div></div>
+_logo_path = Path(__file__).resolve().parents[1] / 'assets' / 'pm-medical-logo.svg'
+_logo_data = base64.b64encode(_logo_path.read_bytes()).decode('ascii')
+st.markdown(f'''
+<div class="of-brand"><img src="data:image/svg+xml;base64,{_logo_data}" alt="P.M. Medical"><h1>P.M. Medical</h1><div class="enterprise">Control Tower</div></div>
 <div class="of-tagline">Control Tower per logistica, magazzino e attività chirurgica ortopedica.</div>
 <div class="of-features"><div class="of-feature"><span>📷</span>Scansiona</div><div class="of-feature"><span>📦</span>Gestisci</div><div class="of-feature"><span>🔎</span>Traccia</div><div class="of-feature"><span>📊</span>Analizza</div></div>
 ''', unsafe_allow_html=True)
 
 with st.form('orthoflow_login'):
-    st.markdown('<div class="of-login-title">Accedi a P.M. Medical</div>', unsafe_allow_html=True)
+    st.markdown('<div class="of-login-title">Accedi a P.M. Medical Control Tower</div>', unsafe_allow_html=True)
     st.markdown('<div class="of-login-sub">Inserisci le credenziali fornite dall’amministratore.</div>', unsafe_allow_html=True)
     username = st.text_input('Nome utente', placeholder='Nome utente')
     password = st.text_input('Password', type='password', placeholder='Password')

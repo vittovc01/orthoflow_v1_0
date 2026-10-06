@@ -144,7 +144,7 @@ def add_scan(raw):
     st.session_state['ddt_mobile_rows']=rows
 
 
-st.markdown('<div class="ddt-hero"><div>ORTHOFLOW CONTROL TOWER</div><h1>🚚 DDT carico mobile</h1><p>Scanner Johnson, foto DDT con OCR AI o import Excel. Verifica sempre i dati prima del carico definitivo.</p></div>', unsafe_allow_html=True)
+st.markdown('<div class="ddt-hero"><div>P.M. MEDICAL CONTROL TOWER</div><h1>🚚 DDT carico mobile</h1><p>Scanner Johnson, foto DDT con OCR AI o import Excel. Verifica sempre i dati prima del carico definitivo.</p></div>', unsafe_allow_html=True)
 
 labels=mags()
 head1,head2=st.columns(2)

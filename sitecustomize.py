@@ -1,4 +1,4 @@
-"""Global mobile/PWA branding for OrthoFlow Control Tower.
+"""Global mobile/PWA branding for P.M. Medical Control Tower.
 
 Loaded automatically by Python when the repository root is on sys.path.
 It keeps the existing Streamlit app architecture unchanged while applying
@@ -6,51 +6,19 @@ consistent favicon/title metadata and generating touch icons in ./static.
 """
 from pathlib import Path
 
-BRAND_NAME = "OrthoFlow Control Tower"
+BRAND_NAME = "P.M. Medical Control Tower"
 STATIC = Path(__file__).resolve().parent / "static"
 STATIC.mkdir(exist_ok=True)
 
 
-def _make_icon(path: Path, size: int) -> None:
-    try:
-        from PIL import Image, ImageDraw
+# Reuse the supplied company artwork for legacy Streamlit touch icons.
+from shutil import copyfile
+for filename, source in (("icon-192.png", "icon-192.png"), ("icon-512.png", "icon-512.png"), ("apple-touch-icon.png", "icon-192.png")):
+    icon_source = Path(__file__).resolve().parent / "mobile" / "static" / source
+    if icon_source.exists():
+        copyfile(icon_source, STATIC / filename)
 
-        img = Image.new("RGB", (size, size), "#071923")
-        d = ImageDraw.Draw(img)
-        pad = int(size * 0.09)
-        radius = int(size * 0.22)
-        d.rounded_rectangle((pad, pad, size-pad, size-pad), radius=radius, fill="#0B1F2A")
-        cx = cy = size // 2
-        r = int(size * 0.30)
-        green = "#20C982"
-        mint = "#E9FFF7"
-        width = max(6, int(size * 0.055))
-        d.ellipse((cx-r, cy-r, cx+r, cy+r), outline=green, width=width)
-        r2 = int(size * 0.145)
-        d.ellipse((cx-r2, cy-r2, cx+r2, cy+r2), outline=mint, width=max(5, int(size * 0.04)))
-        arm = int(size * 0.39)
-        for x1, y1, x2, y2 in [
-            (cx, cy-arm, cx, cy-r), (cx, cy+r, cx, cy+arm),
-            (cx-arm, cy, cx-r, cy), (cx+r, cy, cx+arm, cy),
-        ]:
-            d.line((x1, y1, x2, y2), fill=green, width=width)
-        # Control-tower pointer / location cue.
-        top = (cx, int(size * 0.34))
-        left = (int(size * 0.40), int(size * 0.61))
-        right = (int(size * 0.60), int(size * 0.61))
-        d.polygon((top, right, left), fill=mint)
-        d.ellipse((cx-int(size*.035), int(size*.55), cx+int(size*.035), int(size*.62)), fill=green)
-        img.save(path, "PNG", optimize=True)
-    except Exception:
-        pass
-
-
-for filename, size in (("icon-192.png", 192), ("icon-512.png", 512), ("apple-touch-icon.png", 180)):
-    p = STATIC / filename
-    if not p.exists():
-        _make_icon(p, size)
-
-# Monkey-patch Streamlit page config so every page gets OrthoFlow branding,
+# Monkey-patch Streamlit page config so every page gets P.M. Medical branding,
 # including legacy pages that do not explicitly specify a page_icon.
 try:
     import streamlit as st
@@ -84,12 +52,12 @@ try:
                   upsertLink('manifest', '/app/static/manifest.json');
                   upsertLink('apple-touch-icon', '/app/static/apple-touch-icon.png', {sizes:'180x180'});
                   upsertLink('icon', '/app/static/icon-192.png', {type:'image/png'});
-                  upsertMeta('theme-color', '#071923');
+                  upsertMeta('theme-color', '#004aad');
                   upsertMeta('mobile-web-app-capable', 'yes');
                   upsertMeta('apple-mobile-web-app-capable', 'yes');
                   upsertMeta('apple-mobile-web-app-status-bar-style', 'black-translucent');
-                  upsertMeta('apple-mobile-web-app-title', 'OrthoFlow');
-                  d.title = 'OrthoFlow Control Tower';
+                  upsertMeta('apple-mobile-web-app-title', 'P.M. Medical');
+                  d.title = 'P.M. Medical Control Tower';
                 } catch(e) {}
                 </script>
                 """,
