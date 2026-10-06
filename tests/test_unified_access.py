@@ -1,4 +1,5 @@
 import pytest
+import httpx
 from fastapi import HTTPException
 from fastapi.testclient import TestClient
 from mobile.app import create_app
@@ -78,3 +79,41 @@ def test_office_headers_allow_only_same_origin_frame(setup):
     assert response.headers['cache-control'] == 'no-store'
     shell = client.get('/')
     assert shell.headers['x-frame-options'] == 'DENY'
+
+
+def test_office_pages_and_assets_do_not_wait_for_an_inbound_body(setup, monkeypatch):
+    from starlette.requests import Request
+    import mobile.office_proxy as gateway
+    client, _, _ = setup
+    login(client, 'direzione')
+    original = httpx.AsyncClient
+    seen = []
+
+    class AssetStream(httpx.AsyncByteStream):
+        async def __aiter__(self):
+            yield b'office asset'
+
+    async def upstream(request):
+        seen.append((request.method, request.url.path, request.headers))
+        assert await request.aread() == b''
+        return httpx.Response(200, stream=AssetStream())
+
+    monkeypatch.setattr(gateway.httpx, 'AsyncClient', lambda **kw:
+                        original(transport=httpx.MockTransport(upstream), **kw))
+
+    original_stream = Request.stream
+
+    def pending_body(request):
+        # Starlette's middleware may consume its own cached request to watch
+        # disconnects. Only the proxy's request must never be streamed.
+        if type(request) is Request:
+            raise AssertionError('Body-less page requests must not read the receive channel')
+        return original_stream(request)
+
+    monkeypatch.setattr(Request, 'stream', pending_body)
+    assert client.get('/office/?module=gestionale').status_code == 200
+    assert client.get('/office/static/js/index.js').content == b'office asset'
+    assert client.head('/office/static/js/index.js').status_code == 200
+    assert len(seen) == 3
+    assert all('transfer-encoding' not in headers for _, _, headers in seen)
+    assert all('content-length' not in headers for _, _, headers in seen)
