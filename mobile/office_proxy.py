@@ -4,7 +4,9 @@ The office process listens on loopback only. Every HTTP request and WebSocket
 is checked against the app session; no second public login or shared password.
 """
 import asyncio
+import logging
 from contextlib import suppress
+from contextlib import asynccontextmanager
 
 import httpx
 from fastapi import HTTPException, Request, WebSocket
@@ -17,9 +19,24 @@ from mobile.access import COOKIE, MODULES, authenticated, modules_for, office_al
 
 UPSTREAM = 'http://127.0.0.1:8501'
 HOP = {'host', 'connection', 'keep-alive', 'transfer-encoding', 'upgrade', 'proxy-authorization', 'proxy-authenticate', 'te', 'trailer'}
+log = logging.getLogger('orthoflow.office')
 
 
 def install_office(app, backend, public_origin):
+    previous_lifespan = app.router.lifespan_context
+
+    @asynccontextmanager
+    async def lifespan(application):
+        async with previous_lifespan(application):
+            # Asset bursts must reuse loopback connections and a single client,
+            # rather than build dozens of transports on the event loop.
+            async with httpx.AsyncClient(timeout=httpx.Timeout(90, connect=5),
+                                         follow_redirects=False, trust_env=False) as client:
+                application.state.office_client = client
+                yield
+
+    app.router.lifespan_context = lifespan
+
     def identity(cookies):
         sb = backend()
         row = authenticated(cookies.get(COOKIE, ''), app.state.sessions, sb)
@@ -47,15 +64,17 @@ def install_office(app, backend, public_origin):
         body = None if request.method in {'GET', 'HEAD'} else request.stream()
         if body is None:
             headers.pop('content-length', None)
-        client = httpx.AsyncClient(timeout=httpx.Timeout(90, connect=5), follow_redirects=False, trust_env=False)
+        client = app.state.office_client
         try:
-            response = await client.send(client.build_request(request.method, url, headers=headers, content=body), stream=True)
-        except httpx.HTTPError:
-            await client.aclose()
+            # A shared client's cookie jar must never supply another user's
+            # cookies. Forward only the cookies in this authenticated request.
+            upstream_request = httpx.Request(request.method, url, headers=headers, content=body)
+            response = await client.send(upstream_request, stream=True)
+        except httpx.HTTPError as error:
+            log.warning('Office upstream request failed: %s', type(error).__name__)
             raise HTTPException(503, 'Modulo in avvio. Riprova tra pochi secondi.')
         async def close():
             await response.aclose()
-            await client.aclose()
         result = StreamingResponse(response.aiter_raw(), status_code=response.status_code,
             background=BackgroundTask(close))
         result.raw_headers = [(k, v) for k, v in response.headers.raw if k.decode().lower() not in HOP]
