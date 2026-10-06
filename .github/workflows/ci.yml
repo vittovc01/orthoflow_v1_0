@@ -45,7 +45,11 @@ jobs:
           docker build -f mobile/Dockerfile -t orthoflow-ci .
           docker run --rm orthoflow-ci python -c 'import os; from pathlib import Path; assert os.getuid() == 10001; paths = [Path("uploads/ddt/prova.pdf"), Path("data/prova.db")]; [(p.parent.mkdir(parents=True, exist_ok=True), p.write_bytes(b"test"), p.unlink()) for p in paths]; assert not os.access("/app/mobile/app.py", os.W_OK)'
       - name: Browser per test mobile
-        run: python -m playwright install --with-deps chromium
+        # ubuntu-latest already provides Chromium's shared libraries. Avoid
+        # upgrading Mesa/fonts through an external apt mirror just to run
+        # the headless browser used by these tests.
+        timeout-minutes: 5
+        run: python -m playwright install --only-shell chromium
       - name: Menu su telefono e desktop
         env:
           MOBILE_PREVIEW_DIR: artifacts/mobile

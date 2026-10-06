@@ -5,12 +5,14 @@ is checked against the app session; no second public login or shared password.
 """
 import asyncio
 import logging
+import importlib.util
+from pathlib import Path
 from contextlib import suppress
 from contextlib import asynccontextmanager
 
 import httpx
 from fastapi import HTTPException, Request, WebSocket
-from fastapi.responses import RedirectResponse, StreamingResponse
+from fastapi.responses import FileResponse, RedirectResponse, StreamingResponse
 from starlette.background import BackgroundTask
 from starlette.concurrency import run_in_threadpool
 from websockets.asyncio.client import connect
@@ -20,6 +22,11 @@ from mobile.access import COOKIE, MODULES, authenticated, modules_for, office_al
 UPSTREAM = 'http://127.0.0.1:8501'
 HOP = {'host', 'connection', 'keep-alive', 'transfer-encoding', 'upgrade', 'proxy-authorization', 'proxy-authenticate', 'te', 'trailer'}
 log = logging.getLogger('orthoflow.office')
+
+
+def streamlit_static_root():
+    spec = importlib.util.find_spec('streamlit')
+    return Path(spec.origin).parent / 'static' if spec and spec.origin else None
 
 
 def install_office(app, backend, public_origin):
@@ -55,6 +62,17 @@ def install_office(app, backend, public_origin):
         route = request.query_params.get('module') or path.strip('/')
         if (request.query_params.get('module') or route in {m[0] for m in MODULES}) and route not in {m['path'] for m in modules_for(row)}:
             raise HTTPException(403, 'Funzione non autorizzata per il tuo utente.')
+        if request.method in {'GET', 'HEAD'} and path.startswith('static/'):
+            root = streamlit_static_root()
+            if root is not None:
+                # Serve the installed Streamlit bundle without opening a TCP
+                # connection for each JS chunk. Authenticate every request as
+                # above and confine file access to the package's static folder.
+                root = root.resolve()
+                asset = (root / path).resolve()
+                if not asset.is_relative_to(root / 'static') or not asset.is_file():
+                    raise HTTPException(404)
+                return FileResponse(asset, headers={'Cache-Control': 'no-store'})
         # Join on a fixed loopback origin; path is never interpreted as a URL.
         url = httpx.URL(UPSTREAM).copy_with(raw_path=request.url.path.encode() +
             (b'?' + request.scope.get('query_string', b'') if request.scope.get('query_string') else b''))

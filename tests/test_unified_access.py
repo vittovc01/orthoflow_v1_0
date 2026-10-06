@@ -84,6 +84,7 @@ def test_office_headers_allow_only_same_origin_frame(setup):
 def test_office_pages_and_assets_do_not_wait_for_an_inbound_body(tmp_path, monkeypatch):
     from starlette.requests import Request
     import mobile.office_proxy as gateway
+    monkeypatch.setattr(gateway, 'streamlit_static_root', lambda: None)
     original = httpx.AsyncClient
     seen = []
     pools = []
@@ -157,3 +158,27 @@ def test_supabase_pool_reused_without_caching_permissions(tmp_path, monkeypatch)
         backend.tables['utenti_app'][-1]['attivo'] = False
         assert client.get('/api/config').status_code == 401
     assert len(created) == 1
+
+
+def test_packaged_assets_bypass_loopback_but_require_live_permissions(setup, tmp_path, monkeypatch):
+    import mobile.office_proxy as gateway
+    root = tmp_path/'bundle'
+    (root/'static'/'js').mkdir(parents=True)
+    (root/'static'/'js'/'index.js').write_text('console.log("synthetic");')
+    (root/'private.txt').write_text('must stay private')
+    monkeypatch.setattr(gateway, 'streamlit_static_root', lambda: root)
+    client, backend, app = setup
+    asset = '/office/static/js/index.js'
+    assert client.get(asset).status_code == 401
+    login(client, 'mario')
+    assert client.get(asset).status_code == 403
+    login(client, 'direzione')
+    response = client.get(asset)
+    assert response.status_code == 200
+    assert response.content == b'console.log("synthetic");'
+    assert 'javascript' in response.headers['content-type']
+    assert client.head(asset).status_code == 200
+    assert client.get('/office/static/js/missing.js').status_code == 404
+    assert client.get('/office/static/%2e%2e/private.txt').status_code == 404
+    backend.tables['utenti_app'][-2]['attivo'] = False
+    assert client.get(asset).status_code == 401
