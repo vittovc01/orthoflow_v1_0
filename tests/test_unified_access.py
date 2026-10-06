@@ -89,16 +89,26 @@ def test_office_pages_and_assets_do_not_wait_for_an_inbound_body(setup, monkeypa
     original = httpx.AsyncClient
     seen = []
 
+    class AssetStream(httpx.AsyncByteStream):
+        async def __aiter__(self):
+            yield b'office asset'
+
     async def upstream(request):
         seen.append((request.method, request.url.path, request.headers))
         assert await request.aread() == b''
-        return httpx.Response(200, content=b'office asset')
+        return httpx.Response(200, stream=AssetStream())
 
     monkeypatch.setattr(gateway.httpx, 'AsyncClient', lambda **kw:
                         original(transport=httpx.MockTransport(upstream), **kw))
 
-    def pending_body(_):
-        raise AssertionError('Body-less page requests must not read the receive channel')
+    original_stream = Request.stream
+
+    def pending_body(request):
+        # Starlette's middleware may consume its own cached request to watch
+        # disconnects. Only the proxy's request must never be streamed.
+        if type(request) is Request:
+            raise AssertionError('Body-less page requests must not read the receive channel')
+        return original_stream(request)
 
     monkeypatch.setattr(Request, 'stream', pending_body)
     assert client.get('/office/?module=gestionale').status_code == 200
