@@ -53,3 +53,25 @@ def test_jpeg_preserves_resolution_and_remains_readable_image():
 def test_unsupported_or_invalid_file_never_lost():
     for source,name in [(b'not a PDF','file.pdf'),(b'PK zip source','file.xlsx')]:
         assert compress_document(source,name).data==source
+
+
+def test_large_file_skips_synchronous_compression():
+    from document_compression import MAX_SYNC_BYTES
+    source = b'x' * (MAX_SYNC_BYTES + 1)
+    result = compress_document(source, 'large.pdf')
+    assert result.data is source
+    assert result.method == 'original_sync_limit'
+    assert result.elapsed_ms >= 0
+
+
+def test_large_image_skips_expensive_reencode():
+    from document_compression import MAX_SYNC_IMAGE_PIXELS
+    # Highly compressible PNG keeps encoded bytes small while decoded work would be large.
+    width, height = 4000, 3100
+    assert width * height > MAX_SYNC_IMAGE_PIXELS
+    image = Image.new('RGB', (width, height), 'white')
+    out = io.BytesIO(); image.save(out, 'PNG')
+    source = out.getvalue()
+    result = compress_document(source, 'large.png')
+    assert result.data == source
+    assert result.method == 'original_sync_limit'
