@@ -1,5 +1,6 @@
 import os
 import re
+from calendar import monthrange
 from datetime import date
 from functools import lru_cache
 
@@ -240,11 +241,26 @@ intervention = labels[selected_label]
 intervention_id = intervention.get("id")
 
 st.subheader("Dati intervento")
+data_value = pd.to_datetime(intervention.get("data_intervento"), errors="coerce")
+saved_date = data_value.date() if pd.notna(data_value) else date.today()
+last_year = max(date.today().year + 10, saved_date.year)
+# Streamlit's calendar year menu shows only a rolling 20-year window.
+# This full selector lets an old intervention jump directly to the current year.
+calendar_year = st.selectbox(
+    "Anno intervento",
+    list(range(1900, last_year + 1)),
+    index=saved_date.year - 1900,
+    key=f"intervention_year_{intervention_id}_{saved_date.isoformat()}",
+    help="Seleziona l'anno, poi verifica giorno e mese nella Data intervento e salva.",
+)
+calendar_date = saved_date.replace(
+    year=calendar_year,
+    day=min(saved_date.day, monthrange(calendar_year, saved_date.month)[1]),
+)
 with st.form(f"header_{intervention_id}"):
     h1, h2, h3 = st.columns(3)
     with h1:
-        data_value = pd.to_datetime(intervention.get("data_intervento"), errors="coerce")
-        edit_date = st.date_input("Data intervento", value=data_value.date() if pd.notna(data_value) else date.today(), min_value=date(1900, 1, 1), max_value=date(max(date.today().year + 10, data_value.year if pd.notna(data_value) else date.today().year), 12, 31), format="DD/MM/YYYY")
+        edit_date = st.date_input("Data intervento", value=calendar_date, min_value=date(1900, 1, 1), max_value=date(last_year, 12, 31), format="DD/MM/YYYY", key=f"intervention_date_{intervention_id}_{saved_date.isoformat()}_{calendar_year}")
         edit_customer_code = st.text_input("Codice cliente", value=clean(intervention.get("codice_cliente")))
         edit_client = st.text_input("Cliente / struttura", value=clean(intervention.get("cliente") or intervention.get("struttura")))
     with h2:
