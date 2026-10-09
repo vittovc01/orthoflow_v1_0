@@ -244,7 +244,7 @@ with st.form(f"header_{intervention_id}"):
     h1, h2, h3 = st.columns(3)
     with h1:
         data_value = pd.to_datetime(intervention.get("data_intervento"), errors="coerce")
-        edit_date = st.date_input("Data intervento", value=data_value.date() if pd.notna(data_value) else date.today())
+        edit_date = st.date_input("Data intervento", value=data_value.date() if pd.notna(data_value) else date.today(), min_value=date(1900, 1, 1), max_value=date(max(date.today().year + 10, data_value.year if pd.notna(data_value) else date.today().year), 12, 31), format="DD/MM/YYYY")
         edit_customer_code = st.text_input("Codice cliente", value=clean(intervention.get("codice_cliente")))
         edit_client = st.text_input("Cliente / struttura", value=clean(intervention.get("cliente") or intervention.get("struttura")))
     with h2:
