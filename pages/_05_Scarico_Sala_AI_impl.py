@@ -561,7 +561,7 @@ with st.form("scarico_ai_confirm"):
 
     c1, c2 = st.columns(2)
     with c1:
-        procedure_date = st.date_input("Data intervento", value=ai_date.date() if pd.notna(ai_date) else date.today())
+        procedure_date = st.date_input("Data intervento", value=ai_date.date() if pd.notna(ai_date) else date.today(), min_value=date(1900, 1, 1), max_value=date(max(date.today().year + 10, ai_date.year if pd.notna(ai_date) else date.today().year), 12, 31), format="DD/MM/YYYY")
         clinical_record = st.text_input("Numero cartella clinica", value=ai_record)
         surgeon = st.text_input("Chirurgo", value=ai_surgeon)
     with c2:
