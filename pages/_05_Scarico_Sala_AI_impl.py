@@ -301,7 +301,7 @@ def available_qty(mag, code, lot):
     """Pre-check UX; include null/empty lots only for confirmed lotless rows."""
     try:
         query = (sb().table("giacenze").select("codice,lotto,quantita,origine")
-                 .eq("codice_magazzino", mag).eq("origine", "CONTO DEPOSITO"))
+                 .eq("codice_magazzino", mag).eq("origine", "CONTO DEPOSITO").eq("codice", code))
         if lot:
             query = query.eq("lotto", lot)
         total, offset = 0.0, 0
