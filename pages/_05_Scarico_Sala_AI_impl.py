@@ -366,7 +366,9 @@ def run_ai(path, documents=None):
                 for field, value in incoming.items():
                     if field != "items" and not meta.get(field) and value:
                         meta[field] = value
-        combined_rows = aggregate_identical_labels(combined_rows)
+        # Keep one row per physical label during review: combining before verification
+        # can conceal missed or double-counted labels from overlapping image crops.
+        meta["physical_label_count"] = len(combined_rows)
         meta["items"] = combined_rows
         st.session_state["scarico_ai_rows"] = combined_rows
         st.session_state["scarico_documents"] = documents
@@ -377,7 +379,7 @@ def run_ai(path, documents=None):
         st.session_state["scarico_source"] = "AI"
         st.session_state.pop("scarico_missing_prices", None)
         st.session_state.pop("scarico_stock_errors", None)
-        st.success(f"AI completata: {len(st.session_state['scarico_ai_rows'])} righe rilevate.")
+        st.warning(f"AI: {len(combined_rows)} etichette candidate. Verifica il conteggio fisico prima dello scarico; immagini sovrapposte possono generare doppioni.")
         st.rerun()
     except Exception as e:
         st.error(f"Errore analisi AI: {e}")
