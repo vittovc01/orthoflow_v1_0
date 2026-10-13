@@ -1,4 +1,5 @@
 import os
+import logging
 import re
 from calendar import monthrange
 from datetime import date
@@ -87,14 +88,14 @@ def audit(action, table_name, record_id, detail):
     try:
         sb().table("audit_log").insert({
             "utente": user(),
-            "ruolo": role(),
             "azione": action,
             "tabella": table_name,
-            "record_id": str(record_id),
-            "dettaglio": detail,
+            "riferimento": str(record_id),
+            "dettagli": detail,
         }).execute()
     except Exception:
-        pass
+        logging.exception("Audit non registrato: azione=%s tabella=%s record=%s", action, table_name, record_id)
+        st.error("Errore registrazione audit: verifica il log applicativo.")
 
 
 @lru_cache(maxsize=None)
@@ -192,7 +193,7 @@ def available_qty(mag, code, lot):
     """Pre-check UX; include null/empty lots only for confirmed lotless rows."""
     try:
         query = (sb().table("giacenze").select("codice,lotto,quantita,origine")
-                 .eq("codice_magazzino", mag))
+                 .eq("codice_magazzino", mag).eq("codice", code))
         if lot:
             query = query.eq("lotto", lot)
         total, offset = 0.0, 0
