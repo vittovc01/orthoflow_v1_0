@@ -1,6 +1,7 @@
 """Physical-label OCR: geometry precedes identity; no production writes."""
 import base64
 import calendar
+import csv
 import hashlib
 import math
 import re
@@ -12,26 +13,30 @@ from pathlib import Path
 
 from PIL import Image, ImageOps, ImageFilter
 
-PIPELINE_VERSION = 'physical-label-v3-literal-ref'
+PIPELINE_VERSION = 'physical-label-v4-local-geometry'
 
 
 def local_ref_evidence(image):
     """Independent literal OCR. Never translate 5 to S or recover missing suffixes."""
     if not shutil.which('tesseract'):
         return {'status': 'unavailable', 'reads': [], 'candidates': []}
-    reads = []
+    reads, candidates = [], set()
     try:
         for variant in (image, prepare_crop(image)):
             buffer = BytesIO()
             variant.save(buffer, format='PNG')
             result = subprocess.run(
-                ['tesseract', 'stdin', 'stdout', '-l', 'eng', '--psm', '6'],
+                ['tesseract', 'stdin', 'stdout', '-l', 'eng', '--psm', '6', 'tsv'],
                 input=buffer.getvalue(), capture_output=True, timeout=15, check=True)
-            reads.append(result.stdout.decode('utf-8', errors='replace'))
+            words = list(csv.DictReader(result.stdout.decode('utf-8', errors='replace').splitlines(),delimiter='\t'))
+            reads.append(' '.join(w.get('text','') for w in words if w.get('text')))
+            for word in words:
+                token = (word.get('text') or '').strip()
+                if re.fullmatch(r'(?:\d{2}\.\d{3}\.\d{3}|\d{3}\.\d{3})(?:TS|S)',token) and float(word.get('conf') or -1)>=80:
+                    candidates.add(token)
     except (OSError, subprocess.SubprocessError):
         return {'status': 'unavailable', 'reads': reads, 'candidates': []}
-    pattern = r'(?<![A-Za-z0-9.])(?:\d{2}\.\d{3}\.\d{3,4}|\d{3}\.\d{3,4})[A-Za-z]*(?![A-Za-z0-9.])'
-    candidates = sorted(set(token for text in reads for token in re.findall(pattern, text)))
+    candidates = sorted(candidates)
     return {'status': 'read' if candidates else 'unreadable', 'reads': reads,
             'candidates': candidates}
 
@@ -322,7 +327,9 @@ def analyze_labels(path, client, model, item_schema, parse):
     for number, page in enumerate(pages, 1):
         preview = page.copy()
         preview.thumbnail((2200,2200))
-        located = parse(client.responses.create(model=model, store=False,
+        from label_geometry import locate_datamatrix_labels
+        local_regions = locate_datamatrix_labels(page)
+        located = {'labels': local_regions, 'warning': None} if local_regions else parse(client.responses.create(model=model, store=False,
             input=[{'role':'user','content':[
                 {'type':'input_text','text':'Individua OGNI etichetta fisica adesiva di prodotto ortopedico, inclusi bordi e etichette verticali. Non leggere i dati. Restituisci rettangoli stretti non sovrapposti in coordinate della immagine originale da 0 a 1000 [sinistra,alto,destra,basso]. Una etichetta per rettangolo, non una colonna. rotation è la rotazione antioraria necessaria a leggere quel singolo ritaglio. Non includere intestazione, firma, celle vuote. Segnala parti non localizzabili.'},
                 {'type':'input_image','image_url':image_url(preview),'detail':'high'}]}],
@@ -357,7 +364,8 @@ def analyze_labels(path, client, model, item_schema, parse):
                 # Preserve failed observations; never silently reduce label count.
                 row = {key:None for key in item_schema['properties']}
                 row.update(quantity=1, confidence=0, warning=f'Lettura fallita ({type(exc).__name__}): verificare manualmente',reviewed=False)
-            row.update(label_id=label_id,page=number,bbox=region['bbox'],rotation=region['rotation'],crop_data_url=image_url(crop),source_document=digest)
+            row.update(label_id=label_id,page=number,bbox=region['bbox'],rotation=region['rotation'],crop_data_url=image_url(crop),source_document=digest,
+                       geometry_source=region.get('geometry_source','ai_proposal'),finder_bbox=region.get('finder_bbox'))
             items.append(row)
     metadata = {k: None for k in ('clinic_name', 'clinical_record', 'procedure_date', 'surgeon')}
     header_preview = pages[0].copy()
