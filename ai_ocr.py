@@ -121,8 +121,8 @@ def _prepare_scarico_images(path):
     if p.suffix.lower() == ".pdf":
         import fitz
         pdf = fitz.open(str(p))
-        if len(pdf) > 12:
-            raise ValueError("PDF troppo lungo: suddividere il documento in gruppi da 12 pagine.")
+        if len(pdf) > 4:
+            raise ValueError("PDF troppo lungo: suddividere il documento in gruppi da 4 pagine.")
         pages = [Image.open(BytesIO(pg.get_pixmap(matrix=fitz.Matrix(2.5, 2.5), alpha=False).tobytes("png"))).convert("RGB") for pg in pdf]
         pdf.close()
     else:
