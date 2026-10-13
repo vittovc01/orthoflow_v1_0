@@ -483,7 +483,7 @@ if is_physical_ai:
             left, right = st.columns([2, 3])
             if r.get("crop_data_url"):
                 left.image(r["crop_data_url"], use_container_width=True)
-            right.write({k:r.get(k) for k in ("codice", "lotto", "scadenza", "descrizione", "produttore", "gtin")})
+            right.write({k:r.get(k) for k in ("codice", "lotto", "scadenza", "scadenza_originale", "descrizione", "produttore", "gtin")})
             right.caption(f"Pagina {r.get('page')} · posizione {r.get('bbox')} · rotazione {r.get('rotation')}°")
             if r.get("warning"):
                 right.warning(r["warning"])
@@ -757,7 +757,9 @@ if confirm:
             "bbox": originals.get(r.get("label_id"), {}).get("bbox"),
             "rotation": originals.get(r.get("label_id"), {}).get("rotation"),
             "codice": clean(r.get("codice")), "lotto": clean(r.get("lotto")),
-            "scadenza": clean(r.get("scadenza")), "verificata": bool(r.get("verificata")),
+            "scadenza": clean(r.get("scadenza")),
+            "scadenza_originale": originals.get(r.get("label_id"), {}).get("scadenza_originale"),
+            "verificata": bool(r.get("verificata")),
             "esclusa": bool(r.get("escludi_riga")) or is_other_manufacturer(r.get("produttore")),
         } for r in final_rows]
     try:

@@ -77,9 +77,11 @@ The new strict path blocks these records until inventory is independently reconc
   missing count/review, inventory identity/expiry, failed reads and 16 crop regressions.
 - Each fixture's GS1 lot/expiry is independently checked against printed reference
   values; original and 180-degree crop variants decode identically.
-- Wider Python smoke/API/access/deployment/document suites run separately.
+- 110 Python tests pass across dedicated OCR and smoke/API/access/deployment/document suites, plus the standalone scarico form regression.
+- Real Streamlit AppTest confirms that submitting a preloaded AI label with unchecked physical count/individual review cannot issue a write.
 - Dependency check exposed an existing multidict 7/aiohttp incompatibility; both
   lockfiles now use multidict 6.6.4.
+- Isolated PostgreSQL CI passed the new verified-label RPC tests and all existing stock/price tests, including backup restore. The movement trigger sentinel is preserved to prevent a second debit.
 - No OpenAI key is present in this execution environment. Live localization and REF
   OCR on the whole original PDF have NOT been proven. Geometry detection remains
   probabilistic and requires the operator count check. No autonomous count is trusted.
