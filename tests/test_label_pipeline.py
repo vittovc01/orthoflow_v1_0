@@ -10,6 +10,16 @@ from label_pipeline import (aggregate_labels, unique_regions, review_errors,
     compare_reads, prepare_crop, local_ref_evidence, verify_ref_evidence)
 
 
+@pytest.mark.parametrize('size', [(538,183), (539,184), (540,185)])
+def test_resampled_philos_symbol_preserves_exact_gs1_date(size):
+    path = Path(__file__).parent / 'fixtures' / 'santa_lucia' / '04.png'
+    with Image.open(path) as image:
+        decoded = decode_barcodes(image.resize(size, Image.Resampling.LANCZOS))
+    assert len(decoded) == 1
+    assert decoded[0]['lot'] == '78864P9'
+    assert decoded[0]['expiry'] == '2035-09-01'
+
+
 @pytest.mark.parametrize('code', ['402.886', '402.8865', '04.211.018', '04.211.0185'])
 def test_sterile_ref_suffix_is_not_invented(code):
     result = verify_ref_evidence(dict(code=code, is_sterile=True),

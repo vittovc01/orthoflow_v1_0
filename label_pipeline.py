@@ -13,7 +13,7 @@ from pathlib import Path
 
 from PIL import Image, ImageOps, ImageFilter
 
-PIPELINE_VERSION = 'physical-label-v6-adaptive-geometry'
+PIPELINE_VERSION = 'physical-label-v7-gs1-resampling'
 
 
 def local_ref_evidence(image):
@@ -193,9 +193,13 @@ def decode_barcodes(image):
     # Retry conservative threshold/scale variants; retain every distinct payload.
     variants = [image]
     gray = image.convert('L')
-    variants += [gray.point(lambda p: 255 if p > t else 0) for t in (80, 120, 160)]
-    small = gray.resize((max(1, int(gray.width*.75)), max(1, int(gray.height*.75))))
+    variants += [gray.point(lambda p: 255 if p > t else 0) for t in (60, 80, 120, 160)]
+    small = gray.resize((max(1, round(gray.width*.75)), max(1, round(gray.height*.75))), Image.Resampling.LANCZOS)
     variants.append(small.point(lambda p: 255 if p > 80 else 0))
+    # Resampling must be explicit: default interpolation can destroy a finder
+    # whose module boundary falls between pixels. Never invent a payload.
+    if max(gray.size) < 1200:
+        variants.append(gray.resize(tuple(round(v*1.5) for v in gray.size), Image.Resampling.NEAREST))
     seen = set()
     for variant in variants:
         for barcode in zxingcpp.read_barcodes(variant):
