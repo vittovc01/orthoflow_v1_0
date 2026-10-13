@@ -53,6 +53,10 @@ if st.button('Analizza senza scaricare', disabled=upload is None):
             os.unlink(path)
 
 result = st.session_state.get('ocr_acceptance_result')
+if result and result.get('pipeline_version') != PIPELINE_VERSION:
+    st.session_state.pop('ocr_acceptance_result',None)
+    st.info('Pipeline aggiornata: riesegui il collaudo sulla foto caricata.')
+    result = None
 if result:
     st.caption('Modello utilizzato: ' + st.session_state['ocr_acceptance_model'])
     st.metric('Etichette individuate', len(result['items']))
