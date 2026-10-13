@@ -103,6 +103,8 @@ operations_page = page(
     url_path="gestionale",
 )
 
+ocr_validation_page = page("pages/15_OCR_Collaudo.py", title="Collaudo OCR", icon="🔬", url_path="ocr-collaudo")
+
 if not logged_in:
     nav = st.navigation([login_page], position="hidden")
 else:
@@ -120,7 +122,7 @@ else:
     elif "CORRIERE" in permissions:
         pages["CORRIERI"] = [courier_page]
     if is_director:
-        pages["DIREZIONE"] = [operations_page, price_anomalies_page, users_page, courier_data_page]
+        pages["DIREZIONE"] = [operations_page, price_anomalies_page, users_page, courier_data_page, ocr_validation_page]
     elif 'AMMINISTRAZIONE' in permissions:
         pages['AMMINISTRAZIONE'].append(operations_page)
     elif 'LOGISTICA' in permissions:
