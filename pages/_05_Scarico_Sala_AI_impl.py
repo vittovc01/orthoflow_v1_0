@@ -607,6 +607,16 @@ if confirm:
         st.error("Nessuna riga valida: servono codice e quantità > 0; il lotto è richiesto salvo materiale confermato non sterile senza lotto.")
         st.stop()
 
+    # Do not silently accept OCR-transcribed identifiers absent from inventory.
+    # Inventory availability is checked separately below; this check is about identity.
+    uncertain = []
+    for r, code, lot, qty in valid_rows:
+        if float(r.get("confidence") or 0) < 0.85 or clean(r.get("warning")):
+            uncertain.append(f"{code} / {lot}: lettura OCR incerta")
+    if uncertain:
+        st.error("Rilevate etichette con lettura incerta. Correggi codice e lotto confrontandoli con l'originale e ripeti l'analisi prima di confermare: " + "; ".join(uncertain))
+        st.stop()
+
     # UX pre-flight: raggruppa duplicati. La RPC ripete il controllo con lock DB ed è quella autoritativa.
     requested = {}
     for r, code, lot, qty in valid_rows:
