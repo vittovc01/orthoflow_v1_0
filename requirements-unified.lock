@@ -30,7 +30,7 @@ itsdangerous==2.2.0
 jiter==0.17.0
 jsonschema-specifications==2025.9.1
 jsonschema==4.26.0
-multidict==7.0.0
+multidict==6.6.4
 narwhals==2.26.0
 numpy==2.5.3
 openai==3.24.0
@@ -82,3 +82,6 @@ xlsxwriter==3.2.9
 yarl==1.25.1
 
 streamlit-pdf==2.1.0
+
+PyMuPDF==1.26.4
+zxing-cpp==2.3.0

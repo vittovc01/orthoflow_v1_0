@@ -6,6 +6,8 @@ from datetime import date, datetime
 from pathlib import Path
 from functools import lru_cache
 
+from label_pipeline import review_errors, inventory_errors, aggregate_labels
+
 import pandas as pd
 import streamlit as st
 from orthoflow_branding import configure_page
@@ -339,6 +341,7 @@ def run_ai(path, documents=None):
                 for field, value in incoming.items():
                     if field != "items" and not meta.get(field) and value:
                         meta[field] = value
+        meta["physical_label_count"] = len(combined_rows)
         meta["items"] = combined_rows
         st.session_state["scarico_ai_rows"] = combined_rows
         st.session_state["scarico_documents"] = documents
@@ -347,6 +350,7 @@ def run_ai(path, documents=None):
         st.session_state["scarico_file_path"] = path
         st.session_state["scarico_file_name"] = Path(path).name
         st.session_state["scarico_source"] = "AI"
+        st.session_state.pop("scarico_verified", None)
         st.session_state.pop("scarico_missing_prices", None)
         st.session_state.pop("scarico_stock_errors", None)
         st.success(f"AI completata: {len(st.session_state['scarico_ai_rows'])} righe rilevate.")
@@ -463,6 +467,27 @@ if excluded_indices:
 excluded_rows = [r for i, r in enumerate(source_rows) if i in excluded_indices and i not in restored_indices]
 rows = [{**r, "jnj_verificato_manualmente": i in restored_indices}
         for i, r in enumerate(source_rows) if i not in excluded_indices or i in restored_indices]
+is_physical_ai = st.session_state.get("scarico_source") == "AI"
+if is_physical_ai:
+    # Every detected observation remains reviewable, including other manufacturers.
+    rows = [{**r, "escludi_riga": is_other_manufacturer(r.get("produttore"))}
+            for r in source_rows]
+    excluded_rows = []
+    st.subheader("Verifica delle etichette fisiche")
+    cols = st.columns(3)
+    cols[0].metric("Etichette individuate", len(source_rows))
+    cols[1].metric("Articoli distinti (REF / lotto / scadenza)", len({(r.get("codice"), r.get("lotto"), r.get("scadenza")) for r in source_rows}))
+    cols[2].metric("Pezzi individuati", len(source_rows))
+    for r in source_rows:
+        with st.expander(f"{r.get('label_id')} · {clean(r.get('codice'))} · {clean(r.get('lotto'))}"):
+            left, right = st.columns([2, 3])
+            if r.get("crop_data_url"):
+                left.image(r["crop_data_url"], use_container_width=True)
+            right.write({k:r.get(k) for k in ("codice", "lotto", "scadenza", "descrizione", "produttore", "gtin")})
+            right.caption(f"Pagina {r.get('page')} · posizione {r.get('bbox')} · rotazione {r.get('rotation')}°")
+            if r.get("warning"):
+                right.warning(r["warning"])
+    st.info("Confronta ogni ritaglio con la pagina originale. Se manca un'etichetta, interrompi la conferma e ricarica una foto separata più nitida. Non confermare un conteggio incompleto.")
 clients = client_options()
 ai_clinic = clean(meta.get("clinic_name"))
 if clients:
@@ -492,7 +517,8 @@ with st.form("scarico_ai_confirm"):
         st.caption("Tocca una cella per correggere codice, lotto, scadenza o quantità. Per materiale non sterile senza lotto spunta Non sterile / senza lotto. Spunta Escludi riga per non inserirla nello scarico. Le modifiche vengono applicate alla conferma.")
         df_rows = pd.DataFrame(rows)
         preferred = ["codice", "senza_lotto", "jnj_verificato_manualmente", "escludi_riga", "descrizione", "lotto", "scadenza", "quantita", "produttore", "confidence", "warning"]
-        df_rows["escludi_riga"] = False
+        if "escludi_riga" not in df_rows:
+            df_rows["escludi_riga"] = False
         df_rows["senza_lotto"] = df_rows.get("senza_lotto", pd.Series(False, index=df_rows.index)).fillna(False).astype(bool)
         for col in preferred:
             if col not in df_rows.columns:
@@ -503,10 +529,14 @@ with st.form("scarico_ai_confirm"):
             df_rows["conto_deposito_struttura"] = df_rows["conto_deposito_struttura"].fillna(False).astype(bool)
             preferred.insert(1, "conto_deposito_struttura")
             st.info("Malzoni: spunta il materiale della struttura Smart Track. Prezzi, fatturato e ordini restano inclusi; queste righe non scaricano la vostra giacenza.")
+        if is_physical_ai:
+            preferred = ["label_id", "verificata"] + preferred
         edited = st.data_editor(
-            df_rows[preferred], num_rows="dynamic", use_container_width=True,
+            df_rows[preferred], num_rows="fixed" if is_physical_ai else "dynamic", use_container_width=True,
+            disabled=["label_id", "confidence", "warning"] if is_physical_ai else [],
             height=min(1600, max(220, 35 * (len(df_rows) + 3))), row_height=35,
             column_config={
+                "verificata": st.column_config.CheckboxColumn("Etichetta verificata", default=False, help="Confronta REF, lotto, scadenza e quantità con il singolo ritaglio e correggi prima di spuntare."),
                 "jnj_verificato_manualmente": None,
                 "escludi_riga": st.column_config.CheckboxColumn(
                     "Escludi riga", default=False,
@@ -569,6 +599,8 @@ with st.form("scarico_ai_confirm"):
         mag = wh.split(" - ")[0]
         agent = st.selectbox("Agente", agents) if agents and agents != [""] else st.text_input("Agente")
 
+    expected_label_count = st.number_input("Numero di etichette contate sul documento originale", min_value=0, step=1, value=0, key=f"physical_count_{st.session_state.get('scarico_editor_revision', 0)}") if is_physical_ai else 0
+    count_verified = st.checkbox("Ho confrontato tutti i ritagli con il documento originale e verificato il conteggio fisico.", value=False, key=f"physical_verified_{st.session_state.get('scarico_editor_revision', 0)}") if is_physical_ai else True
     verified = st.checkbox("Ho verificato codice Johnson/REF, lotto, scadenza e quantità di tutte le righe.")
     confirm = st.form_submit_button("📤 Crea intervento e scarica materiali", type="primary", use_container_width=True, disabled=(len(rows) == 0))
 
@@ -577,6 +609,11 @@ if confirm:
         st.error("Conferma di aver verificato i materiali prima di creare l’intervento.")
         st.stop()
     final_rows = edited.to_dict("records") if rows else []
+    if is_physical_ai:
+        errors = review_errors(final_rows, [r.get("label_id") for r in source_rows], expected_label_count, count_verified)
+        if errors:
+            st.error("Conferma bloccata: " + "; ".join(errors))
+            st.stop()
     valid_rows = []
     invalid_lots = []
     for r in final_rows:
@@ -607,6 +644,26 @@ if confirm:
         st.error("Nessuna riga valida: servono codice e quantità > 0; il lotto è richiesto salvo materiale confermato non sterile senza lotto.")
         st.stop()
 
+    if is_physical_ai:
+        checked_rows = [r for r, _, _, _ in valid_rows
+                        if not (is_malzoni and bool(r.get("conto_deposito_struttura", False)))]
+        try:
+            stock, offset = [], 0
+            while True:
+                batch = (sb().table("giacenze").select("codice,lotto,scadenza,quantita")
+                    .eq("codice_magazzino", mag).eq("origine", "CONTO DEPOSITO")
+                    .order("id").range(offset, offset + 499).execute().data or [])
+                stock.extend(batch)
+                if len(batch) < 500:
+                    break
+                offset += 500
+            identity_errors = inventory_errors(checked_rows, stock)
+        except Exception:
+            identity_errors = ["Magazzino non verificabile: riprovare prima di confermare"]
+        if identity_errors:
+            st.error("Conferma bloccata: " + "; ".join(identity_errors))
+            st.stop()
+
     # UX pre-flight: raggruppa duplicati. La RPC ripete il controllo con lock DB ed è quella autoritativa.
     requested = {}
     for r, code, lot, qty in valid_rows:
@@ -622,9 +679,14 @@ if confirm:
             shortages.append({"Codice": sample_code, "Lotto": lot, "Disponibile": avail, "Richiesto": qty, "Magazzino": mag})
     if shortages:
         st.session_state["scarico_stock_errors"] = shortages
+        st.error("Scarico bloccato: quantità insufficienti. Nessun dato è stato salvato.")
+        st.stop()
     else:
         st.session_state.pop("scarico_stock_errors", None)
 
+    if is_physical_ai:
+        grouped = aggregate_labels([r for r, _, _, _ in valid_rows])
+        valid_rows = [(r, clean(r.get("codice")), clean(r.get("lotto")), float(r["quantita"])) for r in grouped]
     customer_code = clean(selected_client.get("codice_cliente"))
     priced_rows = []
     missing = []
@@ -656,6 +718,8 @@ if confirm:
         manufacturer = clean(r.get("produttore"))
         validation = "J&J verificato manualmente" if r.get("jnj_verificato_manualmente", False) else "Validato J&J" if any(x in manufacturer.upper() for x in ["JOHNSON", "J&J", "DEPUY", "SYNTHES"]) else ("Marchio non letto" if not manufacturer else "Prodotto non J&J")
         rpc_rows.append({
+            "label_ids": r.get("label_ids", []),
+            "verificata": bool(r.get("verificata", False)),
             "codice": code,
             "descrizione": clean(r.get("descrizione")),
             "lotto": lot,
@@ -681,8 +745,12 @@ if confirm:
         "magazzino_scarico": mag,
     }
 
+    if is_physical_ai:
+        header["physical_label_count"] = len(source_rows)
+        header["count_verified"] = bool(count_verified)
+        header["included_label_ids"] = [i for r in rpc_rows for i in r["label_ids"]]
     try:
-        result = sb().rpc("crea_intervento_scarico_ai_flessibile", {
+        result = sb().rpc("crea_intervento_scarico_ai_verificato" if is_physical_ai else "crea_intervento_scarico_ai_flessibile", {
             "p_header": header,
             "p_rows": rpc_rows,
             "p_utente": user(),

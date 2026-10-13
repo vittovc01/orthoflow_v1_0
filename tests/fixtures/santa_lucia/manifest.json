@@ -1,0 +1,456 @@
+{
+  "source_sha256": "3471e3ebd4178b08c55ee97d30ab3527cf21d63d6f08478e63cf546bfc564805",
+  "source_rotation": 180,
+  "labels": [
+    {
+      "label_id": "santa:1",
+      "bbox_upright": [
+        78,
+        297,
+        386,
+        366
+      ],
+      "rotation": 0,
+      "code": "07.720.051S",
+      "barcodes": [
+        {
+          "raw": "010761181946184020151729120110502L306",
+          "format": "BarcodeFormat.DataMatrix",
+          "gtin": "07611819461840",
+          "lot": "502L306",
+          "expiry": "2029-12-01",
+          "ais": {
+            "01": "07611819461840",
+            "20": "15",
+            "17": "291201",
+            "10": "502L306"
+          }
+        }
+      ],
+      "lot": "502L306",
+      "expiry": "2029-12-01",
+      "verification": "Visual comparison of printed REF, LOT, expiry on high-resolution source crop; GS1 independently compared when decoded."
+    },
+    {
+      "label_id": "santa:2",
+      "bbox_upright": [
+        392,
+        298,
+        694,
+        371
+      ],
+      "rotation": 0,
+      "code": "07.720.047S",
+      "barcodes": [],
+      "lot": "460L593",
+      "expiry": "2030-09-01",
+      "verification": "Visual comparison of printed REF, LOT, expiry on high-resolution source crop; GS1 independently compared when decoded."
+    },
+    {
+      "label_id": "santa:3",
+      "bbox_upright": [
+        81,
+        367,
+        375,
+        438
+      ],
+      "rotation": 0,
+      "code": "07.720.045S",
+      "barcodes": [
+        {
+          "raw": "010761181946181920151730070110502L109",
+          "format": "BarcodeFormat.DataMatrix",
+          "gtin": "07611819461819",
+          "lot": "502L109",
+          "expiry": "2030-07-01",
+          "ais": {
+            "01": "07611819461819",
+            "20": "15",
+            "17": "300701",
+            "10": "502L109"
+          }
+        }
+      ],
+      "lot": "502L109",
+      "expiry": "2030-07-01",
+      "verification": "Visual comparison of printed REF, LOT, expiry on high-resolution source crop; GS1 independently compared when decoded."
+    },
+    {
+      "label_id": "santa:4",
+      "bbox_upright": [
+        389,
+        386,
+        684,
+        454
+      ],
+      "rotation": 0,
+      "code": "441.903S",
+      "barcodes": [
+        {
+          "raw": "01076118197977962015173509011078864P9",
+          "format": "BarcodeFormat.DataMatrix",
+          "gtin": "07611819797796",
+          "lot": "78864P9",
+          "expiry": "2035-09-01",
+          "ais": {
+            "01": "07611819797796",
+            "20": "15",
+            "17": "350901",
+            "10": "78864P9"
+          }
+        }
+      ],
+      "lot": "78864P9",
+      "expiry": "2035-09-01",
+      "verification": "Visual comparison of printed REF, LOT, expiry on high-resolution source crop; GS1 independently compared when decoded."
+    },
+    {
+      "label_id": "santa:5",
+      "bbox_upright": [
+        75,
+        435,
+        371,
+        503
+      ],
+      "rotation": 0,
+      "code": "292.720S",
+      "barcodes": [
+        {
+          "raw": "010761181973317620151736030110477L650",
+          "format": "BarcodeFormat.DataMatrix",
+          "gtin": "07611819733176",
+          "lot": "477L650",
+          "expiry": "2036-03-01",
+          "ais": {
+            "01": "07611819733176",
+            "20": "15",
+            "17": "360301",
+            "10": "477L650"
+          }
+        }
+      ],
+      "lot": "477L650",
+      "expiry": "2036-03-01",
+      "verification": "Visual comparison of printed REF, LOT, expiry on high-resolution source crop; GS1 independently compared when decoded."
+    },
+    {
+      "label_id": "santa:6",
+      "bbox_upright": [
+        386,
+        459,
+        688,
+        530
+      ],
+      "rotation": 0,
+      "code": "292.720S",
+      "barcodes": [
+        {
+          "raw": "010761181973317620151736030110477L650",
+          "format": "BarcodeFormat.DataMatrix",
+          "gtin": "07611819733176",
+          "lot": "477L650",
+          "expiry": "2036-03-01",
+          "ais": {
+            "01": "07611819733176",
+            "20": "15",
+            "17": "360301",
+            "10": "477L650"
+          }
+        }
+      ],
+      "lot": "477L650",
+      "expiry": "2036-03-01",
+      "verification": "Visual comparison of printed REF, LOT, expiry on high-resolution source crop; GS1 independently compared when decoded."
+    },
+    {
+      "label_id": "santa:7",
+      "bbox_upright": [
+        69,
+        523,
+        365,
+        600
+      ],
+      "rotation": 0,
+      "code": "413.040S",
+      "barcodes": [
+        {
+          "raw": "010761181926862320151736060110301931P",
+          "format": "BarcodeFormat.DataMatrix",
+          "gtin": "07611819268623",
+          "lot": "301931P",
+          "expiry": "2036-06-01",
+          "ais": {
+            "01": "07611819268623",
+            "20": "15",
+            "17": "360601",
+            "10": "301931P"
+          }
+        }
+      ],
+      "lot": "301931P",
+      "expiry": "2036-06-01",
+      "verification": "Visual comparison of printed REF, LOT, expiry on high-resolution source crop; GS1 independently compared when decoded."
+    },
+    {
+      "label_id": "santa:8",
+      "bbox_upright": [
+        381,
+        534,
+        680,
+        606
+      ],
+      "rotation": 0,
+      "code": "413.040S",
+      "barcodes": [
+        {
+          "raw": "01076118192686232015173504011062405P5",
+          "format": "BarcodeFormat.DataMatrix",
+          "gtin": "07611819268623",
+          "lot": "62405P5",
+          "expiry": "2035-04-01",
+          "ais": {
+            "01": "07611819268623",
+            "20": "15",
+            "17": "350401",
+            "10": "62405P5"
+          }
+        }
+      ],
+      "lot": "62405P5",
+      "expiry": "2035-04-01",
+      "verification": "Visual comparison of printed REF, LOT, expiry on high-resolution source crop; GS1 independently compared when decoded."
+    },
+    {
+      "label_id": "santa:9",
+      "bbox_upright": [
+        62,
+        603,
+        356,
+        681
+      ],
+      "rotation": 0,
+      "code": "413.048S",
+      "barcodes": [
+        {
+          "raw": "0107611819757844201517340101109133P02",
+          "format": "BarcodeFormat.DataMatrix",
+          "gtin": "07611819757844",
+          "lot": "9133P02",
+          "expiry": "2034-01-01",
+          "ais": {
+            "01": "07611819757844",
+            "20": "15",
+            "17": "340101",
+            "10": "9133P02"
+          }
+        }
+      ],
+      "lot": "9133P02",
+      "expiry": "2034-01-01",
+      "verification": "Visual comparison of printed REF, LOT, expiry on high-resolution source crop; GS1 independently compared when decoded."
+    },
+    {
+      "label_id": "santa:10",
+      "bbox_upright": [
+        373,
+        606,
+        672,
+        689
+      ],
+      "rotation": 0,
+      "code": "04.200.026S",
+      "barcodes": [
+        {
+          "raw": "010761181930560120151734110110354L297",
+          "format": "BarcodeFormat.DataMatrix",
+          "gtin": "07611819305601",
+          "lot": "354L297",
+          "expiry": "2034-11-01",
+          "ais": {
+            "01": "07611819305601",
+            "20": "15",
+            "17": "341101",
+            "10": "354L297"
+          }
+        }
+      ],
+      "lot": "354L297",
+      "expiry": "2034-11-01",
+      "verification": "Visual comparison of printed REF, LOT, expiry on high-resolution source crop; GS1 independently compared when decoded."
+    },
+    {
+      "label_id": "santa:11",
+      "bbox_upright": [
+        50,
+        681,
+        347,
+        747
+      ],
+      "rotation": 0,
+      "code": "413.040S",
+      "barcodes": [
+        {
+          "raw": "01076118192686232015173505011066475P9",
+          "format": "BarcodeFormat.DataMatrix",
+          "gtin": "07611819268623",
+          "lot": "66475P9",
+          "expiry": "2035-05-01",
+          "ais": {
+            "01": "07611819268623",
+            "20": "15",
+            "17": "350501",
+            "10": "66475P9"
+          }
+        }
+      ],
+      "lot": "66475P9",
+      "expiry": "2035-05-01",
+      "verification": "Visual comparison of printed REF, LOT, expiry on high-resolution source crop; GS1 independently compared when decoded."
+    },
+    {
+      "label_id": "santa:12",
+      "bbox_upright": [
+        362,
+        682,
+        667,
+        761
+      ],
+      "rotation": 0,
+      "code": "413.028S",
+      "barcodes": [
+        {
+          "raw": "01076118192686782015173504011061172P8",
+          "format": "BarcodeFormat.DataMatrix",
+          "gtin": "07611819268678",
+          "lot": "61172P8",
+          "expiry": "2035-04-01",
+          "ais": {
+            "01": "07611819268678",
+            "20": "15",
+            "17": "350401",
+            "10": "61172P8"
+          }
+        }
+      ],
+      "lot": "61172P8",
+      "expiry": "2035-04-01",
+      "verification": "Visual comparison of printed REF, LOT, expiry on high-resolution source crop; GS1 independently compared when decoded."
+    },
+    {
+      "label_id": "santa:13",
+      "bbox_upright": [
+        700,
+        296,
+        786,
+        505
+      ],
+      "rotation": 90,
+      "code": "413.050S",
+      "barcodes": [
+        {
+          "raw": "01076118192686472015173411011040045P6",
+          "format": "BarcodeFormat.DataMatrix",
+          "gtin": "07611819268647",
+          "lot": "40045P6",
+          "expiry": "2034-11-01",
+          "ais": {
+            "01": "07611819268647",
+            "20": "15",
+            "17": "341101",
+            "10": "40045P6"
+          }
+        }
+      ],
+      "lot": "40045P6",
+      "expiry": "2034-11-01",
+      "verification": "Visual comparison of printed REF, LOT, expiry on high-resolution source crop; GS1 independently compared when decoded."
+    },
+    {
+      "label_id": "santa:14",
+      "bbox_upright": [
+        793,
+        298,
+        913,
+        511
+      ],
+      "rotation": 90,
+      "code": "413.026S",
+      "barcodes": [
+        {
+          "raw": "0107611819268593201517330701106889P71",
+          "format": "BarcodeFormat.DataMatrix",
+          "gtin": "07611819268593",
+          "lot": "6889P71",
+          "expiry": "2033-07-01",
+          "ais": {
+            "01": "07611819268593",
+            "20": "15",
+            "17": "330701",
+            "10": "6889P71"
+          }
+        }
+      ],
+      "lot": "6889P71",
+      "expiry": "2033-07-01",
+      "verification": "Visual comparison of printed REF, LOT, expiry on high-resolution source crop; GS1 independently compared when decoded."
+    },
+    {
+      "label_id": "santa:15",
+      "bbox_upright": [
+        714,
+        519,
+        805,
+        721
+      ],
+      "rotation": 90,
+      "code": "413.035S",
+      "barcodes": [
+        {
+          "raw": "01076118192686162015173601011095663P8",
+          "format": "BarcodeFormat.DataMatrix",
+          "gtin": "07611819268616",
+          "lot": "95663P8",
+          "expiry": "2036-01-01",
+          "ais": {
+            "01": "07611819268616",
+            "20": "15",
+            "17": "360101",
+            "10": "95663P8"
+          }
+        }
+      ],
+      "lot": "95663P8",
+      "expiry": "2036-01-01",
+      "verification": "Visual comparison of printed REF, LOT, expiry on high-resolution source crop; GS1 independently compared when decoded."
+    },
+    {
+      "label_id": "santa:16",
+      "bbox_upright": [
+        830,
+        520,
+        942,
+        727
+      ],
+      "rotation": 90,
+      "code": "413.026S",
+      "barcodes": [
+        {
+          "raw": "010761181926859320151736060110281402P",
+          "format": "BarcodeFormat.DataMatrix",
+          "gtin": "07611819268593",
+          "lot": "281402P",
+          "expiry": "2036-06-01",
+          "ais": {
+            "01": "07611819268593",
+            "20": "15",
+            "17": "360601",
+            "10": "281402P"
+          }
+        }
+      ],
+      "lot": "281402P",
+      "expiry": "2036-06-01",
+      "verification": "Visual comparison of printed REF, LOT, expiry on high-resolution source crop; GS1 independently compared when decoded."
+    }
+  ]
+}
