@@ -109,6 +109,42 @@ def _track_usage(response, mode, model, suffix):
     except Exception:
         pass
 
+def _prepare_scarico_images(path):
+    """Render scanned pages upright and divide into left/right label columns.
+
+    Each crop retains a whole column, avoiding cross-column code/lot mixing.
+    The original document remains available for manual review.
+    """
+    from io import BytesIO
+    from PIL import Image, ImageOps
+    p = Path(path)
+    if p.suffix.lower() == ".pdf":
+        import fitz
+        pdf = fitz.open(str(p))
+        if len(pdf) > 12:
+            raise ValueError("PDF troppo lungo: suddividere il documento in gruppi da 12 pagine.")
+        pages = [Image.open(BytesIO(pg.get_pixmap(matrix=fitz.Matrix(2.5, 2.5), alpha=False).tobytes("png"))).convert("RGB") for pg in pdf]
+        pdf.close()
+    else:
+        pages = [Image.open(p).convert("RGB")]
+    images = []
+    for page in pages:
+        page = ImageOps.exif_transpose(page)
+        # For scanned labels, orientation cannot be inferred reliably from EXIF.
+        # Pass both orientations to the vision model; it must select the readable one.
+        for orientation in (page, page.rotate(180)):
+            w, h = orientation.size
+            # Include overlap to avoid clipping label edges at the central divider.
+            for left, right in ((0, int(w * 0.54)), (int(w * 0.46), w)):
+                crop = orientation.crop((left, 0, right, h))
+                if max(crop.size) > 3200:
+                    crop.thumbnail((3200, 3200))
+                buf = BytesIO()
+                crop.save(buf, format="JPEG", quality=88)
+                images.append("data:image/jpeg;base64," + base64.b64encode(buf.getvalue()).decode("ascii"))
+    return images
+
+
 def analyze_document(path: str, mode: str="scarico_sala") -> Dict[str,Any]:
     status=ai_status()
     if not status["enabled"]: raise RuntimeError("AI OCR non abilitato. Configura OPENAI_API_KEY e ENABLE_AI_OCR=true nei Secrets.")
@@ -116,14 +152,15 @@ def analyze_document(path: str, mode: str="scarico_sala") -> Dict[str,Any]:
     if not p.exists(): raise FileNotFoundError(f"Documento non trovato: {path}")
     if p.suffix.lower() not in SUPPORTED_DOCUMENT_EXT: raise ValueError("Formato non supportato. Usa PDF, JPG, JPEG, PNG o WEBP.")
     client=OpenAI(api_key=_secret("OPENAI_API_KEY")); schema=DDT_SCHEMA if mode=="ddt" else SCARICO_SALA_SCHEMA
-    if p.suffix.lower()==".pdf":
+    if mode == "scarico_sala":
+        crops = _prepare_scarico_images(path)
+        content = [{"type": "input_text", "text": "Le immagini rappresentano le stesse pagine in orientamenti alternativi e colonne sovrapposte. Scegli il verso leggibile; NON contare due volte etichette duplicate tra immagini. Leggi ogni REF e lotto dalla stessa etichetta."}]
+        content.extend({"type": "input_image", "image_url": crop, "detail": "high"} for crop in crops)
+    elif p.suffix.lower()==".pdf":
         pdf_b64=base64.b64encode(p.read_bytes()).decode("utf-8")
-        content=[
-            {"type":"input_text","text":"Analizza tutte le pagine del PDF. Restituisci esclusivamente i dati conformi allo schema strutturato."},
-            {"type":"input_file","filename":p.name,"file_data":f"data:application/pdf;base64,{pdf_b64}","detail":"high"}
-        ]
+        content=[{"type":"input_text","text":"Analizza tutte le pagine del PDF."},{"type":"input_file","filename":p.name,"file_data":f"data:application/pdf;base64,{pdf_b64}"}]
     else:
-        content=[{"type":"input_text","text":"Analizza il documento. Restituisci esclusivamente i dati conformi allo schema strutturato."},{"type":"input_image","image_url":image_to_data_url(path),"detail":"high"}]
+        content=[{"type":"input_text","text":"Analizza il documento."},{"type":"input_image","image_url":image_to_data_url(path),"detail":"high"}]
     response=client.responses.create(model=status["model"],store=False,input=[{"role":"system","content":_instructions(mode)},{"role":"user","content":content}],text={"format":_responses_json_schema_format(schema)})
     result=_parse_response(response)
     _track_usage(response,mode,status["model"],p.suffix.lower())
