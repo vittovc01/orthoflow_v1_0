@@ -56,6 +56,30 @@ def _instructions(mode):
         return """Sei il modulo documentale di OrthoFlow Control Tower per DDT Johnson & Johnson / DePuy Synthes. Analizza TUTTO il documento e TUTTE le pagine. Estrai numero e data DDT, cliente, destinazione, causale e ogni riga EFFETTIVAMENTE SPEDITA con REF/codice Johnson, lotto, scadenza, descrizione e quantità spedita. Il REF deve essere identico allo stampato: punti, zeri e S finale sono significativi. 413.050S è diverso da 413.050. IMPORTANTE: separa le righe NON SPEDITE/back order/prodotto non spedito in back_orders; non inserirle mai in items. Per ogni back order estrai REF/codice, descrizione e quantità ordinata/non spedita quando leggibile; lotto e scadenza possono essere null. Per le righe spedite leggi SEMPRE la scadenza stampata sul DDT quando presente, inclusi formati MM/YY, MM/YYYY, DD/MM/YY e DD/MM/YYYY. Non inventare valori; se incerto usa null/warning."""
     return """Sei il modulo documentale di OrthoFlow Control Tower per scarichi di sala ortopedica. Analizza tutto il documento/immagine. Estrai struttura, cartella clinica, data, chirurgo e per ogni etichetta/materiale REF esatto, lotto, scadenza, descrizione, quantità e produttore. IMPORTANTE: restituisci una voce distinta in items per OGNI etichetta fisica visibile, anche se due etichette hanno lo stesso REF e lo stesso lotto. Non deduplicare e non accorpare le etichette ripetute: due etichette identiche di due pezzi richiedono due voci con quantity=1, salvo quantità diversa esplicitamente stampata. Prima di terminare, ricontrolla l'immagine riga per riga e colonna per colonna, comprese le etichette ai bordi e in basso, e confronta il numero delle etichette fisiche con le voci estratte. Se un'etichetta è parzialmente illeggibile, includila comunque con i campi incerti a null e un warning; non inventare i valori e non ometterla. Leggi misure e descrizioni direttamente dall'etichetta, senza copiarle da altre etichette simili. manufacturer deve contenere solo il nome del produttore/marchio leggibile, ad esempio Synthes GmbH, DePuy Synthes o Johnson & Johnson. Ti Al6 Nb7, Ti6Al4V, titanio e acciaio sono MATERIALI, mai produttori. Se il produttore non è leggibile, usa null; valuta is_jnj_depuy_synthes usando anche loghi e marchi visibili, senza inventare nomi. Mantieni punti, zeri e S finale. Per le scadenze restituisci preferibilmente YYYY-MM-DD; se sull'etichetta compare solo mese/anno, conserva mese e anno senza inventare un giorno. Non inventare valori; usa warning se incerto."""
 
+def flag_suspicious_scarico_items(result):
+    """Flag uncertain OCR output without guessing or changing product identities."""
+    if not isinstance(result, dict):
+        return result
+    for item in result.get("items", []) or []:
+        code = str(item.get("code") or "").strip()
+        lot = str(item.get("lot") or "").strip()
+        description = str(item.get("description") or "").strip()
+        flags = []
+        if not code or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9. /-]*", code):
+            flags.append("REF mancante o con caratteri inattesi")
+        if not lot:
+            flags.append("Lotto non leggibile")
+        if not description:
+            flags.append("Descrizione non leggibile")
+        if re.fullmatch(r"\\d{7,}", code):
+            flags.append("REF solo numerico: verificare che non sia un identificativo diverso")
+        if flags:
+            previous = str(item.get("warning") or "").strip()
+            item["warning"] = " · ".join(filter(None, [previous, *flags]))
+            item["confidence"] = min(float(item.get("confidence") or 0), 0.5)
+    return result
+
+
 def _parse_response(response):
     text=getattr(response,"output_text",None)
     if not text:
@@ -104,6 +128,7 @@ def analyze_document(path: str, mode: str="scarico_sala") -> Dict[str,Any]:
     result=_parse_response(response)
     _track_usage(response,mode,status["model"],p.suffix.lower())
     if mode=='ddt': result=_ddt_text_fallback(path,result)
+    else: result=flag_suspicious_scarico_items(result)
     return result
 
 def analyze_image(path: str, mode: str="scarico_sala") -> Dict[str,Any]:
