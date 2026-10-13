@@ -570,6 +570,7 @@ with st.form("scarico_ai_confirm"):
         agent = st.selectbox("Agente", agents) if agents and agents != [""] else st.text_input("Agente")
 
     verified = st.checkbox("Ho verificato codice Johnson/REF, lotto, scadenza e quantità di tutte le righe.")
+    uncertain_verified = st.checkbox("Ho ricontrollato sul documento originale tutte le righe OCR incerte.", value=False)
     confirm = st.form_submit_button("📤 Crea intervento e scarica materiali", type="primary", use_container_width=True, disabled=(len(rows) == 0))
 
 if confirm:
@@ -616,8 +617,8 @@ if confirm:
             continue
         if float(r.get("confidence") or 0) < 0.85 or clean(r.get("warning")):
             uncertain.append(f"{code} / {lot}: OCR incerto")
-    if uncertain:
-        st.error("Letture OCR incerte: " + "; ".join(uncertain) + ". Riesamina il documento e ripeti l'analisi.")
+    if uncertain and not uncertain_verified:
+        st.error("Letture OCR da verificare: " + "; ".join(uncertain) + ". Correggi codice e lotto nell’editor e conferma la verifica manuale.")
         st.stop()
 
     # UX pre-flight: raggruppa duplicati. La RPC ripete il controllo con lock DB ed è quella autoritativa.
