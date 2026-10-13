@@ -19,6 +19,7 @@ production schema change, or historical stock repair was performed.
   against paginated inventory reads. Missing expiry blocks confirmation.
 - Dedicated service-role-only, SECURITY INVOKER RPC repeats verification and stock
   checks under row locks; any shortage rolls back the entire intervention.
+- Physical label coordinates, corrected identities and exclusions persist in the existing audit log.
 - Existing manual-entry RPC and mobile discharge RPC remain unchanged.
 
 ## Existing PRs

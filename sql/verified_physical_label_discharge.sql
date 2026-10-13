@@ -76,13 +76,18 @@ begin
      v_remaining:=v_remaining-v_take;
    end loop;
    if v_remaining>0 then raise exception 'GIACENZA_INSUFFICIENTE_O_SCADENZA_DIVERSA'; end if;
+   -- Preserve the existing trigger sentinel: stock has already been debited.
    insert into movimenti_magazzino(data_movimento,tipo_movimento,codice_magazzino,codice,descrizione,lotto,scadenza,quantita,origine,riferimento_tipo,riferimento_id,note,utente)
-   values(now(),'SCARICO',p_header->>'magazzino_scarico',r->>'codice',r->>'descrizione',r->>'lotto',nullif(r->>'scadenza','')::date,-v_q,'SCARICO SALA AI','INTERVENTO',v_id::text,'Scarico etichette fisiche verificate',p_utente);
+   values(now(),'SCARICO',p_header->>'magazzino_scarico',r->>'codice',r->>'descrizione',r->>'lotto',nullif(r->>'scadenza','')::date,-v_q,'SCARICO SALA AI','INTERVENTO',v_id::text,'Scarico sala AI flessibile',p_utente);
   end if;
   insert into righe_intervento(intervento_id,codice,descrizione,lotto,scadenza,quantita,produttore,validazione,prezzo,totale,valore,prezzo_source,origine)
   values(v_id,r->>'codice',r->>'descrizione',r->>'lotto',nullif(r->>'scadenza','')::date,v_q,r->>'produttore',case when v_no_lot then concat_ws(' · ',nullif(r->>'validazione',''),'Non sterile senza lotto') else r->>'validazione' end,coalesce((r->>'prezzo')::numeric,0),coalesce((r->>'prezzo')::numeric,0)*v_q,coalesce((r->>'prezzo')::numeric,0)*v_q,r->>'prezzo_source',case when v_structure then 'CONTO DEPOSITO STRUTTURA' else 'CONTO DEPOSITO' end);
   v_total:=v_total+coalesce((r->>'prezzo')::numeric,0)*v_q; v_count:=v_count+1;
  end loop;
+ insert into audit_log(utente,azione,tabella,riferimento,dettagli)
+ values(p_utente,'SCARICO_ETICHETTE_VERIFICATE','interventi',v_id::text,
+   jsonb_build_object('physical_label_count',p_header->'physical_label_count',
+     'label_manifest',p_header->'label_manifest','rows',p_rows)::text);
  return jsonb_build_object('intervento_id',v_id,'righe',v_count,'totale',v_total);
 end $function$
 ;

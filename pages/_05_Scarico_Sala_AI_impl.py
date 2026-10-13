@@ -749,6 +749,17 @@ if confirm:
         header["physical_label_count"] = len(source_rows)
         header["count_verified"] = bool(count_verified)
         header["included_label_ids"] = [i for r in rpc_rows for i in r["label_ids"]]
+        originals = {r.get("label_id"): r for r in source_rows}
+        header["label_manifest"] = [{
+            "label_id": r.get("label_id"),
+            "source_document": originals.get(r.get("label_id"), {}).get("source_document"),
+            "page": originals.get(r.get("label_id"), {}).get("page"),
+            "bbox": originals.get(r.get("label_id"), {}).get("bbox"),
+            "rotation": originals.get(r.get("label_id"), {}).get("rotation"),
+            "codice": clean(r.get("codice")), "lotto": clean(r.get("lotto")),
+            "scadenza": clean(r.get("scadenza")), "verificata": bool(r.get("verificata")),
+            "esclusa": bool(r.get("escludi_riga")) or is_other_manufacturer(r.get("produttore")),
+        } for r in final_rows]
     try:
         result = sb().rpc("crea_intervento_scarico_ai_verificato" if is_physical_ai else "crea_intervento_scarico_ai_flessibile", {
             "p_header": header,

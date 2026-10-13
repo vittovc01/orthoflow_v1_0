@@ -12,6 +12,9 @@ BEGIN
  IF (SELECT quantita FROM giacenze WHERE codice_magazzino='LABEL_TEST')<>0 THEN
    RAISE EXCEPTION 'duplicate physical pieces were not discharged as 2';
  END IF;
+ IF EXISTS(SELECT 1 FROM giacenze WHERE codice_magazzino='LABEL_TEST' AND origine='SCARICO SALA AI') THEN
+   RAISE EXCEPTION 'artificial stock created by movement trigger';
+ END IF;
  IF (SELECT quantita FROM righe_intervento WHERE intervento_id=(result->>'intervento_id')::bigint)<>2 THEN
    RAISE EXCEPTION 'wrong aggregated quantity';
  END IF;
