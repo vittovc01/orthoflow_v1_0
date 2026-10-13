@@ -470,14 +470,17 @@ rows = [{**r, "jnj_verificato_manualmente": i in restored_indices}
 is_physical_ai = st.session_state.get("scarico_source") == "AI"
 if is_physical_ai:
     # Every detected observation remains reviewable, including other manufacturers.
-    rows = [{**r, "escludi_riga": is_other_manufacturer(r.get("produttore"))}
-            for r in source_rows]
+    rows = [{**r, "jnj_verificato_manualmente": i in restored_indices,
+             "escludi_riga": is_other_manufacturer(r.get("produttore")) and i not in restored_indices}
+            for i, r in enumerate(source_rows)]
     excluded_rows = []
     st.subheader("Verifica delle etichette fisiche")
+    for detection_warning in meta.get("detection_warnings", []) or []:
+        st.warning(detection_warning)
     cols = st.columns(3)
     cols[0].metric("Etichette individuate", len(source_rows))
     cols[1].metric("Articoli distinti (REF / lotto / scadenza)", len({(r.get("codice"), r.get("lotto"), r.get("scadenza")) for r in source_rows}))
-    cols[2].metric("Pezzi individuati", len(source_rows))
+    cols[2].metric("Quantità proposta da scaricare", sum(1 for r in rows if not r.get("escludi_riga")))
     for r in source_rows:
         with st.expander(f"{r.get('label_id')} · {clean(r.get('codice'))} · {clean(r.get('lotto'))}"):
             left, right = st.columns([2, 3])

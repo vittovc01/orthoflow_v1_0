@@ -272,6 +272,19 @@ def analyze_labels(path, client, model, item_schema, parse):
                 row.update(quantity=1, confidence=0, warning=f'Lettura fallita ({type(exc).__name__}): verificare manualmente',reviewed=False)
             row.update(label_id=label_id,page=number,bbox=region['bbox'],rotation=region['rotation'],crop_data_url=image_url(crop),source_document=digest)
             items.append(row)
+    metadata = {k: None for k in ('clinic_name', 'clinical_record', 'procedure_date', 'surgeon')}
+    header_preview = pages[0].copy()
+    header_preview.thumbnail((2200, 2200))
+    header_schema = {'type': 'object', 'properties': {k: {'type': ['string', 'null']} for k in metadata},
+                     'required': list(metadata), 'additionalProperties': False}
+    try:
+        metadata = parse(client.responses.create(model=model, store=False,
+            input=[{'role': 'user', 'content': [
+                {'type': 'input_text', 'text': 'Leggi soltanto intestazione e dati intervento: struttura, cartella clinica, data intervento ISO YYYY-MM-DD, chirurgo. Non estrarre etichette. Non confondere destinatario, fornitore o firma con chirurgo. Campi non stampati, non presenti o illeggibili a null.'},
+                {'type': 'input_image', 'image_url': image_url(header_preview), 'detail': 'high'}]}],
+            text={'format': {'type': 'json_schema', 'name': 'procedure_header', 'schema': header_schema, 'strict': True}}))
+    except Exception:
+        warnings.append('Intestazione non letta: compilare manualmente i dati intervento')
     return {'document_type':'scarico_sala','items':items,'back_orders':[],
             'physical_label_count':len(items),'detection_warnings':warnings,
-            'count_verified':False,'clinic_name':None,'clinical_record':None,'procedure_date':None,'surgeon':None,'confidence':0}
+            'count_verified':False, **metadata, 'confidence':0}
