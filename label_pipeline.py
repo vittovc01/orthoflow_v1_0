@@ -13,7 +13,7 @@ from pathlib import Path
 
 from PIL import Image, ImageOps, ImageFilter
 
-PIPELINE_VERSION = 'physical-label-v4-local-geometry'
+PIPELINE_VERSION = 'physical-label-v5-literal-evidence'
 
 
 def local_ref_evidence(image):
@@ -22,11 +22,12 @@ def local_ref_evidence(image):
         return {'status': 'unavailable', 'reads': [], 'candidates': []}
     reads, candidates = [], set()
     try:
-        for variant in (image, prepare_crop(image)):
+        enlarged = image.resize(tuple(max(1, round(v * min(5.0, 1800 / max(image.size)))) for v in image.size), Image.Resampling.LANCZOS) if max(image.size) < 1800 else image.copy()
+        for variant, psm in ((image, 6), (prepare_crop(image), 6), (enlarged, 11)):
             buffer = BytesIO()
             variant.save(buffer, format='PNG')
             result = subprocess.run(
-                ['tesseract', 'stdin', 'stdout', '-l', 'eng', '--psm', '6', 'tsv'],
+                ['tesseract', 'stdin', 'stdout', '-l', 'eng', '--psm', str(psm), 'tsv'],
                 input=buffer.getvalue(), capture_output=True, timeout=15, check=True)
             words = list(csv.DictReader(result.stdout.decode('utf-8', errors='replace').splitlines(),delimiter='\t'))
             reads.append(' '.join(w.get('text','') for w in words if w.get('text')))
@@ -54,6 +55,12 @@ def verify_ref_evidence(item, evidence):
         row['code'] = None
         warnings.append('REF sterile senza suffisso S/TS verificabile: non aggiungere automaticamente')
     candidates = evidence.get('candidates', [])
+    # A split 04.211.016S may produce only 211.016S. This is incomplete
+    # evidence, never a different identity and never a licence to add a prefix.
+    partial = [c for c in candidates if code.endswith('.' + c)]
+    candidates = [c for c in candidates if c not in partial]
+    if partial:
+        warnings.append('OCR locale con REF parziale: confronto manuale con il ritaglio richiesto')
     if code and candidates and candidates != [code]:
         row['code'] = None
         warnings.append('REF discordante o ambiguo tra OCR locale e AI')
@@ -211,6 +218,7 @@ def reconcile(item, barcodes):
         row.update(code=None, lot=None, expiry=None)
         warnings.append('Più identità GS1 nel ritaglio: verificare i confini della singola etichetta')
         barcodes = []
+    conflicted_fields = set()
     for barcode in barcodes:
         if barcode.get('error'):
             warnings.append(barcode['error'])
@@ -219,9 +227,14 @@ def reconcile(item, barcodes):
         if barcode.get('gtin'):
             row['gtin'] = barcode['gtin']
         for field in ('lot', 'expiry'):
+            if field in conflicted_fields:
+                continue
             decoded = barcode.get(field)
             if decoded:
                 if row.get(field) and str(row[field]).strip() != decoded:
+                    row[field + '_ocr_original'] = row[field]
+                    row[field] = None
+                    conflicted_fields.add(field)
                     warnings.append('Conflitto OCR/GS1: ' + field)
                 elif not row.get(field):
                     row[field] = decoded
