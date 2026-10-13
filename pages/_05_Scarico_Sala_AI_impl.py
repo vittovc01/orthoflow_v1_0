@@ -396,6 +396,7 @@ def save_one_document(intervention_id, procedure_date, customer_code, customer_n
 
 
 st.title("📸 Scarico Sala AI")
+st.caption("Versione OCR disponibile: physical-label-v3-literal-ref · lettura per singola etichetta")
 st.caption("Foto/PDF → verifica → intervento e scarico MAG1. Intervento, righe e movimenti vengono salvati in un'unica transazione: o riesce tutto oppure non viene scritto nulla.")
 status = ai_status()
 if status.get("enabled"):
@@ -487,6 +488,8 @@ if is_physical_ai:
             if r.get("crop_data_url"):
                 left.image(r["crop_data_url"], use_container_width=True)
             right.write({k:r.get(k) for k in ("codice", "lotto", "scadenza", "scadenza_originale", "descrizione", "produttore", "gtin")})
+            if r.get("local_ref_evidence"):
+                right.write({"REF letto inizialmente": r.get("ref_original"), "Controllo OCR locale": r["local_ref_evidence"]})
             if r.get("ocr_reads"):
                 right.write({"Letture indipendenti": r["ocr_reads"]})
             right.caption(f"Pagina {r.get('page')} · posizione {r.get('bbox')} · rotazione {r.get('rotation')}°")

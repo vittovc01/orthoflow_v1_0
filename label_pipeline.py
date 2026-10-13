@@ -4,11 +4,58 @@ import calendar
 import hashlib
 import math
 import re
+import shutil
+import subprocess
 from datetime import date
 from io import BytesIO
 from pathlib import Path
 
 from PIL import Image, ImageOps, ImageFilter
+
+PIPELINE_VERSION = 'physical-label-v3-literal-ref'
+
+
+def local_ref_evidence(image):
+    """Independent literal OCR. Never translate 5 to S or recover missing suffixes."""
+    if not shutil.which('tesseract'):
+        return {'status': 'unavailable', 'reads': [], 'candidates': []}
+    reads = []
+    try:
+        for variant in (image, prepare_crop(image)):
+            buffer = BytesIO()
+            variant.save(buffer, format='PNG')
+            result = subprocess.run(
+                ['tesseract', 'stdin', 'stdout', '-l', 'eng', '--psm', '6'],
+                input=buffer.getvalue(), capture_output=True, timeout=15, check=True)
+            reads.append(result.stdout.decode('utf-8', errors='replace'))
+    except (OSError, subprocess.SubprocessError):
+        return {'status': 'unavailable', 'reads': reads, 'candidates': []}
+    pattern = r'(?<![A-Za-z0-9.])(?:\d{2}\.\d{3}\.\d{3,4}|\d{3}\.\d{3,4})[A-Za-z]*(?![A-Za-z0-9.])'
+    candidates = sorted(set(token for text in reads for token in re.findall(pattern, text)))
+    return {'status': 'read' if candidates else 'unreadable', 'reads': reads,
+            'candidates': candidates}
+
+
+def verify_ref_evidence(item, evidence):
+    row = dict(item)
+    row['ref_original'] = row.get('code')
+    row['local_ref_evidence'] = evidence
+    warnings = [row['warning']] if row.get('warning') else []
+    code = str(row.get('code') or '').strip()
+    if code and code == str(row.get('lot') or '').strip():
+        row['code'] = None
+        warnings.append('REF uguale al lotto: verificare i due campi separatamente')
+    if code and row.get('is_sterile') is True and not code.upper().endswith('S'):
+        row['code'] = None
+        warnings.append('REF sterile senza suffisso S/TS verificabile: non aggiungere automaticamente')
+    candidates = evidence.get('candidates', [])
+    if code and candidates and candidates != [code]:
+        row['code'] = None
+        warnings.append('REF discordante o ambiguo tra OCR locale e AI')
+    elif evidence.get('status') in {'unavailable', 'unreadable'}:
+        warnings.append('REF non confermato da OCR locale: confronto manuale con il ritaglio richiesto')
+    row['warning'] = ' · '.join(warnings) or None
+    return row
 
 
 def prepare_crop(image):
@@ -223,6 +270,8 @@ def review_errors(rows, expected_ids, expected_count, count_verified):
         code = str(row.get('codice') or '').strip()
         if not code or not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9. /-]*', code) or re.fullmatch(r'\d{14}', code) or '?' in code:
             errors.append('REF incompleto o non valido: ' + code)
+        if row.get('is_sterile') is True and not code.upper().endswith('S'):
+            errors.append('REF sterile senza suffisso verificato: ' + code)
         if not row.get('lotto') and not row.get('senza_lotto'):
             errors.append('Lotto obbligatorio: ' + code)
         if not row.get('senza_lotto'):
@@ -302,7 +351,8 @@ def analyze_labels(path, client, model, item_schema, parse):
                         {'type':'input_text','text':'Leggi questa sola etichetta da zero. Trascrivi il REF stampato completo di punti, zeri iniziali e suffissi S/TS, lotto e scadenza ISO. Non ricostruire caratteri da descrizioni, GTIN o cataloghi. Campi incerti a null. Non confondere 018, 020, 016, 085, 005. quantity=1.'},
                         {'type':'input_image','image_url':image_url(prepare_crop(crop)),'detail':'high'}]}],
                     text={'format':{'type':'json_schema','name':'independent_label_read','schema':item_schema,'strict':True}}))
-                row = reconcile(compare_reads(first, second),decoded)
+                row = verify_ref_evidence(reconcile(compare_reads(first, second),decoded),
+                                          local_ref_evidence(crop))
             except Exception as exc:
                 # Preserve failed observations; never silently reduce label count.
                 row = {key:None for key in item_schema['properties']}
@@ -323,5 +373,6 @@ def analyze_labels(path, client, model, item_schema, parse):
     except Exception:
         warnings.append('Intestazione non letta: compilare manualmente i dati intervento')
     return {'document_type':'scarico_sala','items':items,'back_orders':[],
+            'pipeline_version':PIPELINE_VERSION,
             'physical_label_count':len(items),'detection_warnings':warnings,
             'count_verified':False, **metadata, 'confidence':0}

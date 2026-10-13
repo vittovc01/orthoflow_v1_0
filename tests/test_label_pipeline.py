@@ -7,7 +7,55 @@ from PIL import Image
 
 from label_pipeline import (aggregate_labels, unique_regions, review_errors,
     inventory_errors, gs1_parse, reconcile, decode_barcodes, analyze_labels,
-    compare_reads, prepare_crop)
+    compare_reads, prepare_crop, local_ref_evidence, verify_ref_evidence)
+
+
+@pytest.mark.parametrize('code', ['402.886', '402.8865', '04.211.018', '04.211.0185'])
+def test_sterile_ref_suffix_is_not_invented(code):
+    result = verify_ref_evidence(dict(code=code, is_sterile=True),
+                                 {'status':'read','candidates':[code]})
+    assert result['code'] is None
+    assert result['ref_original'] == code
+    r = row(); r.update(codice=code, is_sterile=True)
+    assert review_errors([r], ['one'], 1, True)
+
+
+@pytest.mark.parametrize('code', ['04.211.018S', '04.211.018TS'])
+def test_literal_suffix_evidence_is_preserved(code):
+    result = verify_ref_evidence(dict(code=code, is_sterile=True),
+                                 {'status':'read','candidates':[code]})
+    assert result['code'] == code
+    assert not result['warning']
+
+
+def test_local_read_disagreement_cannot_repair_ai_ref():
+    result = verify_ref_evidence(dict(code='402.886S', is_sterile=True),
+                                 {'status':'read','candidates':['402.8865']})
+    assert result['code'] is None
+
+
+def test_lot_in_ref_column_is_rejected():
+    result = verify_ref_evidence(dict(code='LOT',lot='LOT'),
+                                 {'status':'unreadable','candidates':[]})
+    assert result['code'] is None
+
+
+def test_local_ocr_missing_binary_keeps_explicit_warning(monkeypatch):
+    monkeypatch.setattr('label_pipeline.shutil.which', lambda _: None)
+    evidence = local_ref_evidence(Image.new('RGB',(20,20)))
+    assert evidence['status']=='unavailable'
+    result = verify_ref_evidence(dict(code='402.886S'), evidence)
+    assert result['code']=='402.886S' and result['warning']
+
+
+def test_local_ocr_timeout_does_not_abort_label(monkeypatch):
+    import subprocess
+    monkeypatch.setattr('label_pipeline.shutil.which', lambda _: '/usr/bin/tesseract')
+    def timeout(*args, **kwargs):
+        assert kwargs['timeout']==15 and isinstance(kwargs['input'], bytes)
+        raise subprocess.TimeoutExpired('tesseract',15)
+    monkeypatch.setattr('label_pipeline.subprocess.run', timeout)
+    assert local_ref_evidence(Image.new('RGB',(20,20)))['status']=='unavailable'
 
 
 @pytest.mark.parametrize('wrong',['04.211.085S','04.211.005S','4.211.018S','04.211.018TS'])
