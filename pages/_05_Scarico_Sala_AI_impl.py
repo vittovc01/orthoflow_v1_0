@@ -487,6 +487,8 @@ if is_physical_ai:
             if r.get("crop_data_url"):
                 left.image(r["crop_data_url"], use_container_width=True)
             right.write({k:r.get(k) for k in ("codice", "lotto", "scadenza", "scadenza_originale", "descrizione", "produttore", "gtin")})
+            if r.get("ocr_reads"):
+                right.write({"Letture indipendenti": r["ocr_reads"]})
             right.caption(f"Pagina {r.get('page')} · posizione {r.get('bbox')} · rotazione {r.get('rotation')}°")
             if r.get("warning"):
                 right.warning(r["warning"])

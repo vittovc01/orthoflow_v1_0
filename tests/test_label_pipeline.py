@@ -6,7 +6,31 @@ import pytest
 from PIL import Image
 
 from label_pipeline import (aggregate_labels, unique_regions, review_errors,
-    inventory_errors, gs1_parse, reconcile, decode_barcodes, analyze_labels)
+    inventory_errors, gs1_parse, reconcile, decode_barcodes, analyze_labels,
+    compare_reads, prepare_crop)
+
+
+@pytest.mark.parametrize('wrong',['04.211.085S','04.211.005S','4.211.018S','04.211.018TS'])
+def test_ref_disagreement_never_uses_description(wrong):
+    result = compare_reads(dict(code='04.211.018S',lot='LOT',expiry='2035-01-01'),
+                           dict(code=wrong,lot='LOT',expiry='2035-01-01'))
+    assert result['code'] is None
+    assert result['ocr_reads'][0]['code']=='04.211.018S'
+    assert result['warning']
+
+
+def test_mixed_barcode_crop_cannot_supply_identity():
+    result = reconcile(dict(code='04.211.018S',lot='A',expiry='2035-01-01'),
+                       [dict(gtin='G1',lot='A'),dict(gtin='G2',lot='B')])
+    assert result['code'] is None and result['lot'] is None
+    assert 'Più identità' in result['warning']
+
+
+def test_preprocessing_preserves_source_and_bounds():
+    source = Image.new('RGB',(300,100),'white')
+    assert prepare_crop(source).size == (900,300)
+    assert source.size == (300,100)
+
 
 
 def row(label='one', lot='LOT'):

@@ -8,7 +8,29 @@ from datetime import date
 from io import BytesIO
 from pathlib import Path
 
-from PIL import Image, ImageOps
+from PIL import Image, ImageOps, ImageFilter
+
+
+def prepare_crop(image):
+    """Bounded, non-generative enlargement; preserve original as evidence."""
+    scale = min(3.0, 1800 / max(image.size))
+    enlarged = image.resize(tuple(max(1, round(v * scale)) for v in image.size), Image.Resampling.LANCZOS) if scale > 1 else image.copy()
+    return ImageOps.autocontrast(enlarged.convert('RGB'), cutoff=0).filter(
+        ImageFilter.UnsharpMask(radius=1, percent=120, threshold=3))
+
+
+def compare_reads(first, second):
+    """Agreement is evidence only, never automatic stock authorization."""
+    row = dict(first)
+    warnings = [row['warning']] if row.get('warning') else []
+    row['ocr_reads'] = [dict(first), dict(second)]
+    for field in ('code', 'lot', 'expiry'):
+        a, b = first.get(field), second.get(field)
+        if not a or not b or str(a).strip() != str(b).strip():
+            row[field] = None
+            warnings.append('Letture indipendenti discordanti o incomplete: ' + field)
+    row['warning'] = ' · '.join(warnings) or None
+    return row
 
 
 def image_url(image):
@@ -132,6 +154,11 @@ def reconcile(item, barcodes):
     row = dict(item)
     warnings = [row.get('warning')] if row.get('warning') else []
     row['barcodes'] = barcodes
+    valid = [b for b in barcodes if not b.get('error')]
+    if any(len({b.get(f) for b in valid if b.get(f)}) > 1 for f in ('gtin', 'lot', 'expiry')):
+        row.update(code=None, lot=None, expiry=None)
+        warnings.append('Più identità GS1 nel ritaglio: verificare i confini della singola etichetta')
+        barcodes = []
     for barcode in barcodes:
         if barcode.get('error'):
             warnings.append(barcode['error'])
@@ -259,13 +286,23 @@ def analyze_labels(path, client, model, item_schema, parse):
             original = crop_region(page,region['bbox'])
             crop = original.rotate(region['rotation'],expand=True)
             try:
-                decoded = decode_barcodes(crop)
+                try:
+                    decoded = decode_barcodes(crop)
+                except Exception:
+                    decoded = []
+                    warnings.append(f'{label_id}: decodifica DataMatrix non disponibile')
                 response = client.responses.create(model=model, store=False,
                     input=[{'role':'user','content':[
                         {'type':'input_text','text':'Trascrivi SOLO questa singola etichetta: REF stampato (mai GTIN/UDI), lotto, scadenza ISO, descrizione e produttore. Non dedurre dati da descrizioni o cataloghi. Per caratteri incerti usa null e warning. quantity=1. Non usare quantità della confezione. Se il ritaglio contiene più etichette o è troncato segnala warning. La confidence non sostituisce verifica manuale.'},
                         {'type':'input_image','image_url':image_url(crop),'detail':'high'}]}],
                     text={'format':{'type':'json_schema','name':'single_label','schema':item_schema,'strict':True}})
-                row = reconcile(parse(response),decoded)
+                first = parse(response)
+                second = parse(client.responses.create(model=model, store=False,
+                    input=[{'role':'user','content':[
+                        {'type':'input_text','text':'Leggi questa sola etichetta da zero. Trascrivi il REF stampato completo di punti, zeri iniziali e suffissi S/TS, lotto e scadenza ISO. Non ricostruire caratteri da descrizioni, GTIN o cataloghi. Campi incerti a null. Non confondere 018, 020, 016, 085, 005. quantity=1.'},
+                        {'type':'input_image','image_url':image_url(prepare_crop(crop)),'detail':'high'}]}],
+                    text={'format':{'type':'json_schema','name':'independent_label_read','schema':item_schema,'strict':True}}))
+                row = reconcile(compare_reads(first, second),decoded)
             except Exception as exc:
                 # Preserve failed observations; never silently reduce label count.
                 row = {key:None for key in item_schema['properties']}
