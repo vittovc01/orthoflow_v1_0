@@ -1,4 +1,5 @@
 from PIL import Image, ImageDraw
+from types import SimpleNamespace
 import pytest
 from label_geometry import finder_orientation, locate_datamatrix_labels
 
@@ -25,7 +26,7 @@ def test_clinic_cross_is_not_a_datamatrix_finder():
     assert locate_datamatrix_labels(im)==[]
 
 
-def test_two_physical_finders_remain_two_across_orientation_passes():
+def finder_page():
     im=Image.new('RGB',(1000,600),(202,200,195));draw=ImageDraw.Draw(im)
     for start in (80,550):
         draw.rectangle((start,100,start+300,200),fill=(205,208,198))
@@ -37,7 +38,24 @@ def test_two_physical_finders_remain_two_across_orientation_passes():
                 if dark:
                     draw.rectangle((start+260+col*2,150+row*2,
                                     start+261+col*2,151+row*2),fill='black')
+    return im
+
+
+def test_two_physical_finders_remain_two_across_orientation_passes():
+    im = finder_page()
     for turn in (0,90,180,270):
         regions=locate_datamatrix_labels(im.rotate(turn,expand=True))
         assert len(regions)==2
         assert all(r['geometry_source']=='local_datamatrix_finder' for r in regions)
+
+
+def test_large_scanned_symbols_calibrate_morphology_without_reading_ref(monkeypatch):
+    import zxingcpp
+    point = lambda x,y: SimpleNamespace(x=x,y=y)
+    position = SimpleNamespace(top_left=point(0,0), top_right=point(56,0),
+                               bottom_right=point(56,56), bottom_left=point(0,56))
+    barcode = SimpleNamespace(format=zxingcpp.BarcodeFormat.DataMatrix, position=position)
+    monkeypatch.setattr(zxingcpp, 'read_barcodes', lambda image: [barcode])
+    im = finder_page().resize((2000,1200), Image.Resampling.NEAREST)
+    for turn in (0,90,180,270):
+        assert len(locate_datamatrix_labels(im.rotate(turn,expand=True))) == 2

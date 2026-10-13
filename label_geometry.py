@@ -5,6 +5,7 @@ proportions are estimated from visible sticker rectangles. Operator count review
 remains necessary for stickers without readable finder patterns or other layouts.
 """
 import math
+import statistics
 
 from PIL import Image
 
@@ -72,8 +73,18 @@ def _locate_in_orientation(page):
         cx,cy = rect[0]
         length = long_side or max(rect[1])*9
         width = short_side or max(rect[1])*3
-        center = (cx+dx*length*.42,cy+dy*length*.42)
-        bw,bh = (length*1.08,width*1.15) if dx else (width*1.15,length*1.08)
+        quad = _ordered_quad(cv2.boxPoints(rect),rect[0],np)
+        axes = [quad[1]-quad[0],quad[3]-quad[0]]
+        axes = [v/np.linalg.norm(v) for v in axes]
+        direction = max(axes + [-v for v in axes],
+                        key=lambda v: v[0]*dx+v[1]*dy)
+        cross = np.array([-direction[1],direction[0]])
+        # Finder sits near the lower-right corner of the upright label.
+        # Use its measured tilt rather than a cardinal offset that cuts off
+        # the REF on skewed stickers.
+        center = np.array([cx,cy])+direction*length*.42+cross*width*.18
+        bw = abs(direction[0])*length*1.08+abs(cross[0])*width*1.15
+        bh = abs(direction[1])*length*1.08+abs(cross[1])*width*1.15
         x,y,xx,yy = [round(v) for v in (center[0]-bw/2,center[1]-bh/2,
                                        center[0]+bw/2,center[1]+bh/2)]
         x,y,xx,yy = max(0,x),max(0,y),min(image.width,xx),min(image.height,yy)
@@ -130,6 +141,25 @@ def _locate_in_orientation(page):
 
 def locate_datamatrix_labels(page):
     """Repeat in a second orientation; deduplicate physical finders, not REF/lot."""
+    # Finder morphology operates in pixel units. Calibrate those units from
+    # physically decoded symbols before resizing a scan; fixed page dimensions
+    # otherwise mistake text blocks for finders and miss larger DataMatrixes.
+    try:
+        import zxingcpp
+        sizes = []
+        for barcode in zxingcpp.read_barcodes(page):
+            if barcode.format != zxingcpp.BarcodeFormat.DataMatrix:
+                continue
+            p = barcode.position
+            points = [p.top_left, p.top_right, p.bottom_right, p.bottom_left]
+            sizes.extend(math.hypot(a.x-b.x, a.y-b.y)
+                         for a,b in zip(points, points[1:] + points[:1]))
+        if sizes:
+            scale = min(1.0, 36 / statistics.median(sizes))
+            page = page.resize(tuple(max(1, round(v * scale)) for v in page.size),
+                               Image.Resampling.LANCZOS)
+    except (ImportError, RuntimeError, ValueError):
+        pass  # The independent finder path still preserves undecodable labels.
     regions=[]
     for turn in (0,90):
         for region in _locate_in_orientation(page.rotate(turn,expand=True)):
