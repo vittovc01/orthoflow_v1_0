@@ -324,6 +324,32 @@ def is_other_manufacturer(value):
         "SMITHNEPHEW", "SMITHANDNEPHEW", "ARTHREX", "BBRAUN", "AESCULAP", "INOMED"))
 
 
+def aggregate_identical_labels(items):
+    """Sum quantities only when REF, lot, expiry and product identity match.
+
+    Never collapse separate physical labels merely because their REF matches.
+    Preserve uncertain OCR rows individually for operator review.
+    """
+    merged = []
+    indexes = {}
+    for item in items:
+        row = dict(item)
+        code = clean(row.get("codice")).upper()
+        lot = clean(row.get("lotto")).upper()
+        expiry = clean(row.get("scadenza"))
+        description = clean(row.get("descrizione")).casefold()
+        manufacturer = clean(row.get("produttore")).casefold()
+        key = (code, lot, expiry, description, manufacturer)
+        uncertain = bool(clean(row.get("warning"))) or float(row.get("confidence") or 0) < 0.85
+        if not code or not lot or uncertain or key not in indexes:
+            indexes[key] = len(merged) if not uncertain and code and lot else indexes.get(key, -1)
+            merged.append(row)
+        else:
+            existing = merged[indexes[key]]
+            existing["quantita"] = float(existing.get("quantita") or 1) + float(row.get("quantita") or 1)
+    return merged
+
+
 def run_ai(path, documents=None):
     if not ai_enabled():
         st.error("OCR AI non configurato. Verifica OPENAI_API_KEY ed ENABLE_AI_OCR nei Secrets.")
@@ -339,6 +365,7 @@ def run_ai(path, documents=None):
                 for field, value in incoming.items():
                     if field != "items" and not meta.get(field) and value:
                         meta[field] = value
+        combined_rows = aggregate_identical_labels(combined_rows)
         meta["items"] = combined_rows
         st.session_state["scarico_ai_rows"] = combined_rows
         st.session_state["scarico_documents"] = documents
