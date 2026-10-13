@@ -342,7 +342,8 @@ def aggregate_identical_labels(items):
         key = (code, lot, expiry, description, manufacturer)
         uncertain = bool(clean(row.get("warning"))) or float(row.get("confidence") or 0) < 0.85
         if not code or not lot or uncertain or key not in indexes:
-            indexes[key] = len(merged) if not uncertain and code and lot else indexes.get(key, -1)
+            if not uncertain and code and lot:
+                indexes[key] = len(merged)
             merged.append(row)
         else:
             existing = merged[indexes[key]]
