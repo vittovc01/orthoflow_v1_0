@@ -609,6 +609,7 @@ with st.form("scarico_ai_confirm"):
 
     expected_label_count = st.number_input("Numero di etichette contate sul documento originale", min_value=0, step=1, value=0, key=f"physical_count_{st.session_state.get('scarico_editor_revision', 0)}") if is_physical_ai else 0
     count_verified = st.checkbox("Ho confrontato tutti i ritagli con il documento originale e verificato il conteggio fisico.", value=False, key=f"physical_verified_{st.session_state.get('scarico_editor_revision', 0)}") if is_physical_ai else True
+    header_verified = st.checkbox("Ho verificato struttura, data e dati intervento sul documento originale.", value=False, key=f"physical_header_verified_{st.session_state.get('scarico_editor_revision', 0)}") if is_physical_ai else True
     verified = st.checkbox("Ho verificato codice Johnson/REF, lotto, scadenza e quantità di tutte le righe.")
     confirm = st.form_submit_button("📤 Crea intervento e scarica materiali", type="primary", use_container_width=True, disabled=(len(rows) == 0))
 
@@ -621,6 +622,9 @@ if confirm:
         errors = review_errors(final_rows, [r.get("label_id") for r in source_rows], expected_label_count, count_verified)
         if errors:
             st.error("Conferma bloccata: " + "; ".join(errors))
+            st.stop()
+        if not header_verified:
+            st.error("Conferma bloccata: verifica struttura, data e dati intervento sul documento originale.")
             st.stop()
     valid_rows = []
     invalid_lots = []
