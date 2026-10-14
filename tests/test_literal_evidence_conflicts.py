@@ -92,3 +92,15 @@ def test_depuy_linear_fixtures_exclude_inventory_tags_and_keep_every_piece():
             regions=locate_linear_labels(image.rotate(angle,expand=True))
             assert len(regions)==count, (name,angle,regions)
             assert all(r['geometry_source']=='local_linear_barcodes' for r in regions)
+
+
+def test_long_lived_session_refreshes_stale_ocr_version():
+    import label_pipeline
+    import ocr_runtime
+    expected=label_pipeline.PIPELINE_VERSION
+    label_pipeline.PIPELINE_VERSION='stale-session-version'
+    ocr_runtime._signatures.clear()
+    try:
+        assert ocr_runtime.current_label_pipeline().PIPELINE_VERSION==expected
+    finally:
+        label_pipeline.PIPELINE_VERSION=expected

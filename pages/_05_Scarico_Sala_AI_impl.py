@@ -7,6 +7,8 @@ from datetime import date, datetime
 from pathlib import Path
 from functools import lru_cache
 
+from ocr_runtime import current_label_pipeline
+current_label_pipeline()
 from label_pipeline import review_errors, inventory_errors, aggregate_labels, PIPELINE_VERSION
 
 import pandas as pd
@@ -398,6 +400,7 @@ def save_one_document(intervention_id, procedure_date, customer_code, customer_n
 
 st.title("📸 Scarico Sala AI")
 st.caption(f"Versione OCR disponibile: {PIPELINE_VERSION} · lettura per singola etichetta")
+st.caption("Le etichette del produttore con REF e LOT rappresentano i materiali; gli adesivi interni di inventario non aumentano il conteggio.")
 st.caption("Foto/PDF → verifica → intervento e scarico MAG1. Intervento, righe e movimenti vengono salvati in un'unica transazione: o riesce tutto oppure non viene scritto nulla.")
 status = ai_status()
 if status.get("enabled"):
