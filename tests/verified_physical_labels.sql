@@ -19,15 +19,15 @@ BEGIN
    RAISE EXCEPTION 'wrong aggregated quantity';
  END IF;
  SELECT count(*) INTO before_count FROM interventi;
- failed:=false;
- BEGIN
-   PERFORM crea_intervento_scarico_ai_verificato(header,rows,'TEST');
- EXCEPTION WHEN OTHERS THEN
-   IF SQLERRM NOT LIKE '%GIACENZA_INSUFFICIENTE%' THEN RAISE; END IF;
-   failed:=true;
- END;
- IF NOT failed OR (SELECT count(*) FROM interventi)<>before_count THEN
-   RAISE EXCEPTION 'shortage did not roll back intervention';
+ result:=crea_intervento_scarico_ai_verificato(header,rows,'TEST');
+ IF (SELECT count(*) FROM interventi)<>before_count+1 OR (result->>'anomalie')::int<>1 THEN
+   RAISE EXCEPTION 'shortage must save intervention and anomaly';
+ END IF;
+ IF NOT EXISTS(SELECT 1 FROM anomalie_giacenza WHERE intervento_id=(result->>'intervento_id')::bigint AND motivo LIKE 'GIACENZA_INSUFFICIENTE%' AND quantita_richiesta=2 AND quantita_disponibile=0) THEN
+   RAISE EXCEPTION 'shortage evidence missing';
+ END IF;
+ IF EXISTS(SELECT 1 FROM movimenti_magazzino WHERE riferimento_id=result->>'intervento_id' AND riferimento_tipo='INTERVENTO') THEN
+   RAISE EXCEPTION 'anomaly created a stock movement';
  END IF;
  failed:=false;
  BEGIN
@@ -47,15 +47,29 @@ BEGIN
  END;
  IF NOT failed THEN RAISE EXCEPTION 'artificial duplicate accepted'; END IF;
  UPDATE giacenze SET quantita=2,scadenza='2036-04-01' WHERE codice_magazzino='LABEL_TEST';
- failed:=false;
- BEGIN
-   PERFORM crea_intervento_scarico_ai_verificato(header,rows,'TEST');
- EXCEPTION WHEN OTHERS THEN
-   IF SQLERRM NOT LIKE '%GIACENZA_INSUFFICIENTE_O_SCADENZA_DIVERSA%' THEN RAISE; END IF;
-   failed:=true;
- END;
- IF NOT failed OR (SELECT quantita FROM giacenze WHERE codice_magazzino='LABEL_TEST')<>2 THEN
-   RAISE EXCEPTION 'expiry mismatch changed stock';
+ result:=crea_intervento_scarico_ai_verificato(header,rows,'TEST');
+ IF (result->>'anomalie')::int<>1 OR (SELECT quantita FROM giacenze WHERE codice_magazzino='LABEL_TEST')<>2
+    OR NOT EXISTS(SELECT 1 FROM anomalie_giacenza WHERE intervento_id=(result->>'intervento_id')::bigint AND motivo LIKE 'SCADENZA_DIVERSA_O_MANCANTE%2036-03-01') THEN
+   RAISE EXCEPTION 'expiry mismatch must preserve stock and save anomaly';
+ END IF;
+ result:=crea_intervento_scarico_ai_verificato(header,jsonb_set(rows,'{0,lotto}','"MISSINGLOT"'),'TEST');
+ IF (result->>'anomalie')::int<>1 OR NOT EXISTS(SELECT 1 FROM anomalie_giacenza WHERE intervento_id=(result->>'intervento_id')::bigint AND lotto='MISSINGLOT' AND motivo LIKE 'LOTTO_NON_CORRISPONDENTE%') THEN
+   RAISE EXCEPTION 'missing lot must save exact label and anomaly';
+ END IF;
+ UPDATE giacenze SET quantita=1,scadenza='2036-03-01' WHERE codice_magazzino='LABEL_TEST';
+ result:=crea_intervento_scarico_ai_verificato(header,rows,'TEST');
+ IF (SELECT quantita FROM giacenze WHERE codice_magazzino='LABEL_TEST')<>1
+    OR NOT EXISTS(SELECT 1 FROM anomalie_giacenza WHERE intervento_id=(result->>'intervento_id')::bigint AND quantita_richiesta=2 AND quantita_disponibile=1) THEN
+   RAISE EXCEPTION 'insufficient aggregate stock was partially debited';
+ END IF;
+ -- A mixed intervention saves both the matching stock discharge and an anomaly.
+ result:=crea_intervento_scarico_ai_verificato(header,
+   '[{"codice":"292.720S","lotto":"LABELLOT","scadenza":"2036-03-01","quantita":1,"label_ids":["one"],"verificata":true,"prezzo":1},
+     {"codice":"292.720S","lotto":"MISSINGLOT","scadenza":"2036-03-01","quantita":1,"label_ids":["two"],"verificata":true,"prezzo":1}]','TEST');
+ IF (result->>'righe')::int<>2 OR (result->>'anomalie')::int<>1
+    OR (SELECT quantita FROM giacenze WHERE codice_magazzino='LABEL_TEST')<>0
+    OR (SELECT count(*) FROM movimenti_magazzino WHERE riferimento_tipo='INTERVENTO' AND riferimento_id=result->>'intervento_id')<>1 THEN
+   RAISE EXCEPTION 'mixed intervention must discharge only its matching row';
  END IF;
  failed:=false;
  BEGIN

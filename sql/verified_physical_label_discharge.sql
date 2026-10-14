@@ -7,7 +7,7 @@ CREATE OR REPLACE FUNCTION public.crea_intervento_scarico_ai_verificato(p_header
  SECURITY INVOKER
  SET search_path TO 'public'
 AS $function$
-declare v_id bigint; r jsonb; v_q numeric; v_av numeric; v_gid bigint; v_total numeric:=0; v_count int:=0; v_structure boolean; v_no_lot boolean; v_remaining numeric; v_take numeric; g record;
+declare v_id bigint; r jsonb; v_q numeric; v_av numeric; v_gid bigint; v_total numeric:=0; v_count int:=0; v_anomalies int:=0; v_reason text; v_structure boolean; v_no_lot boolean; v_remaining numeric; v_take numeric; g record;
 begin
  if not coalesce((p_header->>'count_verified')::boolean,false)
     or jsonb_typeof(p_rows) is distinct from 'array' or jsonb_array_length(p_rows)=0
@@ -68,23 +68,52 @@ begin
    raise exception 'CONTO_DEPOSITO_STRUTTURA_SOLO_MALZONI';
   end if;
   if not v_structure then
-   v_remaining:=v_q;
-   for g in select id,quantita from giacenze
+   -- Lock exact stock identity before checking aggregate availability. Never
+   -- substitute a different lot/expiry or partially debit an anomalous row.
+   select coalesce(sum(locked.quantita),0) into v_av from (
+    select quantita from giacenze
     where codice_magazzino=p_header->>'magazzino_scarico'
     and origine='CONTO DEPOSITO'
     and regexp_replace(upper(codice),'[^A-Z0-9]','','g')=regexp_replace(upper(r->>'codice'),'[^A-Z0-9]','','g')
     and coalesce(trim(lotto),'')=coalesce(trim(r->>'lotto'),'')
     and (v_no_lot or scadenza=nullif(r->>'scadenza','')::date)
-    and quantita>0 order by id for update loop
-     exit when v_remaining<=0;
-     v_take:=least(v_remaining,g.quantita);
-     update giacenze set quantita=quantita-v_take,updated_at=now() where id=g.id;
-     v_remaining:=v_remaining-v_take;
-   end loop;
-   if v_remaining>0 then raise exception 'GIACENZA_INSUFFICIENTE_O_SCADENZA_DIVERSA'; end if;
-   -- Preserve the existing trigger sentinel: stock has already been debited.
-   insert into movimenti_magazzino(data_movimento,tipo_movimento,codice_magazzino,codice,descrizione,lotto,scadenza,quantita,origine,riferimento_tipo,riferimento_id,note,utente)
-   values(now(),'SCARICO',p_header->>'magazzino_scarico',r->>'codice',r->>'descrizione',r->>'lotto',nullif(r->>'scadenza','')::date,-v_q,'SCARICO SALA AI','INTERVENTO',v_id::text,'Scarico sala AI flessibile',p_utente);
+    and quantita>0 order by id for update) locked;
+   if v_av >= v_q then
+    v_remaining:=v_q;
+    for g in select id,quantita from giacenze
+     where codice_magazzino=p_header->>'magazzino_scarico'
+     and origine='CONTO DEPOSITO'
+     and regexp_replace(upper(codice),'[^A-Z0-9]','','g')=regexp_replace(upper(r->>'codice'),'[^A-Z0-9]','','g')
+     and coalesce(trim(lotto),'')=coalesce(trim(r->>'lotto'),'')
+     and (v_no_lot or scadenza=nullif(r->>'scadenza','')::date)
+     and quantita>0 order by id for update loop
+      exit when v_remaining<=0;
+      v_take:=least(v_remaining,g.quantita);
+      update giacenze set quantita=quantita-v_take,updated_at=now() where id=g.id;
+      v_remaining:=v_remaining-v_take;
+    end loop;
+    -- Preserve the existing trigger sentinel: stock has already been debited.
+    insert into movimenti_magazzino(data_movimento,tipo_movimento,codice_magazzino,codice,descrizione,lotto,scadenza,quantita,origine,riferimento_tipo,riferimento_id,note,utente)
+    values(now(),'SCARICO',p_header->>'magazzino_scarico',r->>'codice',r->>'descrizione',r->>'lotto',nullif(r->>'scadenza','')::date,-v_q,'SCARICO SALA AI','INTERVENTO',v_id::text,'Scarico sala AI flessibile',p_utente);
+   else
+    v_reason:='GIACENZA_INSUFFICIENTE';
+    if not exists(select 1 from giacenze where codice_magazzino=p_header->>'magazzino_scarico'
+       and origine='CONTO DEPOSITO'
+       and regexp_replace(upper(codice),'[^A-Z0-9]','','g')=regexp_replace(upper(r->>'codice'),'[^A-Z0-9]','','g')
+       and coalesce(trim(lotto),'')=coalesce(trim(r->>'lotto'),'')) then
+      v_reason:='LOTTO_NON_CORRISPONDENTE';
+    elsif not v_no_lot and not exists(select 1 from giacenze where codice_magazzino=p_header->>'magazzino_scarico'
+       and origine='CONTO DEPOSITO'
+       and regexp_replace(upper(codice),'[^A-Z0-9]','','g')=regexp_replace(upper(r->>'codice'),'[^A-Z0-9]','','g')
+       and coalesce(trim(lotto),'')=coalesce(trim(r->>'lotto'),'')
+       and scadenza=nullif(r->>'scadenza','')::date) then
+      v_reason:='SCADENZA_DIVERSA_O_MANCANTE';
+    end if;
+    insert into anomalie_giacenza(codice,lotto,quantita_richiesta,quantita_disponibile,magazzino,intervento_id,stato,motivo,creato_da)
+    values(r->>'codice',r->>'lotto',v_q,v_av,p_header->>'magazzino_scarico',v_id,'DA_VERIFICARE',
+      v_reason || ' · Scadenza documento: ' || coalesce(r->>'scadenza','senza scadenza'),p_utente);
+    v_anomalies:=v_anomalies+1;
+   end if;
   end if;
   insert into righe_intervento(intervento_id,codice,descrizione,lotto,scadenza,quantita,produttore,validazione,prezzo,totale,valore,prezzo_source,origine)
   values(v_id,r->>'codice',r->>'descrizione',r->>'lotto',nullif(r->>'scadenza','')::date,v_q,r->>'produttore',case when v_no_lot then concat_ws(' · ',nullif(r->>'validazione',''),'Non sterile senza lotto') else r->>'validazione' end,coalesce((r->>'prezzo')::numeric,0),coalesce((r->>'prezzo')::numeric,0)*v_q,coalesce((r->>'prezzo')::numeric,0)*v_q,r->>'prezzo_source',case when v_structure then 'CONTO DEPOSITO STRUTTURA' else 'CONTO DEPOSITO' end);
@@ -94,7 +123,7 @@ begin
  values(p_utente,'SCARICO_ETICHETTE_VERIFICATE','interventi',v_id::text,
    jsonb_build_object('physical_label_count',p_header->'physical_label_count',
      'label_manifest',p_header->'label_manifest','rows',p_rows)::text);
- return jsonb_build_object('intervento_id',v_id,'righe',v_count,'totale',v_total);
+ return jsonb_build_object('intervento_id',v_id,'righe',v_count,'totale',v_total,'anomalie',v_anomalies);
 end $function$
 ;
 

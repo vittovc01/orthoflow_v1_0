@@ -597,6 +597,8 @@ with st.form("scarico_ai_confirm"):
         st.warning("Uno o più codici/lotti nostri non hanno quantità sufficiente: saranno segnalati a Direzione. Le righe conto deposito struttura sono escluse da questo controllo.")
         st.dataframe(pd.DataFrame(stock_errors), use_container_width=True, hide_index=True)
 
+    st.info("Lotti, scadenze o quantità non corrispondenti al magazzino non bloccano la registrazione: l’intervento viene salvato e le righe interessate vanno in Anomalie Prezzi e Giacenze, senza scalare giacenze non corrispondenti.")
+
     c1, c2 = st.columns(2)
     with c1:
         procedure_date = st.date_input("Data intervento", value=ai_date.date() if pd.notna(ai_date) else date.today(), min_value=date(1900, 1, 1), max_value=date(max(date.today().year + 10, ai_date.year if pd.notna(ai_date) else date.today().year), 12, 31), format="DD/MM/YYYY")
@@ -673,8 +675,7 @@ if confirm:
         except Exception:
             identity_errors = ["Magazzino non verificabile: riprovare prima di confermare"]
         if identity_errors:
-            st.error("Conferma bloccata: " + "; ".join(identity_errors))
-            st.stop()
+            st.warning("Intervento registrabile: le discrepanze di magazzino saranno salvate nelle anomalie. " + "; ".join(identity_errors))
 
     # UX pre-flight: raggruppa duplicati. La RPC ripete il controllo con lock DB ed è quella autoritativa.
     requested = {}
@@ -691,8 +692,7 @@ if confirm:
             shortages.append({"Codice": sample_code, "Lotto": lot, "Disponibile": avail, "Richiesto": qty, "Magazzino": mag})
     if shortages:
         st.session_state["scarico_stock_errors"] = shortages
-        st.error("Scarico bloccato: quantità insufficienti. Nessun dato è stato salvato.")
-        st.stop()
+        st.warning("Quantità insufficienti: l’intervento sarà registrato e le righe saranno segnalate nelle anomalie di giacenza.")
     else:
         st.session_state.pop("scarico_stock_errors", None)
 
@@ -816,6 +816,9 @@ if confirm:
             clean(selected_client.get("descrizione")), agent, clinical_record
         )
         st.success(f"Intervento {intervention_id} creato in modo atomico. Righe registrate: {inserted}. Fatturato teorico: € {total:,.2f}")
+        anomaly_count = int(result.get("anomalie", 0) or 0)
+        if anomaly_count:
+            st.warning(f"{anomaly_count} righe registrate nelle Anomalie Prezzi e Giacenze: quantità, lotto o scadenza non corrispondenti. La giacenza di queste righe non è stata scalata; verifica e riconcilia le anomalie.")
         if not doc_ok:
             st.warning("Intervento e magazzino sono stati salvati correttamente, ma il documento originale non è stato archiviato. Puoi ricaricarlo dall'Archivio impianti.")
 
