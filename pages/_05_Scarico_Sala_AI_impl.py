@@ -597,6 +597,8 @@ with st.form("scarico_ai_confirm"):
         st.warning("Uno o più codici/lotti nostri non hanno quantità sufficiente: saranno segnalati a Direzione. Le righe conto deposito struttura sono escluse da questo controllo.")
         st.dataframe(pd.DataFrame(stock_errors), use_container_width=True, hide_index=True)
 
+    st.info("Lotti, scadenze o quantità non corrispondenti al magazzino non bloccano la registrazione: l’intervento viene salvato e le righe interessate vanno in Anomalie Prezzi e Giacenze, senza scalare giacenze non corrispondenti.")
+
     c1, c2 = st.columns(2)
     with c1:
         procedure_date = st.date_input("Data intervento", value=ai_date.date() if pd.notna(ai_date) else date.today(), min_value=date(1900, 1, 1), max_value=date(max(date.today().year + 10, ai_date.year if pd.notna(ai_date) else date.today().year), 12, 31), format="DD/MM/YYYY")

@@ -62,6 +62,15 @@ BEGIN
     OR NOT EXISTS(SELECT 1 FROM anomalie_giacenza WHERE intervento_id=(result->>'intervento_id')::bigint AND quantita_richiesta=2 AND quantita_disponibile=1) THEN
    RAISE EXCEPTION 'insufficient aggregate stock was partially debited';
  END IF;
+ -- A mixed intervention saves both the matching stock discharge and an anomaly.
+ result:=crea_intervento_scarico_ai_verificato(header,
+   '[{"codice":"292.720S","lotto":"LABELLOT","scadenza":"2036-03-01","quantita":1,"label_ids":["one"],"verificata":true,"prezzo":1},
+     {"codice":"292.720S","lotto":"MISSINGLOT","scadenza":"2036-03-01","quantita":1,"label_ids":["two"],"verificata":true,"prezzo":1}]','TEST');
+ IF (result->>'righe')::int<>2 OR (result->>'anomalie')::int<>1
+    OR (SELECT quantita FROM giacenze WHERE codice_magazzino='LABEL_TEST')<>0
+    OR (SELECT count(*) FROM movimenti_magazzino WHERE riferimento_tipo='INTERVENTO' AND riferimento_id=result->>'intervento_id')<>1 THEN
+   RAISE EXCEPTION 'mixed intervention must discharge only its matching row';
+ END IF;
  failed:=false;
  BEGIN
    PERFORM crea_intervento_scarico_ai_verificato(header,
