@@ -86,7 +86,7 @@ def test_depuy_linear_fixtures_exclude_inventory_tags_and_keep_every_piece():
     from PIL import Image
     from linear_label_geometry import locate_linear_labels
     fixture=Path(__file__).parent/'fixtures'/'depuy_linear'
-    for name,count in [('velys.jpg',6),('attune.jpg',5)]:
+    for name,count in [('velys.jpg',6),('attune.jpg',5),('atripalda.jpg',4)]:
         image=Image.open(fixture/name)
         for angle in (0,90,180,270):
             regions=locate_linear_labels(image.rotate(angle,expand=True))
@@ -104,3 +104,27 @@ def test_long_lived_session_refreshes_stale_ocr_version():
         assert ocr_runtime.current_label_pipeline().PIPELINE_VERSION==expected
     finally:
         label_pipeline.PIPELINE_VERSION=expected
+
+
+def test_scanned_atripalda_crops_include_full_printed_headers():
+    from pathlib import Path
+    from PIL import Image
+    from linear_label_geometry import locate_linear_labels
+    image=Image.open(Path(__file__).parent/'fixtures'/'depuy_linear'/'atripalda.jpg')
+    regions=locate_linear_labels(image)
+    headers=[(140,851,565,878),(590,857,1020,890),
+             (125,1090,590,1145),(650,1100,1115,1137)]
+    for left,top,right,bottom in headers:
+        containing=[r for r in regions if r['bbox'][0]*image.width/1000<=left
+                    and r['bbox'][1]*image.height/1000<=top
+                    and r['bbox'][2]*image.width/1000>=right
+                    and r['bbox'][3]*image.height/1000>=bottom]
+        assert len(containing)==1, (headers,regions)
+
+
+def test_ref_geometry_uses_single_hyphen_and_partial_ref_but_not_dates_or_footer():
+    from linear_label_geometry import _ref_marker
+    for text in ('3095-040','1504-00-','4515-70-006','04.112.622S'):
+        assert _ref_marker({'text':text})
+    for text in ('2036-07-31','2036-071','PAT3095-040','000-02'):
+        assert not _ref_marker({'text':text})

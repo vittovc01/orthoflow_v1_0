@@ -14,14 +14,14 @@ def _words(image):
     buffer=BytesIO(); image.save(buffer,format='PNG')
     result=subprocess.run(['tesseract','stdin','stdout','--psm','11','tsv'],input=buffer.getvalue(),capture_output=True,timeout=30)
     return [dict(text=r['text'],x=int(r['left']),y=int(r['top']),w=int(r['width']),h=int(r['height']))
-            for r in csv.DictReader(result.stdout.decode(errors='replace').splitlines(),delimiter='\t') if r.get('text','').strip()]
+            for r in csv.DictReader(result.stdout.decode(errors='replace').splitlines(),delimiter='\t',quoting=csv.QUOTE_NONE) if r.get('text','').strip()]
 
 
 def _ref_marker(word):
     # OCR characters locate a printed field only; NEVER become a product REF.
-    if re.fullmatch(r'20\d{2}-\d{2}-\d{2}',word['text']):
+    if re.match(r'^20\d{2}-',word['text']):
         return False
-    return 'REF' in word['text'].upper() or bool(re.search(r'\d{2,4}[.-]\d{2}[.-]\d{2,3}',word['text']))
+    return 'REF' in word['text'].upper() or bool(re.match(r'^(?:\d{4}-\d{2,3}|\d{2,3}\.\d{3})',word['text']))
 
 
 def locate_linear_labels(page):
@@ -38,15 +38,21 @@ def locate_linear_labels(page):
         score=sum(_ref_marker(w) for w in words)
         orientations.append((score,angle,upright,words))
     score,angle,image,words=max(orientations,key=lambda r:r[0])
-    if score<2:
+    if score<1:
         return []
+    candidates=[_barcode_regions(image,words,angle,cv2,np,threshold,kernel)
+                for threshold,kernel in ((70,(5,25)),(115,(3,15)))]
+    return max(candidates,key=len)
+
+
+def _barcode_regions(image,words,angle,cv2,np,threshold,kernel):
     gray=cv2.cvtColor(np.asarray(image.convert('RGB')),cv2.COLOR_RGB2GRAY)
     gx=np.abs(cv2.Sobel(gray,cv2.CV_32F,1,0,ksize=3)); gy=np.abs(cv2.Sobel(gray,cv2.CV_32F,0,1,ksize=3))
     if not gx.max():
         return []
     gradient=(gx/gx.max()*255).astype('uint8')
-    mask=cv2.threshold(cv2.blur(gradient,(9,3)),70,255,cv2.THRESH_BINARY)[1]
-    mask=cv2.morphologyEx(mask,cv2.MORPH_CLOSE,np.ones((5,25),np.uint8))
+    mask=cv2.threshold(cv2.blur(gradient,(9,3)),threshold,255,cv2.THRESH_BINARY)[1]
+    mask=cv2.morphologyEx(mask,cv2.MORPH_CLOSE,np.ones(kernel,np.uint8))
     contours,_=cv2.findContours(mask,cv2.RETR_EXTERNAL,cv2.CHAIN_APPROX_SIMPLE)
     bands=[]
     for contour in contours:
@@ -78,11 +84,11 @@ def locate_linear_labels(page):
             marker=max(markers,key=lambda w:w['y'])
             top=marker['y']-max(marker['h']*.7,width*.18)
         else:
-            top=y-width*.45
+            top=y-width*.35
         for w in words:
             if '(1/1)' in w['text'] and x-width*.12<w['x']<x+width*2.25 and top<w['y']<y:
                 top=max(top,w['y']+w['h']+3)
-        retained.append({'anchor':g['bbox'],'bbox':[x-width*.08,top,x+width*2.25,yy+width*.08]})
+        retained.append({'anchor':g['bbox'],'bbox':[x-width*.08,top,x+width*2.25,yy+width*.20]})
     regions=[]
     for g in retained:
         x,y,xx,yy=g['bbox'];a=g['anchor']
@@ -93,7 +99,7 @@ def locate_linear_labels(page):
             if horizontal>min(a[2]-a[0],b[2]-b[0])*.65 and b[3]<a[1]:
                 y=max(y,b[3]+2)
             if abs((a[1]+a[3]-b[1]-b[3])/2)<max(a[2]-a[0],b[2]-b[0])*.5 and b[0]>a[0]:
-                xx=min(xx,b[0]+(b[2]-b[0])*.08)
+                xx=min(xx,b[0]-(b[2]-b[0])*.02)
         bbox=[round(max(0,x)/image.width*1000),round(max(0,y)/image.height*1000),round(min(image.width,xx)/image.width*1000),round(min(image.height,yy)/image.height*1000)]
         x,y,xx,yy=bbox
         if angle==90:bbox=[1000-yy,x,1000-y,xx]
