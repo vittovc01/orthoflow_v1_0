@@ -26,7 +26,7 @@ def ai_status():
     missing=[]
     if not _secret("OPENAI_API_KEY"): missing.append("OPENAI_API_KEY")
     if not _flag("ENABLE_AI_OCR","false"): missing.append("ENABLE_AI_OCR=true")
-    return {"enabled":not missing,"missing":missing,"model":_secret("OPENAI_VISION_MODEL","gpt-5-mini")}
+    return {"enabled":not missing,"missing":missing,"model":_secret("OPENAI_VISION_MODEL","gpt-5-mini"),"label_model":_secret("SCARICO_LABEL_MODEL","gpt-4.1")}
 
 def ai_enabled(): return bool(ai_status()["enabled"])
 
@@ -94,7 +94,7 @@ def analyze_document(path: str, mode: str="scarico_sala") -> Dict[str,Any]:
     client=OpenAI(api_key=_secret("OPENAI_API_KEY"), timeout=60, max_retries=1); schema=DDT_SCHEMA if mode=="ddt" else SCARICO_SALA_SCHEMA
     if mode == "scarico_sala":
         from label_pipeline import analyze_labels
-        return analyze_labels(path, client, _secret("SCARICO_LABEL_MODEL", "gpt-4.1"),
+        return analyze_labels(path, client, status["label_model"],
             {"type":"object","properties":ITEM_PROPERTIES,"required":ITEM_REQUIRED,"additionalProperties":False},
             _parse_response)
     if p.suffix.lower()==".pdf":
