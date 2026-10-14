@@ -499,7 +499,56 @@ if is_physical_ai:
             right.caption(f"Pagina {r.get('page')} · posizione {r.get('bbox')} · rotazione {r.get('rotation')}°")
             if r.get("warning"):
                 right.warning(r["warning"])
-    st.info("Confronta ogni ritaglio con la pagina originale. Se manca un'etichetta, interrompi la conferma e ricarica una foto separata più nitida. Non confermare un conteggio incompleto.")
+    st.info("Confronta ogni ritaglio con la pagina originale. Se manca un'etichetta, aggiungila dal modulo qui sotto confrontandola con il documento originale. Verifica il conteggio completo prima della conferma.")
+if is_physical_ai:
+    st.subheader("Aggiungi o correggi un materiale")
+    choices = list(range(len(source_rows))) + [-1]
+    target = st.selectbox("Materiale da correggere", choices,
+        format_func=lambda i: "➕ Nuova etichetta non riconosciuta" if i == -1 else f"{i+1} · {clean(source_rows[i].get('codice'))} · {clean(source_rows[i].get('lotto'))}",
+        key="scarico_manual_target")
+    selected = source_rows[target] if target >= 0 else {}
+    documents = st.session_state.get("scarico_documents", []) or []
+    with st.form(f"scarico_manual_material_{target}_{st.session_state.get('scarico_editor_revision', 0)}"):
+        manual_code = st.text_input("REF / codice", value=clean(selected.get("codice")))
+        manual_lot = st.text_input("Lotto stampato", value=clean(selected.get("lotto")))
+        manual_expiry = st.text_input("Scadenza stampata (AAAA-MM-GG)", value=clean(selected.get("scadenza")))
+        manual_description = st.text_input("Descrizione materiale", value=clean(selected.get("descrizione")))
+        manual_lotless = st.checkbox("Materiale non sterile senza lotto", value=bool(selected.get("senza_lotto", False)))
+        manual_verified = st.checkbox("Ho confrontato questi campi con l'etichetta originale", value=False)
+        if target == -1 and documents:
+            manual_document = st.selectbox("Documento contenente l'etichetta mancante", list(range(len(documents))), format_func=lambda i: documents[i]["name"])
+            manual_page = st.number_input("Pagina dell'etichetta mancante", min_value=1, max_value=12, value=1, step=1)
+            st.caption("La pagina originale sarà mostrata come prova. Una nuova riga rappresenta una sola etichetta fisica e un pezzo.")
+        apply_manual = st.form_submit_button("Applica materiale alla lista", disabled=target == -1 and not documents)
+    if apply_manual:
+        if not manual_code.strip() or not manual_verified:
+            st.error("Inserisci il REF e conferma il confronto con l'etichetta originale.")
+        else:
+            try:
+                updated = dict(selected)
+                if target == -1:
+                    from label_pipeline import render_pages, image_url
+                    from uuid import uuid4
+                    document = documents[manual_document]
+                    pages = render_pages(document["path"])
+                    if manual_page > len(pages):
+                        raise ValueError("La pagina indicata non esiste nel documento.")
+                    updated.update(label_id=f"manual:{uuid4().hex}", source_document=sha256(Path(document["path"]).read_bytes()).hexdigest(),
+                        page=int(manual_page), bbox=[0,0,1000,1000], rotation=0,
+                        crop_data_url=image_url(pages[int(manual_page)-1]), quantita=1,
+                        warning="Etichetta aggiunta manualmente: prova sulla pagina originale.")
+                updated.update(codice=manual_code.strip(), lotto=manual_lot.strip(), scadenza=manual_expiry.strip(),
+                    descrizione=manual_description.strip(), senza_lotto=manual_lotless, verificata=True)
+                updated_rows = list(source_rows)
+                if target == -1:
+                    updated_rows.append(updated)
+                else:
+                    updated_rows[target] = updated
+                st.session_state["scarico_ai_rows"] = updated_rows
+                st.session_state["scarico_editor_revision"] = int(st.session_state.get("scarico_editor_revision", 0)) + 1
+                st.rerun()
+            except (ValueError, OSError) as exc:
+                st.error(str(exc))
 clients = client_options()
 ai_clinic = clean(meta.get("clinic_name"))
 if clients:
@@ -521,7 +570,7 @@ with st.form("scarico_ai_confirm"):
     if rows:
         st.divider()
         st.subheader("✅ Lista materiali riconosciuti")
-        st.caption("Tocca una cella per correggere codice, lotto, scadenza o quantità. Per materiale non sterile senza lotto spunta Non sterile / senza lotto. Spunta Escludi riga per non inserirla nello scarico. Le modifiche vengono applicate alla conferma.")
+        st.caption("Tocca una cella per correggere codice, lotto, scadenza o quantità. Per materiale non sterile senza lotto spunta Non sterile / senza lotto. Spunta Escludi riga per non inserirla nello scarico. Le modifiche vengono applicate alla conferma. Puoi anche usare il modulo Aggiungi o correggi un materiale sopra la lista.")
         df_rows = pd.DataFrame(rows)
         preferred = ["codice", "senza_lotto", "jnj_verificato_manualmente", "escludi_riga", "descrizione", "lotto", "scadenza", "quantita", "produttore", "confidence", "warning"]
         if "escludi_riga" not in df_rows:
@@ -537,6 +586,7 @@ with st.form("scarico_ai_confirm"):
             preferred.insert(1, "conto_deposito_struttura")
             st.info("Malzoni: spunta il materiale della struttura Smart Track. Prezzi, fatturato e ordini restano inclusi; queste righe non scaricano la vostra giacenza.")
         if is_physical_ai:
+            df_rows["verificata"] = df_rows.get("verificata", pd.Series(False, index=df_rows.index)).fillna(False).astype(bool)
             preferred = ["label_id", "verificata"] + preferred
         edited = st.data_editor(
             df_rows[preferred], num_rows="fixed" if is_physical_ai else "dynamic", use_container_width=True,

@@ -150,3 +150,40 @@ def test_reviewed_labels_cannot_save_unverified_procedure_header(backend):
     at.run()
     assert not at.exception
     assert any('verifica struttura, data e dati intervento' in e.value for e in at.error)
+
+
+def test_manual_material_can_correct_or_add_missing_physical_label(backend, tmp_path):
+    from PIL import Image
+    from label_pipeline import review_errors
+    document=tmp_path/'labels.jpg'
+    Image.new('RGB',(300,200),'white').save(document)
+    at=app()
+    at.session_state['user']='ci-user'
+    at.session_state['ruolo']='Admin'
+    at.session_state['permessi']=['DIREZIONE']
+    at.run()
+    at.session_state['scarico_source']='AI'
+    at.session_state['scarico_ai_rows']=[{'label_id':'original', 'codice':'3092-040',
+        'lotto':'LOT', 'scadenza':'2030-01-01', 'quantita':1, 'verificata':False}]
+    at.session_state['scarico_documents']=[{'name':'labels.jpg','path':str(document)}]
+    at.switch_page('pages/05_Scarico_Sala_AI.py').run()
+    next(t for t in at.text_input if t.label=='REF / codice').set_value('3095-040')
+    next(c for c in at.checkbox if c.label.startswith('Ho confrontato questi')).check()
+    next(b for b in at.button if b.label=='Applica materiale alla lista').click()
+    at.run()
+    assert not at.exception
+    assert at.session_state['scarico_ai_rows'][0]['codice']=='3095-040'
+    assert at.session_state['scarico_ai_rows'][0]['label_id']=='original'
+    next(s for s in at.selectbox if s.label=='Materiale da correggere').set_value(-1)
+    at.run()
+    for label,value in [('REF / codice','1506-70-005'),('Lotto stampato','LOT2'),('Scadenza stampata (AAAA-MM-GG)','2036-01-01')]:
+        next(t for t in at.text_input if t.label==label).set_value(value)
+    next(c for c in at.checkbox if c.label.startswith('Ho confrontato questi')).check()
+    next(b for b in at.button if b.label=='Applica materiale alla lista').click()
+    at.run()
+    assert not at.exception
+    rows=at.session_state['scarico_ai_rows']
+    assert len(rows)==2
+    assert rows[1]['source_document'] and rows[1]['crop_data_url']
+    assert rows[1]['page']==1 and rows[1]['quantita']==1
+    assert not review_errors(rows,[r['label_id'] for r in rows],2,True)
