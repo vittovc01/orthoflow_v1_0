@@ -673,8 +673,7 @@ if confirm:
         except Exception:
             identity_errors = ["Magazzino non verificabile: riprovare prima di confermare"]
         if identity_errors:
-            st.error("Conferma bloccata: " + "; ".join(identity_errors))
-            st.stop()
+            st.warning("Intervento registrabile: le discrepanze di magazzino saranno salvate nelle anomalie. " + "; ".join(identity_errors))
 
     # UX pre-flight: raggruppa duplicati. La RPC ripete il controllo con lock DB ed è quella autoritativa.
     requested = {}
@@ -691,8 +690,7 @@ if confirm:
             shortages.append({"Codice": sample_code, "Lotto": lot, "Disponibile": avail, "Richiesto": qty, "Magazzino": mag})
     if shortages:
         st.session_state["scarico_stock_errors"] = shortages
-        st.error("Scarico bloccato: quantità insufficienti. Nessun dato è stato salvato.")
-        st.stop()
+        st.warning("Quantità insufficienti: l’intervento sarà registrato e le righe saranno segnalate nelle anomalie di giacenza.")
     else:
         st.session_state.pop("scarico_stock_errors", None)
 
@@ -816,6 +814,9 @@ if confirm:
             clean(selected_client.get("descrizione")), agent, clinical_record
         )
         st.success(f"Intervento {intervention_id} creato in modo atomico. Righe registrate: {inserted}. Fatturato teorico: € {total:,.2f}")
+        anomaly_count = int(result.get("anomalie", 0) or 0)
+        if anomaly_count:
+            st.warning(f"{anomaly_count} righe registrate nelle Anomalie Prezzi e Giacenze: quantità, lotto o scadenza non corrispondenti. La giacenza di queste righe non è stata scalata; verifica e riconcilia le anomalie.")
         if not doc_ok:
             st.warning("Intervento e magazzino sono stati salvati correttamente, ma il documento originale non è stato archiviato. Puoi ricaricarlo dall'Archivio impianti.")
 
