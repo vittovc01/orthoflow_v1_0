@@ -71,3 +71,11 @@ def test_local_geometry_requires_complete_one_to_one_corroboration():
     assert select_label_regions(local,same,'synthes_datamatrix',1)[0]['rotation']==180
     missing=same+[{'bbox':[200,200,300,300],'rotation':0}]
     assert select_label_regions(local,missing,'synthes_datamatrix',1)==missing
+
+
+def test_generic_casa_di_cura_does_not_capture_malzoni_header():
+    from clinic_matching import clinic_default_index
+    clients=[{'descrizione':'CARDIOMED SPA'}, {'descrizione':'CASA DI CURA'}, {'descrizione':'CASA DI CURA PRIVATA MALZONI'}]
+    assert clinic_default_index('Casa di Cura Malzoni',clients)==2
+    assert clinic_default_index('Casa di Cura',clients)==1
+    assert clinic_default_index('Casa di Cura non identificata',clients)==0
