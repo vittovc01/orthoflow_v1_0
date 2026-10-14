@@ -7,6 +7,8 @@ from datetime import date, datetime
 from pathlib import Path
 from functools import lru_cache
 
+from ocr_runtime import current_label_pipeline
+current_label_pipeline()
 from label_pipeline import review_errors, inventory_errors, aggregate_labels, PIPELINE_VERSION
 
 import pandas as pd
