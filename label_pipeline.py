@@ -13,7 +13,7 @@ from pathlib import Path
 
 from PIL import Image, ImageOps, ImageFilter
 
-PIPELINE_VERSION = 'physical-label-v9-linear-anchors'
+PIPELINE_VERSION = 'physical-label-v10-scanned-linear-anchors'
 
 
 def local_ref_evidence(image):
