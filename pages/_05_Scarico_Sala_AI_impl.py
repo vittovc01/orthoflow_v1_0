@@ -400,7 +400,7 @@ st.caption(f"Versione OCR disponibile: {PIPELINE_VERSION} · lettura per singola
 st.caption("Foto/PDF → verifica → intervento e scarico MAG1. Intervento, righe e movimenti vengono salvati in un'unica transazione: o riesce tutto oppure non viene scritto nulla.")
 status = ai_status()
 if status.get("enabled"):
-    st.success(f"OCR AI attivo · {status.get('model', '')}")
+    st.success(f"OCR AI attivo · {status.get('label_model', status.get('model', ''))}")
 else:
     st.warning("OCR AI non attivo: " + ", ".join(status.get("missing", [])))
 
