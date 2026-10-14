@@ -13,7 +13,7 @@ from pathlib import Path
 
 from PIL import Image, ImageOps, ImageFilter
 
-PIPELINE_VERSION = 'physical-label-v7-gs1-resampling'
+PIPELINE_VERSION = 'physical-label-v8-mixed-layouts'
 
 
 def local_ref_evidence(image):
@@ -51,7 +51,7 @@ def verify_ref_evidence(item, evidence):
     if code and code == str(row.get('lot') or '').strip():
         row['code'] = None
         warnings.append('REF uguale al lotto: verificare i due campi separatamente')
-    if code and row.get('is_sterile') is True and not code.upper().endswith('S'):
+    if code and row.get('is_sterile') is True and re.fullmatch(r'(?:\d{2}\.\d{3}\.\d{3}|\d{3}\.\d{3})5?', code):
         row['code'] = None
         warnings.append('REF sterile senza suffisso S/TS verificabile: non aggiungere automaticamente')
     candidates = evidence.get('candidates', [])
@@ -292,7 +292,7 @@ def review_errors(rows, expected_ids, expected_count, count_verified):
         code = str(row.get('codice') or '').strip()
         if not code or not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9. /-]*', code) or re.fullmatch(r'\d{14}', code) or '?' in code:
             errors.append('REF incompleto o non valido: ' + code)
-        if row.get('is_sterile') is True and not code.upper().endswith('S'):
+        if row.get('is_sterile') is True and re.fullmatch(r'(?:\d{2}\.\d{3}\.\d{3}|\d{3}\.\d{3})5?', code):
             errors.append('REF sterile senza suffisso verificato: ' + code)
         if not row.get('lotto') and not row.get('senza_lotto'):
             errors.append('Lotto obbligatorio: ' + code)
@@ -330,6 +330,30 @@ def inventory_errors(rows, stock):
     return errors
 
 
+def select_label_regions(local_regions, proposals, layout, page):
+    """Synthes template geometry needs independent layout and count support.
+
+    A DataMatrix on ATTUNE/SmartSet cannot license the Synthes crop offsets.
+    Ambiguous or incomplete local grids use the complete visual proposals.
+    """
+    if layout != 'synthes_datamatrix' or not local_regions or len(local_regions) != len(proposals):
+        return proposals
+    remaining = list(proposals)
+    for local in local_regions:
+        a = local['bbox']
+        matches = []
+        for index, proposal in enumerate(remaining):
+            b = proposal['bbox']
+            intersection = max(0,min(a[2],b[2])-max(a[0],b[0])) * max(0,min(a[3],b[3])-max(a[1],b[1]))
+            area = max(1,(b[2]-b[0])*(b[3]-b[1]))
+            if intersection/area >= .7:
+                matches.append(index)
+        if len(matches) != 1:
+            return proposals
+        remaining.pop(matches[0])
+    return [dict(r,page=page) for r in local_regions]
+
+
 def analyze_labels(path, client, model, item_schema, parse):
     """Two stages: locate geometry, then read exactly one crop per observation."""
     detector_schema = {'type':'object','properties':{
@@ -337,7 +361,8 @@ def analyze_labels(path, client, model, item_schema, parse):
             'bbox':{'type':'array','items':{'type':'integer'},'minItems':4,'maxItems':4},
             'rotation':{'type':'integer','enum':[0,90,180,270]}},
             'required':['bbox','rotation'],'additionalProperties':False}},
-        'warning':{'type':['string','null']}},'required':['labels','warning'],'additionalProperties':False}
+        'layout':{'type':'string','enum':['synthes_datamatrix','other','mixed','unknown']},
+        'warning':{'type':['string','null']}},'required':['labels','layout','warning'],'additionalProperties':False}
     pages = render_pages(path)
     digest = hashlib.sha256(Path(path).read_bytes()).hexdigest()[:20]
     items, warnings = [], []
@@ -346,14 +371,15 @@ def analyze_labels(path, client, model, item_schema, parse):
         preview.thumbnail((2200,2200))
         from label_geometry import locate_datamatrix_labels
         local_regions = locate_datamatrix_labels(page)
-        located = {'labels': local_regions, 'warning': None} if local_regions else parse(client.responses.create(model=model, store=False,
+        located = parse(client.responses.create(model=model, store=False,
             input=[{'role':'user','content':[
-                {'type':'input_text','text':'Individua OGNI etichetta fisica adesiva di prodotto ortopedico, inclusi bordi e etichette verticali. Non leggere i dati. Restituisci rettangoli stretti non sovrapposti in coordinate della immagine originale da 0 a 1000 [sinistra,alto,destra,basso]. Una etichetta per rettangolo, non una colonna. rotation è la rotazione antioraria necessaria a leggere quel singolo ritaglio. Non includere intestazione, firma, celle vuote. Segnala parti non localizzabili.'},
+                {'type':'input_text','text':'Individua OGNI etichetta fisica adesiva originale del produttore di prodotto ortopedico, incluse le etichette con soli barcode lineari, quelle ripetute, ai bordi e verticali. Escludi gli adesivi di inventario ospedaliero contenenti soltanto codice articolo, numeri interni e (1/1), senza LOT/lotto, scadenza e dati del produttore. Non leggere i dati. layout=synthes_datamatrix soltanto per il layout delle piccole etichette Synthes a REF puntato e DataMatrix; altre etichette DePuy ATTUNE/VELYS/SmartSet sono other, anche se sterili o con DataMatrix. Per compresenza dei due layout usa mixed. Restituisci rettangoli stretti non sovrapposti in coordinate della immagine originale da 0 a 1000 [sinistra,alto,destra,basso]. Una etichetta per rettangolo, non una colonna. rotation è la rotazione antioraria necessaria a leggere quel singolo ritaglio. Non includere intestazione, firma, celle vuote. Segnala parti non localizzabili.'},
                 {'type':'input_image','image_url':image_url(preview),'detail':'high'}]}],
             text={'format':{'type':'json_schema','name':'physical_labels','schema':detector_schema,'strict':True}}))
         if located.get('warning'):
             warnings.append(f'Pagina {number}: {located["warning"]}')
-        regions = unique_regions([dict(r,page=number) for r in located['labels']])
+        proposals = unique_regions([dict(r,page=number) for r in located['labels']])
+        regions = select_label_regions(local_regions, proposals, located.get('layout'), number)
         for index, region in enumerate(regions,1):
             label_id = f'{digest}:p{number}:l{index}'
             original = crop_region(page,region['bbox'])

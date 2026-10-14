@@ -1,3 +1,4 @@
+from clinic_matching import clinic_default_index
 import os
 import re
 from hashlib import sha256
@@ -499,12 +500,7 @@ if is_physical_ai:
 clients = client_options()
 ai_clinic = clean(meta.get("clinic_name"))
 if clients:
-    default_idx = 0
-    if ai_clinic:
-        for i, c in enumerate(clients):
-            if ai_clinic.casefold() in c["descrizione"].casefold() or c["descrizione"].casefold() in ai_clinic.casefold():
-                default_idx = i
-                break
+    default_idx = clinic_default_index(ai_clinic, clients)
     selected_client = st.selectbox("Struttura / cliente", clients, index=default_idx, format_func=lambda x: x["label"])
 else:
     selected_client = {"codice_cliente": "", "descrizione": st.text_input("Struttura / cliente", value=ai_clinic)}

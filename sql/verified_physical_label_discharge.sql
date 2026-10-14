@@ -31,7 +31,8 @@ begin
    if exists(select 1 from jsonb_array_elements_text(r->'label_ids') as labels(label_id) where label_id is null or trim(label_id)='') then
      raise exception 'IDENTITA_FISICA_VUOTA';
    end if;
-   if coalesce((r->>'is_sterile')::boolean,false) and upper(r->>'codice') !~ 'S$' then
+   if coalesce((r->>'is_sterile')::boolean,false)
+      and r->>'codice' ~ '^([0-9]{2}\.[0-9]{3}\.[0-9]{3}|[0-9]{3}\.[0-9]{3})5?$' then
      raise exception 'REF_STERILE_SENZA_SUFFISSO_VERIFICATO';
    end if;
    if coalesce((r->>'is_sterile')::boolean,false) and coalesce((r->>'senza_lotto')::boolean,false) then

@@ -71,6 +71,13 @@ BEGIN
     OR (SELECT count(*) FROM movimenti_magazzino WHERE riferimento_tipo='INTERVENTO' AND riferimento_id=result->>'intervento_id')<>1 THEN
    RAISE EXCEPTION 'mixed intervention must discharge only its matching row';
  END IF;
+ -- Sterile DePuy ATTUNE / VELYS / SmartSet REF is literal without S.
+ result:=crea_intervento_scarico_ai_verificato(header || '{"codice_cliente":"9010013"}',
+   '[{"codice":"4515-70-006","lotto":"266429P","scadenza":"2036-05-31","quantita":2,"label_ids":["one","two"],"verificata":true,"is_sterile":true,"conto_deposito_struttura":true,"prezzo":1}]','TEST');
+ IF (result->>'anomalie')::int<>0 OR (result->>'righe')::int<>1
+    OR EXISTS(SELECT 1 FROM movimenti_magazzino WHERE riferimento_tipo='INTERVENTO' AND riferimento_id=result->>'intervento_id') THEN
+   RAISE EXCEPTION 'literal sterile DePuy REF or structure ownership rejected';
+ END IF;
  failed:=false;
  BEGIN
    PERFORM crea_intervento_scarico_ai_verificato(header,
