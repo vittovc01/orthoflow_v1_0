@@ -98,3 +98,31 @@ def test_scarico_uploaded_pdf_is_displayed_without_ocr_or_writes(backend, monkey
     assert not at.exception
     assert shown == [payload], "Uploaded PDFs must not be silently omitted from preview"
     assert any(e.label == "Anteprima documenti (foto e PDF)" for e in at.expander)
+
+
+def test_physical_label_review_blocks_unverified_count_without_writes(backend):
+    from label_pipeline import image_url
+    from PIL import Image
+    at = app()
+    at.session_state['user'] = 'ci-user'
+    at.session_state['ruolo'] = 'Admin'
+    at.session_state['permessi'] = ['DIREZIONE']
+    at.run()
+    at.session_state['scarico_source'] = 'AI'
+    at.session_state['scarico_editor_revision'] = 1
+    at.session_state['scarico_ai_rows'] = [{
+        'label_id': 'document:p1:l1', 'codice': '413.040S', 'lotto': 'LOT',
+        'scadenza': '2035-04-01', 'quantita': 1, 'produttore': 'Synthes',
+        'confidence': .99, 'warning': '', 'verificata': False,
+        'page': 1, 'bbox': [100,100,300,200], 'rotation': 180,
+        'crop_data_url': image_url(Image.new('RGB',(100,40),'white')),
+    }]
+    at.switch_page('pages/05_Scarico_Sala_AI.py').run()
+    assert not at.exception
+    assert any(m.label=='Etichette individuate' and m.value=='1' for m in at.metric)
+    next(c for c in at.checkbox if c.label.startswith('Ho verificato codice')).check()
+    next(b for b in at.button if b.label=='📤 Crea intervento e scarica materiali').click()
+    at.run()
+    assert not at.exception
+    assert any('Conteggio fisico non verificato' in e.value for e in at.error)
+    assert any('verifica singola etichetta richiesta' in e.value for e in at.error)

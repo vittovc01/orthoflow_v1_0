@@ -91,7 +91,12 @@ def analyze_document(path: str, mode: str="scarico_sala") -> Dict[str,Any]:
     p=Path(path)
     if not p.exists(): raise FileNotFoundError(f"Documento non trovato: {path}")
     if p.suffix.lower() not in SUPPORTED_DOCUMENT_EXT: raise ValueError("Formato non supportato. Usa PDF, JPG, JPEG, PNG o WEBP.")
-    client=OpenAI(api_key=_secret("OPENAI_API_KEY")); schema=DDT_SCHEMA if mode=="ddt" else SCARICO_SALA_SCHEMA
+    client=OpenAI(api_key=_secret("OPENAI_API_KEY"), timeout=60, max_retries=1); schema=DDT_SCHEMA if mode=="ddt" else SCARICO_SALA_SCHEMA
+    if mode == "scarico_sala":
+        from label_pipeline import analyze_labels
+        return analyze_labels(path, client, _secret("SCARICO_LABEL_MODEL", "gpt-4.1"),
+            {"type":"object","properties":ITEM_PROPERTIES,"required":ITEM_REQUIRED,"additionalProperties":False},
+            _parse_response)
     if p.suffix.lower()==".pdf":
         pdf_b64=base64.b64encode(p.read_bytes()).decode("utf-8")
         content=[
@@ -114,7 +119,11 @@ def _normalize_expiry(value):
     s=str(value or "").strip()
     if not s: return ""
     # Already complete ISO date.
-    if re.fullmatch(r"\d{4}-\d{2}-\d{2}",s): return s
+    if re.fullmatch(r"\d{4}-\d{2}-\d{2}",s):
+        try:
+            from datetime import date
+            return date.fromisoformat(s).isoformat()
+        except ValueError: return ""
     # AI commonly returns YYYY-MM when the label only contains month/year.
     m=re.fullmatch(r"(\d{4})[-/](\d{1,2})",s)
     if m:
@@ -172,7 +181,9 @@ def normalize_ai_items(result):
         raw_expiry=it.get("expiry") or ""
         expiry=_normalize_expiry(raw_expiry)
         warning=it.get("warning") or ""
+        if raw_expiry and re.fullmatch(r"(?:\d{4}[-/]\d{1,2}|\d{1,2}[-/]\d{4})", str(raw_expiry)):
+            warning=(warning+" · " if warning else "")+"Scadenza stampata solo mese/anno: fine mese tecnica, verificare la precisione originale"
         if raw_expiry and not expiry:
             warning=(warning+" · " if warning else "")+f"Scadenza da verificare: {raw_expiry}"
-        out.append({"codice":code,"descrizione":it.get("description") or "","lotto":(it.get("lot") or "").strip(),"scadenza":expiry,"quantita":it.get("quantity") or 1,"produttore":manufacturer,"is_jnj":bool(it.get("is_jnj_depuy_synthes",False)),"is_sterile":bool(it.get("is_sterile",code.upper().endswith("S"))),"confidence":float(it.get("confidence") or 0),"warning":warning,"source_text":it.get("source_text") or ""})
+        out.append({"codice":code,"descrizione":it.get("description") or "","lotto":(it.get("lot") or "").strip(),"scadenza":expiry,"scadenza_originale":raw_expiry,"quantita":it.get("quantity") if it.get("quantity") is not None else 1,"produttore":manufacturer,"is_jnj":bool(it.get("is_jnj_depuy_synthes",False)),"is_sterile":bool(it.get("is_sterile",code.upper().endswith("S"))),"confidence":float(it.get("confidence") or 0),"warning":warning,"source_text":it.get("source_text") or "", **{k:it.get(k) for k in ("label_id","page","bbox","rotation","crop_data_url","source_document","gtin","barcodes","ocr_reads","ref_original","local_ref_evidence")}, "verificata":False})
     return out
