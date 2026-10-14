@@ -1,6 +1,8 @@
-from clinic_matching import clinic_default_index
 import ast,copy,re
 from pathlib import Path
+import sys
+sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
+from clinic_matching import clinic_default_index
 from datetime import date
 from types import SimpleNamespace
 import pandas as pd
