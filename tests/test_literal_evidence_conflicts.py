@@ -79,3 +79,16 @@ def test_generic_casa_di_cura_does_not_capture_malzoni_header():
     assert clinic_default_index('Casa di Cura Malzoni',clients)==2
     assert clinic_default_index('Casa di Cura',clients)==1
     assert clinic_default_index('Casa di Cura non identificata',clients)==0
+
+
+def test_depuy_linear_fixtures_exclude_inventory_tags_and_keep_every_piece():
+    from pathlib import Path
+    from PIL import Image
+    from linear_label_geometry import locate_linear_labels
+    fixture=Path(__file__).parent/'fixtures'/'depuy_linear'
+    for name,count in [('velys.jpg',6),('attune.jpg',5)]:
+        image=Image.open(fixture/name)
+        for angle in (0,90,180,270):
+            regions=locate_linear_labels(image.rotate(angle,expand=True))
+            assert len(regions)==count, (name,angle,regions)
+            assert all(r['geometry_source']=='local_linear_barcodes' for r in regions)

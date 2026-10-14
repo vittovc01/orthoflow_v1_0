@@ -13,7 +13,7 @@ from pathlib import Path
 
 from PIL import Image, ImageOps, ImageFilter
 
-PIPELINE_VERSION = 'physical-label-v8-mixed-layouts'
+PIPELINE_VERSION = 'physical-label-v9-linear-anchors'
 
 
 def local_ref_evidence(image):
@@ -379,7 +379,14 @@ def analyze_labels(path, client, model, item_schema, parse):
         if located.get('warning'):
             warnings.append(f'Pagina {number}: {located["warning"]}')
         proposals = unique_regions([dict(r,page=number) for r in located['labels']])
-        regions = select_label_regions(local_regions, proposals, located.get('layout'), number)
+        from linear_label_geometry import locate_linear_labels
+        linear_regions = locate_linear_labels(page) if located.get('layout') == 'other' else []
+        if linear_regions:
+            regions = [dict(r,page=number) for r in linear_regions]
+            if len(regions) != len(proposals):
+                warnings.append(f'Pagina {number}: conteggio AI/localizzazione barcode discordante; verificare il conteggio sul documento originale')
+        else:
+            regions = select_label_regions(local_regions, proposals, located.get('layout'), number)
         for index, region in enumerate(regions,1):
             label_id = f'{digest}:p{number}:l{index}'
             original = crop_region(page,region['bbox'])
@@ -392,7 +399,7 @@ def analyze_labels(path, client, model, item_schema, parse):
                     warnings.append(f'{label_id}: decodifica DataMatrix non disponibile')
                 response = client.responses.create(model=model, store=False,
                     input=[{'role':'user','content':[
-                        {'type':'input_text','text':'Trascrivi SOLO questa singola etichetta: REF stampato (mai GTIN/UDI), lotto, scadenza ISO, descrizione e produttore. Non dedurre dati da descrizioni o cataloghi. Per caratteri incerti usa null e warning. quantity=1. Non usare quantità della confezione. Se il ritaglio contiene più etichette o è troncato segnala warning. La confidence non sostituisce verifica manuale.'},
+                        {'type':'input_text','text':'Trascrivi SOLO questa singola etichetta: REF stampato (mai GTIN/UDI), lotto, scadenza ISO, descrizione e produttore. Non dedurre dati da descrizioni o cataloghi. Per caratteri incerti usa null e warning. quantity=1. Non usare quantità della confezione. Se il ritaglio contiene più etichette o è troncato segnala warning. Ignora eventuali adesivi interni ospedalieri con soli codici numerici e (1/1), senza REF/LOT e dati del produttore. La confidence non sostituisce verifica manuale.'},
                         {'type':'input_image','image_url':image_url(crop),'detail':'high'}]}],
                     text={'format':{'type':'json_schema','name':'single_label','schema':item_schema,'strict':True}})
                 first = parse(response)
