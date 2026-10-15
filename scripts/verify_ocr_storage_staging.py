@@ -60,7 +60,7 @@ def run(url,expected_ref):
         except HTTPError as e:assert e.code in (400,401,403,404)
         print('PASS: anonymous and users A/B denied; private bucket; signed URL works and expires')
     finally:
-        status,_=request('/storage/v1/object/'+bucket,service,method='DELETE',data={'prefixes':[path]})
+        status,_=request('/storage/v1/object/'+bucket,service,method='DELETE',data={'prefixes':[path,path+'-unauthorized']})
         if status!=200:raise RuntimeError('Synthetic object cleanup failed; remove staging-probe object in staging')
 
 

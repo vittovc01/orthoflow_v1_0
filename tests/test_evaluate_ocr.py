@@ -135,3 +135,11 @@ def test_real_quality_glare_patch():
     from PIL import ImageDraw
     img=Image.new('RGB',(512,256),(100,100,100));ImageDraw.Draw(img).rectangle([180,30,300,180],fill='white')
     assert 'glare' in inspect_quality(img)['conditions']
+
+
+def test_production_preflight_cannot_accept_local_or_reduced_thresholds(tmp_path):
+    import subprocess,sys
+    evidence=tmp_path/'summary.json';evidence.write_text(json.dumps({'accepted':False}))
+    command=[sys.executable,'-O','scripts/check_ocr_acceptance.py',str(evidence),'--pipeline-sha256','hash']
+    result=subprocess.run(command,capture_output=True,text=True)
+    assert result.returncode==2 and 'BLOCKED' in result.stdout
