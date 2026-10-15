@@ -1,0 +1,4 @@
+decoder,file,page,source_width,source_height,scale,width,height,expected,local_regions,decoded_payloads,correct,wrong,rate
+v15,foto01.jpg,1,900,1600,1.0,900,1600,7,7,5,5,0,0.7142857142857143
+v15,foto01.jpg,1,900,1600,0.75,675,1200,7,5,1,1,0,0.14285714285714285
+v15,foto01.jpg,1,900,1600,0.5,450,800,7,0,0,0,0,0.0

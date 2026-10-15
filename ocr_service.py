@@ -45,7 +45,8 @@ def analyze_documents(documents, *, analyzer, catalog=None, gtin_catalog=None, s
             for key in ('clinic_name','clinical_record','procedure_date','surgeon'):
                 if not result.get(key) and incoming.get(key):
                     result[key] = incoming[key]
-    from gtin_catalog import resolve_ref
+    from gtin_catalog import resolve_ref,missing_gtins
     result['items']=[resolve_ref(item,gtin_catalog) for item in result['items']]
+    result['missing_gtins']=missing_gtins(result['items'])
     mark_cross_photo_candidates(result['items'])
     return build_review(result,catalog=catalog,soon_days=soon_days)

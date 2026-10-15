@@ -299,6 +299,10 @@ def evaluate(root,truth_path,out,*,mode='local',annotations_path=None,model='gpt
     out.mkdir(parents=True,exist_ok=True)
     try:
         privacy_manifest=json.loads(privacy_manifest_path.read_text()).get('documents',{}) if privacy_manifest_path else None
+        if mode!='replay':
+            import cv2,zxingcpp,fitz
+            if not __import__('shutil').which('tesseract'):
+                raise RuntimeError('Tesseract assente: valutazione non eseguibile')
         reader=live_analyzer(model,privacy_manifest) if mode=='live' else local_analyzer
         from gtin_catalog import read_catalog
         gtin_catalog=read_catalog(gtin_catalog_path) if gtin_catalog_path else None
@@ -349,6 +353,8 @@ def evaluate(root,truth_path,out,*,mode='local',annotations_path=None,model='gpt
         with (out/'problems.csv').open('w',encoding='utf-8-sig',newline='') as stream:
             writer=csv.DictWriter(stream,fieldnames=REPORT_COLUMNS,extrasaction='ignore');writer.writeheader()
             writer.writerows(r for r in reports if r.get('problem'))
+        from gtin_catalog import missing_gtins_csv
+        (out/'gtin_mancanti.csv').write_text(missing_gtins_csv([item for prediction in recorded.values() for item in prediction.get('items',[])]),encoding='utf-8')
         # Do not include hospital header/clinical record in replay output.
         for prediction in recorded.values():
             for key in ('clinic_name','clinical_record','procedure_date','surgeon'):prediction.pop(key,None)

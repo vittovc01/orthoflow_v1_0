@@ -9,6 +9,9 @@ for migration in sql/malzoni_structure_stock.sql sql/verified_physical_label_dis
 done
 psql -X -v ON_ERROR_STOP=1 -c "CREATE TRIGGER trg_movimenti_giacenza AFTER INSERT ON movimenti_magazzino FOR EACH ROW EXECUTE FUNCTION aggiorna_giacenza_da_movimento();"
 for test in tests/*.sql; do
+  if [[ "$test" == "tests/catalog_staging_v2.sql" ]]; then
+    PGOPTIONS='-c orthoflow.environment=staging' psql -X -v ON_ERROR_STOP=1 -f sql/articoli_gtin_staging_v2.sql
+  fi
   printf 'Running %s\n' "$test"
   psql -X -v ON_ERROR_STOP=1 -f "$test"
 done

@@ -568,6 +568,12 @@ if is_physical_ai:
         except Exception:
             st.caption("Anagrafica scanner non disponibile: confronto catalogo non eseguito.")
     assessed_rows = build_review({"items":source_rows}, catalog=catalog)["items"]
+    from gtin_catalog import missing_gtins, missing_gtins_csv
+    if missing_gtins(source_rows):
+        st.warning("GTIN assenti dal catalogo: REF da verificare. Scarica l’elenco per richiedere l’aggiornamento a J&J.")
+        st.download_button("Scarica GTIN mancanti", missing_gtins_csv(source_rows),
+                           file_name="gtin_mancanti.csv", mime="text/csv", key="missing_gtins_download")
+
     for r in assessed_rows:
         with st.expander(f"{'⚠️ Da verificare' if r.get('assessment',{}).get('needs_review') else 'Da confermare'} · {r.get('label_id')} · {clean(r.get('codice'))} · {clean(r.get('lotto'))}"):
             left, right = st.columns([2, 3])

@@ -13,7 +13,7 @@ def read_catalog(path):
     rows={}
     with Path(path).open(encoding='utf-8-sig',newline='') as f:
         r=csv.DictReader(f)
-        if set(r.fieldnames or [])!={'gtin','ref','descrizione'}:raise ValueError('Colonne esatte richieste: gtin,ref,descrizione')
+        if not {'gtin','ref','descrizione'}<=set(r.fieldnames or []):raise ValueError('Colonne esatte richieste: gtin,ref,descrizione')
         for line,row in enumerate(r,2):
             gtin=row['gtin'].strip();ref=row['ref'].strip();description=row['descrizione'].strip()
             if not validate_gtin(gtin) or not ref or not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9. /-]*',ref) or len(ref)>100:
@@ -73,3 +73,18 @@ def resolve_ref(item,lookup=None):
       'ocr_missing':'REF da catalogo GTIN; controllo OCR non leggibile: da verificare'}
     if state!='matched':row['warning']=' · '.join(filter(None,[row.get('warning'),messages[state]]))
     return row
+
+
+def missing_gtins(items):
+    """Minimal export for supplier: no patients, filenames, lots or image data."""
+    counts={}
+    for item in items:
+        if item.get('catalog_resolution')=='unknown_gtin' and validate_gtin(item.get('gtin')):
+            gtin=item['gtin'];counts[gtin]=counts.get(gtin,0)+1
+    return [{'gtin':g,'occorrenze':n} for g,n in sorted(counts.items())]
+
+
+def missing_gtins_csv(items):
+    from io import StringIO
+    out=StringIO();writer=csv.DictWriter(out,fieldnames=['gtin','occorrenze'])
+    writer.writeheader();writer.writerows(missing_gtins(items));return out.getvalue()

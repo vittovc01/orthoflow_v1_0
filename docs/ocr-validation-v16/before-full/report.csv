@@ -1,0 +1,39 @@
+﻿priority,row_type,repeat,case_id,file,truth_label,predicted_label,field,expected,predicted,correct,flagged,silent_error,method,matching,condition,problem
+-1,SUMMARY_SILENT_ERRORS,,,,,,silent_errors,,0,,,,,,,BLOCKED: Modello live non eseguito; Servono almeno tre ripetizioni live; Verità manuale non controverificata; Servono almeno 300 etichette reali annotate; Servono almeno 50 scarichi indipendenti; Accuratezza esatta campi inferiore al 98%; Più del 15% dei campi da verificare; Quantità errate o non risolte; Casi limite non tutti rappresentati
+1,quantity,1,full-photo-01,,04.200.014S / 470L625,,ref+lotto,1,,,True,,,,,Codice e lotto obbligatori per aggregare etichette di impianto
+1,quantity,1,full-photo-01,,04.200.016S / 470L068,,ref+lotto,1,,,True,,,,,Codice e lotto obbligatori per aggregare etichette di impianto
+1,quantity,1,full-photo-01,,413.016S / 131962P,,ref+lotto,1,,,True,,,,,Codice e lotto obbligatori per aggregare etichette di impianto
+1,quantity,1,full-photo-01,,413.016S / 332600P,,ref+lotto,1,,,True,,,,,Codice e lotto obbligatori per aggregare etichette di impianto
+1,quantity,1,full-photo-01,,413.016S / 46993P5,,ref+lotto,1,,,True,,,,,Codice e lotto obbligatori per aggregare etichette di impianto
+1,quantity,1,full-photo-01,,413.016S / 92021P0,,ref+lotto,1,,,True,,,,,Codice e lotto obbligatori per aggregare etichette di impianto
+1,quantity,1,full-photo-01,,423.581S / 11598P5,,ref+lotto,1,,,True,,,,,Codice e lotto obbligatori per aggregare etichette di impianto
+1,field,1,full-photo-01,foto01.jpg,unit-1,1c3dc052e86ca2fd7f9c:p1:l3,ref,04.200.016S,,False,True,False,gtin_catalogue,spatial,,campo_errato_o_assente
+1,field,1,full-photo-01,foto01.jpg,unit-2,1c3dc052e86ca2fd7f9c:p1:l1,ref,423.581S,,False,True,False,gtin_catalogue,spatial,,campo_errato_o_assente
+1,field,1,full-photo-01,foto01.jpg,unit-3,1c3dc052e86ca2fd7f9c:p1:l2,ref,413.016S,,False,True,False,gtin_catalogue,spatial,,campo_errato_o_assente
+1,field,1,full-photo-01,foto01.jpg,unit-3,1c3dc052e86ca2fd7f9c:p1:l2,lotto,332600P,,False,True,False,missing,spatial,,campo_errato_o_assente
+1,field,1,full-photo-01,foto01.jpg,unit-3,1c3dc052e86ca2fd7f9c:p1:l2,scadenza,2036-09-01,,False,True,False,missing,spatial,,campo_errato_o_assente
+1,field,1,full-photo-01,foto01.jpg,unit-4,1c3dc052e86ca2fd7f9c:p1:l6,ref,04.200.014S,,False,True,False,gtin_catalogue,spatial,,campo_errato_o_assente
+1,field,1,full-photo-01,foto01.jpg,unit-5,1c3dc052e86ca2fd7f9c:p1:l4,ref,413.016S,,False,True,False,gtin_catalogue,spatial,,campo_errato_o_assente
+1,field,1,full-photo-01,foto01.jpg,unit-6,1c3dc052e86ca2fd7f9c:p1:l5,ref,413.016S,,False,True,False,gtin_catalogue,spatial,,campo_errato_o_assente
+1,field,1,full-photo-01,foto01.jpg,unit-6,1c3dc052e86ca2fd7f9c:p1:l5,lotto,131962P,,False,True,False,missing,spatial,,campo_errato_o_assente
+1,field,1,full-photo-01,foto01.jpg,unit-6,1c3dc052e86ca2fd7f9c:p1:l5,scadenza,2036-03-01,,False,True,False,missing,spatial,,campo_errato_o_assente
+1,field,1,full-photo-01,foto01.jpg,unit-7,1c3dc052e86ca2fd7f9c:p1:l7,ref,413.016S,,False,True,False,gtin_catalogue,spatial,,campo_errato_o_assente
+2,field,1,full-photo-01,foto01.jpg,unit-1,1c3dc052e86ca2fd7f9c:p1:l3,lotto,470L068,470L068,True,False,False,datamatrix,spatial,,
+2,field,1,full-photo-01,foto01.jpg,unit-1,1c3dc052e86ca2fd7f9c:p1:l3,scadenza,2036-02-01,2036-02-01,True,False,False,datamatrix,spatial,,
+2,label,1,full-photo-01,foto01.jpg,unit-1,1c3dc052e86ca2fd7f9c:p1:l3,,,,True,,,datamatrix / gtin_catalogue / missing,spatial,,
+2,field,1,full-photo-01,foto01.jpg,unit-2,1c3dc052e86ca2fd7f9c:p1:l1,lotto,11598P5,11598P5,True,False,False,datamatrix,spatial,,
+2,field,1,full-photo-01,foto01.jpg,unit-2,1c3dc052e86ca2fd7f9c:p1:l1,scadenza,2034-03-01,2034-03-01,True,False,False,datamatrix,spatial,,
+2,label,1,full-photo-01,foto01.jpg,unit-2,1c3dc052e86ca2fd7f9c:p1:l1,,,,True,,,datamatrix / gtin_catalogue / missing,spatial,,
+2,condition,1,full-photo-01,foto01.jpg,unit-3,,,,,True,True,,,,clipped,
+2,label,1,full-photo-01,foto01.jpg,unit-3,1c3dc052e86ca2fd7f9c:p1:l2,,,,True,,,gtin_catalogue / missing,spatial,,
+2,field,1,full-photo-01,foto01.jpg,unit-4,1c3dc052e86ca2fd7f9c:p1:l6,lotto,470L625,470L625,True,False,False,datamatrix,spatial,,
+2,field,1,full-photo-01,foto01.jpg,unit-4,1c3dc052e86ca2fd7f9c:p1:l6,scadenza,2036-02-01,2036-02-01,True,False,False,datamatrix,spatial,,
+2,label,1,full-photo-01,foto01.jpg,unit-4,1c3dc052e86ca2fd7f9c:p1:l6,,,,True,,,datamatrix / gtin_catalogue / missing,spatial,,
+2,field,1,full-photo-01,foto01.jpg,unit-5,1c3dc052e86ca2fd7f9c:p1:l4,lotto,46993P5,46993P5,True,False,False,datamatrix,spatial,,
+2,field,1,full-photo-01,foto01.jpg,unit-5,1c3dc052e86ca2fd7f9c:p1:l4,scadenza,2035-01-01,2035-01-01,True,False,False,datamatrix,spatial,,
+2,label,1,full-photo-01,foto01.jpg,unit-5,1c3dc052e86ca2fd7f9c:p1:l4,,,,True,,,datamatrix / gtin_catalogue / missing,spatial,,
+2,condition,1,full-photo-01,foto01.jpg,unit-6,,,,,True,True,,,,clipped,
+2,label,1,full-photo-01,foto01.jpg,unit-6,1c3dc052e86ca2fd7f9c:p1:l5,,,,True,,,gtin_catalogue / missing,spatial,,
+2,field,1,full-photo-01,foto01.jpg,unit-7,1c3dc052e86ca2fd7f9c:p1:l7,lotto,92021P0,92021P0,True,False,False,datamatrix,spatial,,
+2,field,1,full-photo-01,foto01.jpg,unit-7,1c3dc052e86ca2fd7f9c:p1:l7,scadenza,2035-11-01,2035-11-01,True,False,False,datamatrix,spatial,,
+2,label,1,full-photo-01,foto01.jpg,unit-7,1c3dc052e86ca2fd7f9c:p1:l7,,,,True,,,datamatrix / gtin_catalogue / missing,spatial,,
