@@ -13,7 +13,7 @@ from pathlib import Path
 
 from PIL import Image, ImageOps, ImageFilter
 
-PIPELINE_VERSION = 'physical-label-v12-measured-sticker-edges'
+PIPELINE_VERSION = 'physical-label-v13-evidence-review'
 
 
 def local_ref_evidence(image):
@@ -165,6 +165,16 @@ def gs1_parse(raw):
                 return {'error': 'AI GS1 non supportato: ' + ai}
             parts.append((ai, value))
     for ai, value in parts:
+        fixed = {'01':14,'17':6,'11':6,'15':6,'20':2}
+        variable = {'10':20,'21':20,'30':8,'91':90,'92':90,'93':90}
+        if ai not in fixed and ai not in variable:
+            return {'error': 'AI GS1 non supportato: ' + ai}
+        if ai in fixed and (len(value)!=fixed[ai] or not value.isdigit()):
+            return {'error': 'Campo GS1 a lunghezza fissa non valido: ' + ai}
+        if ai in variable and (not 1<=len(value)<=variable[ai] or any(ord(c)<32 for c in value)):
+            return {'error': 'Campo GS1 variabile non valido: ' + ai}
+        if ai=='30' and not value.isdigit():
+            return {'error':'Quantità GS1 non valida'}
         if ai in values and values[ai] != value:
             return {'error': 'AI GS1 in conflitto'}
         if not value:
@@ -404,7 +414,7 @@ def analyze_labels(path, client, model, item_schema, parse):
         'warning':{'type':['string','null']}},'required':['labels','layout','warning'],'additionalProperties':False}
     pages = render_pages(path)
     digest = hashlib.sha256(Path(path).read_bytes()).hexdigest()[:20]
-    items, warnings, unconfirmed_regions = [], [], []
+    items, warnings, unconfirmed_regions, annotated_pages = [], [], [], []
     for number, page in enumerate(pages, 1):
         preview = page.copy()
         preview.thumbnail((2200,2200))
@@ -463,11 +473,21 @@ def analyze_labels(path, client, model, item_schema, parse):
             unconfirmed_regions.extend(page_unconfirmed)
             if page_unconfirmed:
                 warnings.append(f'Pagina {number}: proposte AI prive di riscontro fisico non contate come prodotti; verificare il conteggio sul documento originale')
+        from PIL import ImageDraw
+        overview = preview.copy()
+        pen = ImageDraw.Draw(overview)
+        for index, region in enumerate(regions, 1):
+            pixels = tuple(round(v * (overview.width if i%2==0 else overview.height)/1000)
+                           for i,v in enumerate(region['bbox']))
+            pen.rectangle(pixels, outline='red', width=3)
+            pen.text(pixels[:2], str(index), fill='red')
+        annotated_pages.append({'page':number, 'page_data_url':image_url(overview)})
         for index, region in enumerate(regions,1):
             label_id = f'{digest}:p{number}:l{index}'
             original = crop_region(page,region['bbox'])
             crop = original.rotate(region['rotation'] + region.get('deskew_angle', 0),
                                    resample=Image.Resampling.BICUBIC, expand=True, fillcolor='white')
+            decoded = []
             try:
                 try:
                     decoded = decode_barcodes(crop)
@@ -491,9 +511,12 @@ def analyze_labels(path, client, model, item_schema, parse):
                 # Preserve failed observations; never silently reduce label count.
                 row = {key:None for key in item_schema['properties']}
                 row.update(quantity=1, confidence=0, warning=f'Lettura fallita ({type(exc).__name__}): verificare manualmente',reviewed=False)
+                row = reconcile(row, decoded)
             row.update(label_id=label_id,page=number,bbox=region['bbox'],rotation=region['rotation'],crop_data_url=image_url(crop),source_document=digest,
                        geometry_source=region.get('geometry_source','ai_proposal'),finder_bbox=region.get('finder_bbox'),
                        deskew_angle=region.get('deskew_angle', 0))
+            from ocr_review import assess_label
+            row['assessment'] = assess_label(row)
             items.append(row)
     metadata = {k: None for k in ('clinic_name', 'clinical_record', 'procedure_date', 'surgeon')}
     header_preview = pages[0].copy()
@@ -511,5 +534,5 @@ def analyze_labels(path, client, model, item_schema, parse):
     return {'document_type':'scarico_sala','items':items,'back_orders':[],
             'pipeline_version':PIPELINE_VERSION,
             'physical_label_count':len(items),'detection_warnings':warnings,
-            'unconfirmed_regions':unconfirmed_regions,
+            'unconfirmed_regions':unconfirmed_regions,'annotated_pages':annotated_pages,
             'count_verified':False, **metadata, 'confidence':0}

@@ -275,3 +275,31 @@ def test_header_proposal_cannot_add_quantity_to_measured_stickers(monkeypatch):
     monkeypatch.setattr('label_pipeline.decode_barcodes',lambda _: [])
     proposals=[dict(page=1,bbox=[700,900,900,990],rotation=0)]
     assert len(select_label_regions(local,proposals,'synthes_datamatrix',1,source))==7
+
+
+@pytest.mark.parametrize('raw',[
+    '(01)07611819268623(17)350401(10)'+'A'*21,
+    '(01)07611819268623(99)UNKNOWN',
+    '(01)07611819268623(20)X5',
+    '(01)07611819268623(30)abc',
+])
+def test_parenthesized_gs1_validates_lengths_and_supported_ais(raw):
+    assert 'error' in gs1_parse(raw)
+
+
+def test_gs1_evidence_survives_ai_read_failure(tmp_path,monkeypatch):
+    path=tmp_path/'barcode.png';Image.new('RGB',(100,100),'white').save(path)
+    monkeypatch.setattr('label_geometry.locate_datamatrix_labels',lambda _: [])
+    barcode=gs1_parse('(01)07611819268623(17)350401(10)LOT')
+    monkeypatch.setattr('label_pipeline.decode_barcodes',lambda _: [dict(raw='(01)07611819268623(17)350401(10)LOT',**barcode)])
+    def create(**kwargs):
+        name=kwargs['text']['format']['name']
+        if name in ('physical_labels','audited_physical_labels'):
+            return {'labels':[dict(bbox=[10,10,900,900],rotation=0)],'layout':'unknown','warning':None}
+        raise RuntimeError('AI offline')
+    result=analyze_labels(path,SimpleNamespace(responses=SimpleNamespace(create=create)),
+                          'fake',{'properties':{'code':{},'lot':{},'expiry':{}}},lambda r:r)
+    item=result['items'][0]
+    assert item['code'] is None and item['lot']=='LOT' and item['expiry']=='2035-04-01'
+    assert item['assessment']['fields']['lot']['method']=='datamatrix'
+    assert item['gtin']=='07611819268623'
