@@ -42,3 +42,34 @@ def geometry_alerts(regions):
             elif (width>0 and abs(height)<=3) or (height>0 and abs(width)<=3):
                 warnings.append('Etichette che si toccano: verificare i confini e il conteggio')
     return list(dict.fromkeys(warnings))
+
+
+def acquisition_report(page,regions):
+    """Provisional acquisition targets, not a proven decoder accuracy threshold.
+
+    A missing EXIF field does not establish resizing/compression. JPEG encoding
+    alone does not establish excessive lossy compression either.
+    """
+    warnings=[];longest=max(page.size)
+    if longest<2400:
+        warnings.append(f'Risoluzione {page.width}×{page.height}: sotto il target provvisorio di 2400 px sul lato lungo; acquisire etichette più ravvicinate')
+    symbols=[]
+    for r in regions:
+        b=r.get('finder_bbox')
+        if b:symbols.append(min((b[2]-b[0])*page.width/1000,(b[3]-b[1])*page.height/1000))
+    if symbols and min(symbols)<64:
+        warnings.append(f'DataMatrix più piccolo circa {min(symbols):.0f} px: sotto il target provvisorio di 64 px; nuova foto ravvicinata richiesta')
+    exif=page.getexif()
+    source=page.info.get('_ocr_source_exif',{})
+    original_w=exif.get(40962) or source.get('40962');original_h=exif.get(40963) or source.get('40963')
+    metadata_resized=bool(original_w and original_h and (original_w>page.width or original_h>page.height))
+    if metadata_resized:warnings.append('Dimensioni inferiori a quelle EXIF: immagine probabilmente ridimensionata')
+    software=str(exif.get(305,'') or source.get('305','')).lower()
+    if any(s in software for s in ('whatsapp','screenshot','screen capture')):
+        warnings.append('Metadati di messaggistica/screenshot: possibile ridimensionamento o ricompressione; usare il file originale')
+    quant=getattr(page,'quantization',None) or page.info.get('_ocr_source_quantization')
+    if quant and sum(sum(v) for v in quant.values())/max(1,sum(len(v) for v in quant.values()))>35:
+        warnings.append('Quantizzazione JPEG elevata: possibile forte compressione; usare il file originale')
+    return {'width':page.width,'height':page.height,'finder_sides_px':[round(x,1) for x in symbols],
+            'minimum_long_side_target':2400,'symbol_side_target':64,'threshold_status':'provisional_not_validated',
+            'resized_metadata':metadata_resized,'warnings':warnings}

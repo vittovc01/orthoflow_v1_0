@@ -10,6 +10,13 @@ from label_pipeline import (aggregate_labels, unique_regions, review_errors,
     compare_reads, prepare_crop, local_ref_evidence, verify_ref_evidence)
 
 
+def local_approval(path,regions,monkeypatch):
+    import hashlib
+    record={'sha256':hashlib.sha256(path.read_bytes()).hexdigest(),'approved':True,'labels_only_confirmed':True,'regions':regions}
+    monkeypatch.setattr('local_label_reader.prepare_document',lambda _: record)
+    return record
+
+
 @pytest.mark.parametrize('size', [(538,183), (539,184), (540,185)])
 def test_resampled_philos_symbol_preserves_exact_gs1_date(size):
     path = Path(__file__).parent / 'fixtures' / 'santa_lucia' / '04.png'
@@ -182,20 +189,17 @@ def test_santa_lucia_reference_quantities():
     assert next(r for r in grouped if r['codice']=='292.720S')['quantita']==2
 
 
-def test_pipeline_keeps_failed_reads_and_deduplicates_geometry(tmp_path):
+def test_pipeline_keeps_failed_reads_and_deduplicates_geometry(tmp_path,monkeypatch):
     path=tmp_path/'photo.png';Image.new('RGB',(100,100),'white').save(path)
-    replies=iter([{'labels':[{'bbox':[1,1,400,400],'rotation':180},{'bbox':[2,2,401,401],'rotation':180},{'bbox':[500,500,999,999],'rotation':90}],'warning':None}, {'code':'REF','lot':'A','expiry':'2035-01-01','warning':None}])
+    regions=[dict(page=1,bbox=[1,1,400,400],rotation=180),dict(page=1,bbox=[500,500,999,999],rotation=90)]
+    approval=local_approval(path,regions,monkeypatch)
+    replies=iter([{'code':'REF','lot':'A','expiry':'2035-01-01','warning':None}]*2)
     def create(**kwargs):
+        assert kwargs['text']['format']['name'] in {'single_label','independent_label_read'}
         try:return next(replies)
         except StopIteration:raise RuntimeError('OCR unavailable')
-    # Geometry audit deliberately fails without consuming label read responses.
-    original_create = create
-    def create(**kwargs):
-        if kwargs.get('text', {}).get('format', {}).get('name') == 'audited_physical_labels':
-            raise RuntimeError('audit unavailable')
-        return original_create(**kwargs)
     client=SimpleNamespace(responses=SimpleNamespace(create=create))
-    result=analyze_labels(path,client,'fake',{'properties':{'code':{},'lot':{},'expiry':{}}},lambda r:r)
+    result=analyze_labels(path,client,'fake',{'properties':{'code':{},'lot':{},'expiry':{}}},lambda r:r,privacy_approval=approval)
     assert result['physical_label_count']==2
     assert result['items'][0]['rotation']==180
     assert result['items'][1]['code'] is None and 'fallita' in result['items'][1]['warning']
@@ -228,7 +232,7 @@ def test_unmatched_local_label_is_added_without_identity_deduplication():
     assert len(merge_linear_regions([dict(bbox=[0,0,200,100],rotation=0)],proposals,1))==1
 
 
-def test_geometry_audit_replaces_header_and_split_crops_before_reading(tmp_path, monkeypatch):
+def test_approved_local_crops_exclude_header_and_preserve_two_units(tmp_path, monkeypatch):
     path=tmp_path/'page.png'
     Image.new('RGB',(400,400),'white').save(path)
     monkeypatch.setattr('label_geometry.locate_datamatrix_labels', lambda _: [])
@@ -236,18 +240,14 @@ def test_geometry_audit_replaces_header_and_split_crops_before_reading(tmp_path,
     monkeypatch.setattr('label_pipeline.local_ref_evidence', lambda _: {'status':'unreadable','candidates':[]})
     corrected=[{'bbox':[100,400,900,600],'rotation':0},
                {'bbox':[100,650,900,850],'rotation':0}]
+    approval=local_approval(path,[dict(r,page=1) for r in corrected],monkeypatch)
     read={'code':'413.040S','lot':'LOT','expiry':'2035-04-01'}
     def create(**kwargs):
         name=kwargs['text']['format']['name']
-        if name=='physical_labels':
-            return {'labels':[{'bbox':[100,100,900,200],'rotation':0}], 'layout':'synthes_datamatrix','warning':None}
-        if name=='audited_physical_labels':
-            return {'labels':corrected,'layout':'synthes_datamatrix','warning':None}
-        if name=='procedure_header':
-            return {}
+        assert name in {'single_label','independent_label_read'}
         return dict(read)
     result=analyze_labels(path,SimpleNamespace(responses=SimpleNamespace(create=create)),
-                          'fake',{'properties':{'code':{},'lot':{},'expiry':{}}},lambda r:r)
+                          'fake',{'properties':{'code':{},'lot':{},'expiry':{}}},lambda r:r,privacy_approval=approval)
     assert [r['bbox'] for r in result['items']]==[r['bbox'] for r in corrected]
     assert result['physical_label_count']==2
     assert len({r['label_id'] for r in result['items']})==2
@@ -290,6 +290,7 @@ def test_parenthesized_gs1_validates_lengths_and_supported_ais(raw):
 def test_gs1_evidence_survives_ai_read_failure(tmp_path,monkeypatch):
     path=tmp_path/'barcode.png';Image.new('RGB',(100,100),'white').save(path)
     monkeypatch.setattr('label_geometry.locate_datamatrix_labels',lambda _: [])
+    approval=local_approval(path,[dict(page=1,bbox=[10,10,900,900],rotation=0)],monkeypatch)
     barcode=gs1_parse('(01)07611819268623(17)350401(10)LOT')
     monkeypatch.setattr('label_pipeline.decode_barcodes',lambda _: [dict(raw='(01)07611819268623(17)350401(10)LOT',**barcode)])
     def create(**kwargs):
@@ -298,7 +299,7 @@ def test_gs1_evidence_survives_ai_read_failure(tmp_path,monkeypatch):
             return {'labels':[dict(bbox=[10,10,900,900],rotation=0)],'layout':'unknown','warning':None}
         raise RuntimeError('AI offline')
     result=analyze_labels(path,SimpleNamespace(responses=SimpleNamespace(create=create)),
-                          'fake',{'properties':{'code':{},'lot':{},'expiry':{}}},lambda r:r)
+                          'fake',{'properties':{'code':{},'lot':{},'expiry':{}}},lambda r:r,privacy_approval=approval)
     item=result['items'][0]
     assert item['code'] is None and item['lot']=='LOT' and item['expiry']=='2035-04-01'
     assert item['assessment']['fields']['lot']['method']=='datamatrix'

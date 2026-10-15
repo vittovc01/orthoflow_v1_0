@@ -335,7 +335,15 @@ def is_other_manufacturer(value):
         "SMITHNEPHEW", "SMITHANDNEPHEW", "ARTHREX", "BBRAUN", "AESCULAP", "INOMED"))
 
 
-def run_ai(path, documents=None):
+def run_ai(path, documents=None, *, privacy_manifest=None):
+    documents = documents or [{"path":path,"name":Path(path).name,"type":st.session_state.get("scarico_file_type", "")}]
+    if privacy_manifest is None:
+        from local_label_reader import prepare_document
+        with st.spinner("Controllo locale dei ritagli e della qualità, senza invio al modello…"):
+            proposals=[prepare_document(d["path"]) for d in documents]
+        st.session_state["scarico_privacy_pending"]={"documents":documents,"proposals":proposals}
+        st.rerun()
+        return
     if not ai_enabled():
         st.error("OCR AI non configurato. Verifica OPENAI_API_KEY ed ENABLE_AI_OCR nei Secrets.")
         return
@@ -344,7 +352,11 @@ def run_ai(path, documents=None):
                                    "type": st.session_state.get("scarico_file_type", "")}]
         originals = [OriginalDocument(d.get("name") or Path(d["path"]).name, Path(d["path"]).read_bytes()) for d in documents]
         with st.spinner(f"Analisi AI di {len(documents)} file: codici, lotti e scadenze…"):
-            meta = analyze_documents(originals, analyzer=analyze_document)
+            from gtin_catalog import supabase_lookup
+            def approved_analyzer(source,mode):
+                digest=sha256(Path(source).read_bytes()).hexdigest()
+                return analyze_document(source,mode=mode,privacy_approval=privacy_manifest.get(digest))
+            meta = analyze_documents(originals, analyzer=approved_analyzer,gtin_catalog=supabase_lookup(sb()))
             combined_rows = normalize_ai_items(meta)
         meta["physical_label_count"] = len(combined_rows)
         meta["items"] = combined_rows
@@ -363,7 +375,7 @@ def run_ai(path, documents=None):
         st.info(f"Analisi terminata: {len(st.session_state['scarico_ai_rows'])} etichette proposte. Verifica completezza, campi e avvisi prima della conferma.")
         st.rerun()
     except Exception as e:
-        st.error(f"Errore analisi AI: {e}")
+        st.error(f"Analisi non completata ({type(e).__name__}). Verifica connessione e configurazione senza condividere chiavi nei log.")
 
 
 def save_document_after_transaction(intervention_id, procedure_date, customer_code, customer_name, agent, clinical_record):
@@ -461,6 +473,42 @@ with upload_tab:
                 upload.name = entry["name"]
                 documents.append({"path": save_local(upload), "name": entry["name"], "type": entry["type"]})
             run_ai(documents[0]["path"], documents=documents)
+
+
+privacy_pending=st.session_state.get("scarico_privacy_pending")
+if privacy_pending:
+    from label_pipeline import render_pages,crop_region,decode_barcodes
+    from image_quality import acquisition_report
+    st.subheader("Verifica locale dei ritagli prima dell'invio")
+    st.info("Al modello saranno inviati soltanto i ritagli selezionati qui sotto. Deseleziona qualsiasi ritaglio con intestazione, iniziali, numero di cartella o altri dati del paziente. Se manca un'etichetta, aggiungi una foto ravvicinata. I dati intervento andranno compilati manualmente.")
+    selected={};all_documents_have_labels=True
+    for document,proposal in zip(privacy_pending["documents"],privacy_pending["proposals"]):
+        pages=render_pages(document["path"])
+        regions=[]
+        for number,page in enumerate(pages,1):
+            page_regions=[r for r in proposal["regions"] if r["page"]==number]
+            for message in acquisition_report(page,page_regions)["warnings"]:st.warning(message)
+        for index,region in enumerate(proposal["regions"]):
+            crop=crop_region(pages[region["page"]-1],region["bbox"])
+            st.image(crop,caption=f"{document['name']} · etichetta {index+1}",use_container_width=True)
+            decode_key=f"privacy_dm_{proposal['sha256']}_{index}"
+            if decode_key not in st.session_state:
+                st.session_state[decode_key]=bool([b for b in decode_barcodes(crop) if not b.get('error')])
+            if not st.session_state[decode_key]:
+                st.warning("DataMatrix non decodificato: acquisisci una nuova foto più ravvicinata, nitida e senza riflessi. Il testo sarà soltanto un controllo, non una corrispondenza GTIN verificata.")
+            if st.checkbox("Questo ritaglio contiene solo l'etichetta del prodotto",value=False,key=f"privacy_crop_{proposal['sha256']}_{index}"):
+                regions.append(region)
+        if not regions:all_documents_have_labels=False
+        selected[proposal["sha256"]]={**proposal,"regions":regions,"approved":True,"labels_only_confirmed":True}
+    confirmed=st.checkbox("Ho controllato tutti i ritagli selezionati: nessun dato del paziente verrà inviato",value=False,key="scarico_privacy_confirmed")
+    if st.button("Invia solo le etichette approvate al modello",disabled=not confirmed or not all_documents_have_labels,type="primary"):
+        documents=privacy_pending["documents"]
+        st.session_state.pop("scarico_privacy_pending",None)
+        run_ai(documents[0]["path"],documents=documents,privacy_manifest=selected)
+    if st.button("Annulla e acquisisci foto più ravvicinate"):
+        st.session_state.pop("scarico_privacy_pending",None)
+        st.rerun()
+    st.stop()
 
 meta = st.session_state.get("scarico_ai_meta", {}) or {}
 source_rows = st.session_state.get("scarico_ai_rows", []) or []

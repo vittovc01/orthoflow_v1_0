@@ -1,0 +1,122 @@
+{
+  "silent_errors": 0,
+  "accepted": false,
+  "status": "COMPLETED",
+  "mode": "local",
+  "model": null,
+  "generated_at": "2026-10-15T13:31:35.001897+00:00",
+  "dataset_sha256": "c29a332c930a512870fe7cc4a15ee5a08cababf20a416afd235db7c1aa3a305d",
+  "pipeline_sha256": "ff26a44cb543f36cda52d432d35b7096481ef53f4a1a7480ee180583351916a0",
+  "files": 16,
+  "cases": 16,
+  "unique_label_appearances": 16,
+  "unique_physical_labels": 16,
+  "annotations_complete": true,
+  "truth_manual_review_confirmed": false,
+  "gtin_catalog_sha256": null,
+  "privacy_manifest_sha256": null,
+  "repeats": 1,
+  "unlisted_files": [],
+  "python": "3.12.14",
+  "packages": {
+    "Pillow": "12.3.0",
+    "zxing-cpp": "2.3.0",
+    "opencv-python-headless": "4.11.0.86",
+    "openai": "2.24.0"
+  },
+  "tesseract": "tesseract 5.3.4",
+  "counts": {
+    "expected": 16,
+    "found": 16,
+    "matched": 16,
+    "missing": 0,
+    "extra": 0,
+    "spatial_matches": 16,
+    "silent_errors": 0,
+    "physical_expected": 16,
+    "physical_matched": 16,
+    "aggregation_unavailable": 16,
+    "quantity_wrong": 0,
+    "quantity_unresolved": 16,
+    "failed_documents": 0
+  },
+  "recall": 1.0,
+  "fields": {
+    "ref": {
+      "total": 16,
+      "flagged": 16,
+      "correct": 0,
+      "wrong": 16,
+      "unknown_truth": 0,
+      "silent": 0
+    },
+    "lotto": {
+      "total": 16,
+      "flagged": 0,
+      "correct": 16,
+      "wrong": 0,
+      "unknown_truth": 0,
+      "silent": 0
+    },
+    "scadenza": {
+      "total": 16,
+      "flagged": 0,
+      "correct": 16,
+      "wrong": 0,
+      "unknown_truth": 0,
+      "silent": 0
+    }
+  },
+  "exact_field_accuracy": 0.6666666666666666,
+  "field_review_rate": 0.3333333333333333,
+  "conditions_covered": [],
+  "spatial_recall": 1.0,
+  "gate_reasons": [
+    "Modello live non eseguito",
+    "Servono almeno tre ripetizioni live",
+    "Verità manuale non controverificata",
+    "Servono almeno 300 etichette reali annotate",
+    "Servono almeno 50 scarichi indipendenti",
+    "Accuratezza esatta campi inferiore al 98%",
+    "Più del 15% dei campi da verificare",
+    "Quantità errate o non risolte",
+    "Casi limite non tutti rappresentati"
+  ],
+  "acceptance_thresholds": {
+    "silent_errors": 0,
+    "recall": 1.0,
+    "false_positives": 0,
+    "exact_field_accuracy": 0.98,
+    "max_field_review_rate": 0.15,
+    "quantity_errors_or_unresolved": 0,
+    "min_labels": 300,
+    "min_cases": 50,
+    "live_repeats": 3
+  },
+  "comparison": {
+    "mode": {
+      "baseline": "local",
+      "current": "local"
+    },
+    "model": {
+      "baseline": null,
+      "current": null
+    },
+    "silent_errors": {
+      "baseline": 0,
+      "current": 0
+    },
+    "recall": {
+      "baseline": 0.8125,
+      "current": 1.0
+    },
+    "exact_field_accuracy": {
+      "baseline": 0.5416666666666666,
+      "current": 0.6666666666666666
+    },
+    "field_review_rate": {
+      "baseline": 0.4583333333333333,
+      "current": 0.3333333333333333
+    }
+  }
+}

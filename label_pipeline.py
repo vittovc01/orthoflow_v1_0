@@ -13,7 +13,7 @@ from pathlib import Path
 
 from PIL import Image, ImageOps, ImageFilter
 
-PIPELINE_VERSION = 'physical-label-v14-cross-photo-review'
+PIPELINE_VERSION = 'physical-label-v15-local-crops-gtin'
 
 
 def local_ref_evidence(image):
@@ -107,7 +107,10 @@ def render_pages(path):
                 raise ValueError('Massimo 12 pagine per analisi; dividere il documento.')
             return [Image.open(BytesIO(p.get_pixmap(matrix=fitz.Matrix(4, 4), alpha=False).tobytes('png'))).convert('RGB') for p in doc]
     with Image.open(path) as image:
-        return [ImageOps.exif_transpose(image).convert('RGB')]
+        page=ImageOps.exif_transpose(image).convert('RGB')
+        page.info['_ocr_source_quantization']=getattr(image,'quantization',None)
+        page.info['_ocr_source_exif']={str(k):image.getexif().get(k) for k in (305,40962,40963)}
+        return [page]
 
 
 def overlap(a, b):
@@ -198,29 +201,8 @@ def gs1_parse(raw):
 
 
 def decode_barcodes(image):
-    import zxingcpp
-    results = []
-    # Retry conservative threshold/scale variants; retain every distinct payload.
-    variants = [image]
-    gray = image.convert('L')
-    variants += [gray.point(lambda p: 255 if p > t else 0) for t in (60, 80, 120, 160)]
-    small = gray.resize((max(1, round(gray.width*.75)), max(1, round(gray.height*.75))), Image.Resampling.LANCZOS)
-    variants.append(small.point(lambda p: 255 if p > 80 else 0))
-    # Resampling must be explicit: default interpolation can destroy a finder
-    # whose module boundary falls between pixels. Never invent a payload.
-    if max(gray.size) < 1200:
-        variants.append(gray.resize(tuple(round(v*1.5) for v in gray.size), Image.Resampling.NEAREST))
-    seen = set()
-    for variant in variants:
-        for barcode in zxingcpp.read_barcodes(variant):
-            raw = barcode.bytes.decode('utf-8', errors='replace')
-            symbology = getattr(barcode, 'symbology_identifier', '')
-            if raw in seen:
-                continue
-            if symbology in {']d2', ']C1'} or raw.startswith((']d2', ']C1', '(01)')):
-                seen.add(raw)
-                results.append({'raw': raw, 'format': str(barcode.format), **gs1_parse(raw)})
-    return results
+    from datamatrix_reader import decode
+    return decode(image)
 
 
 def reconcile(item, barcodes):
@@ -411,76 +393,23 @@ def merge_linear_regions(local_regions, proposals, page):
     return sorted(output, key=lambda r: (r['page'], r['bbox'][1], r['bbox'][0]))
 
 
-def analyze_labels(path, client, model, item_schema, parse):
+def analyze_labels(path, client, model, item_schema, parse, *, privacy_approval=None):
     """Two stages: locate geometry, then read exactly one crop per observation."""
-    detector_schema = {'type':'object','properties':{
-        'labels':{'type':'array','items':{'type':'object','properties':{
-            'bbox':{'type':'array','items':{'type':'integer'},'minItems':4,'maxItems':4},
-            'rotation':{'type':'integer','enum':[0,90,180,270]}},
-            'required':['bbox','rotation'],'additionalProperties':False}},
-        'layout':{'type':'string','enum':['synthes_datamatrix','other','mixed','unknown']},
-        'warning':{'type':['string','null']}},'required':['labels','layout','warning'],'additionalProperties':False}
+    from ocr_privacy import approved_regions
+    approved=approved_regions(path,privacy_approval)
     pages = render_pages(path)
     digest = hashlib.sha256(Path(path).read_bytes()).hexdigest()[:20]
     items, warnings, unconfirmed_regions, annotated_pages = [], [], [], []
+    acquisition=[]
     for number, page in enumerate(pages, 1):
         preview = page.copy()
         preview.thumbnail((2200,2200))
-        from label_geometry import locate_datamatrix_labels
-        local_regions = locate_datamatrix_labels(page)
-        located = parse(client.responses.create(model=model, store=False,
-            input=[{'role':'user','content':[
-                {'type':'input_text','text':'Individua OGNI etichetta fisica adesiva originale del produttore di prodotto ortopedico, incluse le etichette con soli barcode lineari, quelle ripetute, ai bordi e verticali. Escludi gli adesivi di inventario ospedaliero contenenti soltanto codice articolo, numeri interni e (1/1), senza LOT/lotto, scadenza e dati del produttore. Non leggere i dati. layout=synthes_datamatrix soltanto per il layout delle piccole etichette Synthes a REF puntato e DataMatrix; altre etichette DePuy ATTUNE/VELYS/SmartSet sono other, anche se sterili o con DataMatrix. Per compresenza dei due layout usa mixed. Restituisci rettangoli stretti non sovrapposti in coordinate della immagine originale da 0 a 1000 [sinistra,alto,destra,basso]. Una etichetta per rettangolo, non una colonna. rotation è la rotazione antioraria necessaria a leggere quel singolo ritaglio. Non includere intestazione, firma, celle vuote. Segnala parti non localizzabili.'},
-                {'type':'input_image','image_url':image_url(preview),'detail':'high'}]}],
-            text={'format':{'type':'json_schema','name':'physical_labels','schema':detector_schema,'strict':True}}))
-        # A separate geometry pass sees the proposed boxes on the source page.
-        # It can reject header fields and repair split/mixed stickers before OCR.
-        try:
-            from PIL import ImageDraw
-            audit = preview.copy()
-            draw = ImageDraw.Draw(audit)
-            for index, region in enumerate(located['labels'], 1):
-                box = region['bbox']
-                pixels = tuple(round(v * (audit.width if i % 2 == 0 else audit.height) / 1000)
-                               for i, v in enumerate(box))
-                draw.rectangle(pixels, outline='red', width=2)
-                draw.text(pixels[:2], str(index), fill='red')
-            checked = parse(client.responses.create(model=model, store=False,
-                input=[{'role':'user','content':[
-                    {'type':'input_text','text':'Controllo geometrico indipendente. I rettangoli rossi sono proposte NON affidabili. Restituisci la lista COMPLETA corretta di tutte le etichette fisiche originali di prodotti ortopedici. Elimina i rettangoli su intestazione, cartella clinica, date manoscritte e firme. Correggi ogni rettangolo troncato o contenente più etichette: includi REF, LOT, scadenza e tutti i bordi della singola etichetta. Aggiungi tutte le etichette mancanti, anche identiche. Non contare adesivi interni ospedalieri. Coordinate [sinistra,alto,destra,basso] da 0 a 1000 su TUTTA la pagina, mai in pixel. Rotazione antioraria. Non leggere gli identificativi. Controlla ogni riga e colonna.'},
-                    {'type':'input_image','image_url':image_url(audit),'detail':'high'},
-                    {'type':'input_image','image_url':image_url(preview),'detail':'high'}]}],
-                text={'format':{'type':'json_schema','name':'audited_physical_labels','schema':detector_schema,'strict':True}}))
-            unique_regions([dict(r, page=number) for r in checked['labels']])
-            if located.get('warning'):
-                warnings.append(f'Pagina {number}: prima localizzazione: {located["warning"]}')
-            if len(checked['labels']) != len(located['labels']):
-                warnings.append(f'Pagina {number}: conteggio corretto dal controllo dei ritagli; confermare sul documento originale')
-            located = checked
-        except Exception:
-            warnings.append(f'Pagina {number}: controllo indipendente dei ritagli non disponibile; verificare ogni etichetta sul documento')
-        if located.get('warning'):
-            warnings.append(f'Pagina {number}: {located["warning"]}')
-        proposals = unique_regions([dict(r,page=number) for r in located['labels']])
-        from linear_label_geometry import locate_linear_labels
-        try:
-            linear_regions = locate_linear_labels(page) if located.get('layout') in {'other', 'mixed'} else []
-        except (OSError, subprocess.SubprocessError):
-            linear_regions = []
-            warnings.append(f'Pagina {number}: localizzazione barcode non disponibile; verificare i ritagli visivi')
-        if linear_regions:
-            regions = merge_linear_regions(linear_regions, proposals, number)
-            if len(regions) != len(proposals):
-                warnings.append(f'Pagina {number}: conteggio AI/localizzazione barcode discordante; verificare il conteggio sul documento originale')
-        else:
-            regions = select_label_regions(local_regions, proposals, located.get('layout'), number, page)
-            page_unconfirmed = []
-            for proposal in proposals:
-                if not any(overlap(r['bbox'], proposal['bbox']) >= .5 for r in regions):
-                    page_unconfirmed.append(dict(proposal, crop_data_url=image_url(crop_region(page, proposal['bbox']))))
-            unconfirmed_regions.extend(page_unconfirmed)
-            if page_unconfirmed:
-                warnings.append(f'Pagina {number}: proposte AI prive di riscontro fisico non contate come prodotti; verificare il conteggio sul documento originale')
+        # Geometry is local and operator approved; never transmit a page or header.
+        regions=[r for r in approved if r['page']==number]
+        from image_quality import acquisition_report
+        capture=acquisition_report(page,regions)
+        acquisition.append(dict(capture,page=number))
+        warnings.extend(capture['warnings'])
         from image_quality import geometry_alerts
         warnings.extend(f'Pagina {number}: {message}' for message in geometry_alerts(regions))
         from PIL import ImageDraw
@@ -511,7 +440,7 @@ def analyze_labels(path, client, model, item_schema, parse):
                     text={'format':{'type':'json_schema','name':'single_label','schema':item_schema,'strict':True}})
                 first = parse(response)
                 if not decoded:
-                    first['warning']=' · '.join(filter(None,[first.get('warning'),'DataMatrix non leggibile: ripiego sul testo stampato']))
+                    first['warning']=' · '.join(filter(None,[first.get('warning'),'DataMatrix non decodificato: acquisire una nuova foto più ravvicinata; ripiego sul testo stampato']))
                 second = parse(client.responses.create(model=model, store=False,
                     input=[{'role':'user','content':[
                         {'type':'input_text','text':'Leggi questa sola etichetta da zero. Trascrivi il REF stampato completo di punti, zeri iniziali e suffissi S/TS, lotto, scadenza ISO e GTIN stampato dopo (01), separato dal REF. Non ricostruire caratteri da descrizioni, GTIN o cataloghi. Campi incerti a null. Non confondere 018, 020, 016, 085, 005. quantity=1.'},
@@ -533,20 +462,9 @@ def analyze_labels(path, client, model, item_schema, parse):
             row['assessment'] = assess_label(row)
             items.append(row)
     metadata = {k: None for k in ('clinic_name', 'clinical_record', 'procedure_date', 'surgeon')}
-    header_preview = pages[0].copy()
-    header_preview.thumbnail((2200, 2200))
-    header_schema = {'type': 'object', 'properties': {k: {'type': ['string', 'null']} for k in metadata},
-                     'required': list(metadata), 'additionalProperties': False}
-    try:
-        metadata = parse(client.responses.create(model=model, store=False,
-            input=[{'role': 'user', 'content': [
-                {'type': 'input_text', 'text': 'Leggi soltanto intestazione e dati intervento: struttura, cartella clinica, data intervento ISO YYYY-MM-DD, chirurgo. Non estrarre etichette. Non confondere destinatario, fornitore o firma con chirurgo. Campi non stampati, non presenti o illeggibili a null.'},
-                {'type': 'input_image', 'image_url': image_url(header_preview), 'detail': 'high'}]}],
-            text={'format': {'type': 'json_schema', 'name': 'procedure_header', 'schema': header_schema, 'strict': True}}))
-    except Exception:
-        warnings.append('Intestazione non letta: compilare manualmente i dati intervento')
+    warnings.append('Privacy: intestazione non inviata al modello; compilare manualmente i dati intervento')
     return {'document_type':'scarico_sala','items':items,'back_orders':[],
             'pipeline_version':PIPELINE_VERSION,
-            'physical_label_count':len(items),'detection_warnings':warnings,
+            'physical_label_count':len(items),'detection_warnings':warnings,'acquisition':acquisition,
             'unconfirmed_regions':unconfirmed_regions,'annotated_pages':annotated_pages,
             'count_verified':False, **metadata, 'confidence':0}

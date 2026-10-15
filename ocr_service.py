@@ -11,11 +11,11 @@ from ocr_repository import OriginalDocument
 from ocr_review import build_review, mark_cross_photo_candidates
 
 
-def analyze_documents(documents, *, analyzer, catalog=None, soon_days=90):
+def analyze_documents(documents, *, analyzer, catalog=None, gtin_catalog=None, soon_days=90):
     if not 1<=len(documents)<=20 or sum(len(d.content) for d in documents)>50*1024*1024:
         raise ValueError('Caricare da 1 a 20 documenti, massimo 50 MiB totali')
     result = {'items':[],'annotated_pages':[],'detection_warnings':[],
-              'unconfirmed_regions':[],'documents':[],'review_required':True}
+              'unconfirmed_regions':[],'acquisition':[],'documents':[],'review_required':True}
     seen_documents={}
     with TemporaryDirectory(prefix='orthoflow-review-') as tmp:
         for index, document in enumerate(documents):
@@ -36,7 +36,7 @@ def analyze_documents(documents, *, analyzer, catalog=None, soon_days=90):
                 result['documents'].append({'index':index,'name':document.name,'status':'failed'})
                 continue
             result['documents'].append({'index':index,'name':document.name,'status':'analyzed'})
-            for key in ('items','annotated_pages','detection_warnings','unconfirmed_regions'):
+            for key in ('items','annotated_pages','detection_warnings','unconfirmed_regions','acquisition'):
                 entries = incoming.get(key) or []
                 if key in ('items','annotated_pages','unconfirmed_regions'):
                     entries = [dict(entry,document_index=index) for entry in entries]
@@ -45,5 +45,7 @@ def analyze_documents(documents, *, analyzer, catalog=None, soon_days=90):
             for key in ('clinic_name','clinical_record','procedure_date','surgeon'):
                 if not result.get(key) and incoming.get(key):
                     result[key] = incoming[key]
+    from gtin_catalog import resolve_ref
+    result['items']=[resolve_ref(item,gtin_catalog) for item in result['items']]
     mark_cross_photo_candidates(result['items'])
     return build_review(result,catalog=catalog,soon_days=soon_days)

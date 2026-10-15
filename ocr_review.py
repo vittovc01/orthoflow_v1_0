@@ -74,6 +74,11 @@ def assess_label(item, *, catalog=None, today=None, soon_days=90):
             elif value:
                 method = 'datamatrix_ocr' if reads else 'datamatrix'
                 status, score = 'agreement' if reads else 'decoded', .95 if reads else .9
+        if name=='code' and item.get('catalog_resolution'):
+            state=item['catalog_resolution']
+            method='gtin_catalogue_ocr' if state=='matched' else 'gtin_catalogue'
+            status='agreement' if state=='matched' else 'conflict' if state=='conflict' else 'unknown_catalogue' if state in {'unknown_gtin','catalogue_unavailable'} else 'unverified'
+            score=.99 if state=='matched' else .45 if value else 0.0
         precision = None
         if name=='expiry' and value:
             normalized, precision = normalize_expiry(value)

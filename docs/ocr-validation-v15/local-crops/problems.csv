@@ -1,0 +1,33 @@
+﻿priority,row_type,repeat,case_id,file,truth_label,predicted_label,field,expected,predicted,correct,flagged,silent_error,method,matching,condition,problem
+1,quantity,1,crop-01,,07.720.051S / 502L306,,ref+lotto,1,,,True,,,,,Codice e lotto obbligatori per aggregare etichette di impianto
+1,field,1,crop-01,01.png,unit-01,4dd678f636fc8859894c:p1:l1,ref,07.720.051S,,False,True,False,gtin_catalogue,spatial,,campo_errato_o_assente
+1,quantity,1,crop-02,,07.720.047S / 460L593,,ref+lotto,1,,,True,,,,,Codice e lotto obbligatori per aggregare etichette di impianto
+1,field,1,crop-02,02.png,unit-02,99a54e0cdea10a78ba63:p1:l1,ref,07.720.047S,,False,True,False,gtin_catalogue,spatial,,campo_errato_o_assente
+1,quantity,1,crop-03,,07.720.045S / 502L109,,ref+lotto,1,,,True,,,,,Codice e lotto obbligatori per aggregare etichette di impianto
+1,field,1,crop-03,03.png,unit-03,d879fc4cd085422cdee7:p1:l1,ref,07.720.045S,,False,True,False,gtin_catalogue,spatial,,campo_errato_o_assente
+1,quantity,1,crop-04,,441.903S / 78864P9,,ref+lotto,1,,,True,,,,,Codice e lotto obbligatori per aggregare etichette di impianto
+1,field,1,crop-04,04.png,unit-04,67b4595e601f7063ea90:p1:l1,ref,441.903S,,False,True,False,gtin_catalogue,spatial,,campo_errato_o_assente
+1,quantity,1,crop-05,,292.720S / 477L650,,ref+lotto,1,,,True,,,,,Codice e lotto obbligatori per aggregare etichette di impianto
+1,field,1,crop-05,05.png,unit-05,ed6206f584fde56245de:p1:l1,ref,292.720S,,False,True,False,gtin_catalogue,spatial,,campo_errato_o_assente
+1,quantity,1,crop-06,,292.720S / 477L650,,ref+lotto,1,,,True,,,,,Codice e lotto obbligatori per aggregare etichette di impianto
+1,field,1,crop-06,06.png,unit-06,fcc6c8138f3273615c08:p1:l1,ref,292.720S,,False,True,False,gtin_catalogue,spatial,,campo_errato_o_assente
+1,quantity,1,crop-07,,413.040S / 301931P,,ref+lotto,1,,,True,,,,,Codice e lotto obbligatori per aggregare etichette di impianto
+1,field,1,crop-07,07.png,unit-07,daf64affc0f6c3d400ea:p1:l1,ref,413.040S,,False,True,False,gtin_catalogue,spatial,,campo_errato_o_assente
+1,quantity,1,crop-08,,413.040S / 62405P5,,ref+lotto,1,,,True,,,,,Codice e lotto obbligatori per aggregare etichette di impianto
+1,field,1,crop-08,08.png,unit-08,d1f8544dbba75327dbe3:p1:l1,ref,413.040S,,False,True,False,gtin_catalogue,spatial,,campo_errato_o_assente
+1,quantity,1,crop-09,,413.048S / 9133P02,,ref+lotto,1,,,True,,,,,Codice e lotto obbligatori per aggregare etichette di impianto
+1,field,1,crop-09,09.png,unit-09,a1ccc1587f41d4dc4032:p1:l1,ref,413.048S,,False,True,False,gtin_catalogue,spatial,,campo_errato_o_assente
+1,quantity,1,crop-10,,04.200.026S / 354L297,,ref+lotto,1,,,True,,,,,Codice e lotto obbligatori per aggregare etichette di impianto
+1,field,1,crop-10,10.png,unit-10,07ccb7fe56df6fb7a63e:p1:l1,ref,04.200.026S,,False,True,False,gtin_catalogue,spatial,,campo_errato_o_assente
+1,quantity,1,crop-11,,413.040S / 66475P9,,ref+lotto,1,,,True,,,,,Codice e lotto obbligatori per aggregare etichette di impianto
+1,field,1,crop-11,11.png,unit-11,f075fddd968a89cb1a7d:p1:l1,ref,413.040S,,False,True,False,gtin_catalogue,spatial,,campo_errato_o_assente
+1,quantity,1,crop-12,,413.028S / 61172P8,,ref+lotto,1,,,True,,,,,Codice e lotto obbligatori per aggregare etichette di impianto
+1,field,1,crop-12,12.png,unit-12,39cf6335d7d8a72249f9:p1:l1,ref,413.028S,,False,True,False,gtin_catalogue,spatial,,campo_errato_o_assente
+1,quantity,1,crop-13,,413.050S / 40045P6,,ref+lotto,1,,,True,,,,,Codice e lotto obbligatori per aggregare etichette di impianto
+1,field,1,crop-13,13.png,unit-13,9c52e6d9d1a6242cf54e:p1:l1,ref,413.050S,,False,True,False,gtin_catalogue,spatial,,campo_errato_o_assente
+1,quantity,1,crop-14,,413.026S / 6889P71,,ref+lotto,1,,,True,,,,,Codice e lotto obbligatori per aggregare etichette di impianto
+1,field,1,crop-14,14.png,unit-14,f41619e91716dceee7f5:p1:l1,ref,413.026S,,False,True,False,gtin_catalogue,spatial,,campo_errato_o_assente
+1,quantity,1,crop-15,,413.035S / 95663P8,,ref+lotto,1,,,True,,,,,Codice e lotto obbligatori per aggregare etichette di impianto
+1,field,1,crop-15,15.png,unit-15,8923ee37483cb703b014:p1:l1,ref,413.035S,,False,True,False,gtin_catalogue,spatial,,campo_errato_o_assente
+1,quantity,1,crop-16,,413.026S / 281402P,,ref+lotto,1,,,True,,,,,Codice e lotto obbligatori per aggregare etichette di impianto
+1,field,1,crop-16,16.png,unit-16,9fba786ed4abd7ff6883:p1:l1,ref,413.026S,,False,True,False,gtin_catalogue,spatial,,campo_errato_o_assente

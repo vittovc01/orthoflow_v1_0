@@ -85,7 +85,7 @@ def _track_usage(response, mode, model, suffix):
     except Exception:
         pass
 
-def analyze_document(path: str, mode: str="scarico_sala") -> Dict[str,Any]:
+def analyze_document(path: str, mode: str="scarico_sala", *, privacy_approval=None) -> Dict[str,Any]:
     status=ai_status()
     if not status["enabled"]: raise RuntimeError("AI OCR non abilitato. Configura OPENAI_API_KEY e ENABLE_AI_OCR=true nei Secrets.")
     p=Path(path)
@@ -96,7 +96,7 @@ def analyze_document(path: str, mode: str="scarico_sala") -> Dict[str,Any]:
         from label_pipeline import analyze_labels
         return analyze_labels(path, client, status["label_model"],
             {"type":"object","properties":ITEM_PROPERTIES,"required":ITEM_REQUIRED,"additionalProperties":False},
-            _parse_response)
+            _parse_response, privacy_approval=privacy_approval)
     if p.suffix.lower()==".pdf":
         pdf_b64=base64.b64encode(p.read_bytes()).decode("utf-8")
         content=[
@@ -185,5 +185,5 @@ def normalize_ai_items(result):
             warning=(warning+" · " if warning else "")+"Scadenza stampata solo mese/anno: fine mese tecnica, verificare la precisione originale"
         if raw_expiry and not expiry:
             warning=(warning+" · " if warning else "")+f"Scadenza da verificare: {raw_expiry}"
-        out.append({"codice":code,"descrizione":it.get("description") or "","lotto":(it.get("lot") or "").strip(),"scadenza":expiry,"scadenza_originale":raw_expiry,"quantita":it.get("quantity") if it.get("quantity") is not None else 1,"produttore":manufacturer,"is_jnj":bool(it.get("is_jnj_depuy_synthes",False)),"is_sterile":bool(it.get("is_sterile",code.upper().endswith("S"))),"confidence":float(it.get("confidence") or 0),"warning":warning,"source_text":it.get("source_text") or "", **{k:it.get(k) for k in ("label_id","page","bbox","rotation","crop_data_url","source_document","gtin","barcodes","ocr_reads","ref_original","local_ref_evidence","assessment","geometry_source","deskew_angle","document_index","lot_ocr_original","expiry_ocr_original","gtin_ocr_original","cross_photo_candidates","physical_distinct_confirmed","duplicate_of","image_quality")}, "verificata":False})
+        out.append({"codice":code,"descrizione":it.get("description") or "","lotto":(it.get("lot") or "").strip(),"scadenza":expiry,"scadenza_originale":raw_expiry,"quantita":it.get("quantity") if it.get("quantity") is not None else 1,"produttore":manufacturer,"is_jnj":bool(it.get("is_jnj_depuy_synthes",False)),"is_sterile":bool(it.get("is_sterile",code.upper().endswith("S"))),"confidence":float(it.get("confidence") or 0),"warning":warning,"source_text":it.get("source_text") or "", **{k:it.get(k) for k in ("label_id","page","bbox","rotation","crop_data_url","source_document","gtin","barcodes","ocr_reads","ref_original","local_ref_evidence","assessment","geometry_source","deskew_angle","document_index","lot_ocr_original","expiry_ocr_original","gtin_ocr_original","cross_photo_candidates","physical_distinct_confirmed","duplicate_of","image_quality","catalog_resolution","catalog_ref_candidate","catalog_description","ref_ocr_observations")}, "verificata":False})
     return out

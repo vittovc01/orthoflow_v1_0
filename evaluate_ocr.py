@@ -161,38 +161,11 @@ def condition_flag(item,condition,warnings):
 
 def local_analyzer(path,mode='scarico_sala'):
     """Actual offline components, no oracle boxes/identifiers and no AI mock result."""
-    from label_pipeline import (render_pages,decode_barcodes,crop_region,local_ref_evidence,
-                                reconcile,verify_ref_evidence,unique_regions,PIPELINE_VERSION)
-    from label_geometry import locate_datamatrix_labels
-    from ocr_review import assess_label
-    from PIL import Image
-    result={'items':[],'detection_warnings':[],'pipeline_version':PIPELINE_VERSION}
-    for page_number,page in enumerate(render_pages(path),1):
-        regions=locate_datamatrix_labels(page)
-        if not regions and 2<page.width/page.height<5 and len(decode_barcodes(page))==1:
-            regions=[{'bbox':[0,0,1000,1000],'rotation':0,'geometry_source':'single_barcode_sticker'}]
-        if not regions:
-            result['detection_warnings'].append(f'Pagina {page_number}: nessuna geometria locale affidabile; nuova foto o modello live necessari')
-        from image_quality import geometry_alerts
-        result['detection_warnings'].extend(geometry_alerts(regions))
-        for index,region in enumerate(unique_regions([dict(r,page=page_number) for r in regions])):
-            crop=crop_region(page,region['bbox']).rotate(region['rotation']+region.get('deskew_angle',0),
-                       expand=True,resample=Image.Resampling.BICUBIC,fillcolor='white')
-            evidence=local_ref_evidence(crop)
-            code=evidence['candidates'][0] if len(evidence.get('candidates',[]))==1 else None
-            decoded=decode_barcodes(crop)
-            item=verify_ref_evidence(reconcile({'code':code,'lot':None,'expiry':None,'description':None},decoded),evidence)
-            item.update(label_id=f'{sha(Path(path).read_bytes())[:20]}:p{page_number}:l{index+1}',
-                        source_document=sha(Path(path).read_bytes())[:20],page=page_number,bbox=region['bbox'])
-            if not decoded:item['warning']=(item.get('warning') or '')+' · DataMatrix non leggibile'
-            from image_quality import inspect_quality
-            item['image_quality']=inspect_quality(crop)
-            item['assessment']=assess_label(item)
-            result['items'].append(item)
-    return result
+    from local_label_reader import read_local
+    return read_local(path,mode=mode)
 
 
-def live_analyzer(model):
+def live_analyzer(model,privacy_manifest=None):
     if not os.environ.get('OPENAI_API_KEY'):
         raise RuntimeError('OPENAI_API_KEY non configurata: valutazione live NON ESEGUITA')
     from openai import OpenAI
@@ -203,7 +176,7 @@ def live_analyzer(model):
     client=OpenAI(api_key=os.environ['OPENAI_API_KEY'],timeout=60,max_retries=1)
     schema={'type':'object','properties':ITEM_PROPERTIES,'required':ITEM_REQUIRED,'additionalProperties':False}
     # Same production analyzer; deliberately bypass usage tracking/storage adapters.
-    return lambda path,mode='scarico_sala':analyze_labels(path,client,model,schema,_parse_response)
+    return lambda path,mode='scarico_sala':analyze_labels(path,client,model,schema,_parse_response,privacy_approval=(privacy_manifest or {}).get(sha(Path(path).read_bytes())))
 
 
 def evaluate_case(case_id,truth_by_file,prediction,repeat):
@@ -295,7 +268,7 @@ def evaluate_case(case_id,truth_by_file,prediction,repeat):
 
 
 def evaluate(root,truth_path,out,*,mode='local',annotations_path=None,model='gpt-4.1',repeats=1,
-             predictions_path=None,compare_path=None,min_labels=300,min_cases=50):
+             predictions_path=None,compare_path=None,min_labels=300,min_cases=50,gtin_catalog_path=None,privacy_manifest_path=None):
     from ocr_service import analyze_documents
     from ocr_repository import OriginalDocument,without_images
     truth,annotations,unlisted=load_truth(root,truth_path,annotations_path)
@@ -304,7 +277,8 @@ def evaluate(root,truth_path,out,*,mode='local',annotations_path=None,model='gpt
     source_hashes={name:sha((root/name).read_bytes()) for name in sorted(truth)}
     dataset_hash=sha(json.dumps({'truth':truth,'source_hashes':source_hashes},sort_keys=True).encode())
     code_files=['evaluate_ocr.py','ocr_service.py','ocr_review.py','label_pipeline.py','label_geometry.py',
-                'sticker_geometry.py','linear_label_geometry.py','image_quality.py','ai_ocr.py']
+                'sticker_geometry.py','linear_label_geometry.py','image_quality.py','ai_ocr.py',
+                'datamatrix_reader.py','local_label_reader.py','ocr_privacy.py','gtin_catalog.py']
     pipeline_hash=sha(b''.join((Path(__file__).parent/p).read_bytes() for p in code_files))
     summary={'silent_errors':None,'accepted':False,'status':'NOT_RUN','mode':mode,'model':model if mode=='live' else None,
         'generated_at':datetime.now(timezone.utc).isoformat(),'dataset_sha256':dataset_hash,'pipeline_sha256':pipeline_hash,
@@ -312,6 +286,8 @@ def evaluate(root,truth_path,out,*,mode='local',annotations_path=None,model='gpt
         'unique_physical_labels':len({(r['case_id'],r['physical_id']) for rows in truth.values() for r in rows}),
         'annotations_complete':all(r.get('bbox') is not None for rows in truth.values() for r in rows),
         'truth_manual_review_confirmed':bool(annotations.get('manual_truth_verified',False)),
+        'gtin_catalog_sha256':sha(gtin_catalog_path.read_bytes()) if gtin_catalog_path else None,
+        'privacy_manifest_sha256':sha(privacy_manifest_path.read_bytes()) if privacy_manifest_path else None,
         'repeats':repeats,'unlisted_files':unlisted,'python':platform.python_version(),
         'packages':{},'tesseract':None}
     try:
@@ -322,7 +298,10 @@ def evaluate(root,truth_path,out,*,mode='local',annotations_path=None,model='gpt
         except importlib.metadata.PackageNotFoundError:summary['packages'][package]=None
     out.mkdir(parents=True,exist_ok=True)
     try:
-        reader=live_analyzer(model) if mode=='live' else local_analyzer
+        privacy_manifest=json.loads(privacy_manifest_path.read_text()).get('documents',{}) if privacy_manifest_path else None
+        reader=live_analyzer(model,privacy_manifest) if mode=='live' else local_analyzer
+        from gtin_catalog import read_catalog
+        gtin_catalog=read_catalog(gtin_catalog_path) if gtin_catalog_path else None
         replay=json.loads(predictions_path.read_text()) if mode=='replay' and predictions_path else None
         if mode=='replay' and (not replay or replay.get('dataset_sha256')!=dataset_hash):
             raise ValueError('Replay assente o riferito a un dataset diverso')
@@ -330,7 +309,7 @@ def evaluate(root,truth_path,out,*,mode='local',annotations_path=None,model='gpt
         for repeat in range(1,repeats+1):
             for case_id,files in groups.items():
                 docs=[OriginalDocument(name,(root/name).read_bytes()) for name in files]
-                prediction=(replay['predictions'][f'{repeat}:{case_id}'] if replay else analyze_documents(docs,analyzer=reader))
+                prediction=(replay['predictions'][f'{repeat}:{case_id}'] if replay else analyze_documents(docs,analyzer=reader,gtin_catalog=gtin_catalog))
                 recorded[f'{repeat}:{case_id}']=without_images(prediction)
                 rows,counts,metrics=evaluate_case(case_id,files,prediction,repeat)
                 reports.extend(rows);total.update(counts)
@@ -383,7 +362,7 @@ def evaluate(root,truth_path,out,*,mode='local',annotations_path=None,model='gpt
     except Exception as exc:
         # Unknown metrics must never appear as reassuring zeroes.
         summary.update(status='NOT_RUN' if summary['silent_errors'] is None else 'ERROR',accepted=False,
-                       gate_reasons=[f'{type(exc).__name__}: {exc}'])
+                       gate_reasons=[__import__('safe_ocr_logs').redact(f'{type(exc).__name__}: {exc}')[0]])
     if summary['status']!='COMPLETED':
         with (out/'report.csv').open('w',encoding='utf-8-sig',newline='') as stream:
             writer=csv.DictWriter(stream,fieldnames=REPORT_COLUMNS);writer.writeheader()
@@ -394,8 +373,12 @@ def evaluate(root,truth_path,out,*,mode='local',annotations_path=None,model='gpt
 
 
 def main(argv=None):
+    import logging
+    for logger in ('openai','httpx','httpcore'):
+        logging.getLogger(logger).setLevel(logging.CRITICAL+1)
     parser=argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--images',type=Path,required=True);parser.add_argument('--truth',type=Path,required=True)
+    parser.add_argument('--gtin-catalog',type=Path);parser.add_argument('--privacy-manifest',type=Path)
     parser.add_argument('--annotations',type=Path);parser.add_argument('--out',type=Path,required=True)
     parser.add_argument('--mode',choices=['live','local','replay'],default='live')
     parser.add_argument('--model',default=os.getenv('SCARICO_LABEL_MODEL','gpt-4.1'))
@@ -407,9 +390,9 @@ def main(argv=None):
     try:
         result=evaluate(args.images,args.truth,args.out,mode=args.mode,annotations_path=args.annotations,
             model=args.model,repeats=args.repeats,predictions_path=args.predictions,compare_path=args.compare,
-            min_labels=args.min_labels,min_cases=args.min_cases)
+            min_labels=args.min_labels,min_cases=args.min_cases,gtin_catalog_path=args.gtin_catalog,privacy_manifest_path=args.privacy_manifest)
     except (ValueError,OSError) as exc:
-        print('VALUTAZIONE NON ESEGUITA:',exc,file=sys.stderr);return 3
+        print('VALUTAZIONE NON ESEGUITA:',__import__('safe_ocr_logs').redact(str(exc))[0],file=sys.stderr);return 3
     print('ERRORI SILENZIOSI:',result['silent_errors'] if result['silent_errors'] is not None else 'NON MISURATI')
     print('ESITO:', 'ACCEPTED' if result['accepted'] else 'BLOCKED', '| modalità:',result['mode'])
     print(json.dumps({k:result.get(k) for k in ('status','recall','fields','counts','gate_reasons')},ensure_ascii=False,indent=2))
