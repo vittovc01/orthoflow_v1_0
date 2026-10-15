@@ -1,6 +1,13 @@
 -- Explicit operator-confirmed OCR archive only; does not move stock.
 -- Apply in staging first. OrthoFlow authenticates in its trusted Python server.
 BEGIN;
+CREATE OR REPLACE FUNCTION public.ocr_review_physical_count(p_rows jsonb)
+RETURNS integer LANGUAGE sql IMMUTABLE STRICT SECURITY INVOKER SET search_path=pg_catalog AS $$
+ SELECT count(*)::integer FROM jsonb_array_elements(p_rows) r
+ WHERE nullif(trim(r->>'duplicate_of'),'') IS NULL;
+$$;
+REVOKE ALL ON FUNCTION public.ocr_review_physical_count(jsonb) FROM PUBLIC,anon,authenticated;
+GRANT EXECUTE ON FUNCTION public.ocr_review_physical_count(jsonb) TO service_role;
 CREATE TABLE IF NOT EXISTS public.ocr_review_sessions (
  id uuid PRIMARY KEY,
  actor text NOT NULL CHECK (length(trim(actor))>0),
@@ -14,8 +21,17 @@ CREATE TABLE IF NOT EXISTS public.ocr_review_sessions (
  aggregate_rows jsonb NOT NULL CHECK (jsonb_typeof(aggregate_rows)='array'),
  physical_count integer NOT NULL CHECK (physical_count>0),
  count_verified boolean NOT NULL CHECK (count_verified),
- CHECK (jsonb_array_length(confirmed)=physical_count)
+ CONSTRAINT ocr_review_physical_count_matches CHECK (public.ocr_review_physical_count(confirmed)=physical_count)
 );
+-- Upgrade the prior observation-count constraint without repairing existing rows.
+DO $$ DECLARE c record; BEGIN
+ FOR c IN SELECT conname FROM pg_constraint WHERE conrelid='public.ocr_review_sessions'::regclass
+  AND contype='c' AND pg_get_constraintdef(oid) LIKE '%jsonb_array_length(confirmed)%physical_count%'
+ LOOP EXECUTE format('ALTER TABLE public.ocr_review_sessions DROP CONSTRAINT %I',c.conname); END LOOP;
+ IF NOT EXISTS(SELECT 1 FROM pg_constraint WHERE conrelid='public.ocr_review_sessions'::regclass AND conname='ocr_review_physical_count_matches') THEN
+  ALTER TABLE public.ocr_review_sessions ADD CONSTRAINT ocr_review_physical_count_matches CHECK(public.ocr_review_physical_count(confirmed)=physical_count);
+ END IF;
+END $$;
 CREATE INDEX IF NOT EXISTS ocr_review_actor_created_idx ON public.ocr_review_sessions(actor,created_at DESC);
 ALTER TABLE public.ocr_review_sessions ENABLE ROW LEVEL SECURITY;
 -- Browser/mobile clients never receive a service key or direct table privileges.

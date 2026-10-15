@@ -1,0 +1,99 @@
+{
+  "silent_errors": 0,
+  "accepted": false,
+  "status": "COMPLETED",
+  "mode": "local",
+  "model": null,
+  "generated_at": "2026-10-15T10:05:23.475026+00:00",
+  "dataset_sha256": "c29a332c930a512870fe7cc4a15ee5a08cababf20a416afd235db7c1aa3a305d",
+  "pipeline_sha256": "caa3dc2fa4d64b768c8716a134ab204dc90ddfab4475e485a0a2921e0198620c",
+  "files": 16,
+  "cases": 16,
+  "unique_label_appearances": 16,
+  "unique_physical_labels": 16,
+  "annotations_complete": true,
+  "truth_manual_review_confirmed": false,
+  "repeats": 1,
+  "unlisted_files": [],
+  "python": "3.12.14",
+  "packages": {
+    "Pillow": "12.3.0",
+    "zxing-cpp": "2.3.0",
+    "opencv-python-headless": "4.11.0.86",
+    "openai": null
+  },
+  "tesseract": "tesseract 5.3.4",
+  "counts": {
+    "expected": 16,
+    "found": 17,
+    "matched": 13,
+    "missing": 3,
+    "extra": 4,
+    "spatial_matches": 13,
+    "silent_errors": 0,
+    "physical_expected": 16,
+    "physical_matched": 13,
+    "aggregation_unavailable": 16,
+    "quantity_wrong": 0,
+    "quantity_unresolved": 16,
+    "failed_documents": 0
+  },
+  "recall": 0.8125,
+  "fields": {
+    "ref": {
+      "total": 16,
+      "flagged": 16,
+      "correct": 0,
+      "wrong": 16,
+      "unknown_truth": 0,
+      "silent": 0,
+      "missing_label": 3
+    },
+    "lotto": {
+      "total": 16,
+      "flagged": 3,
+      "correct": 13,
+      "wrong": 3,
+      "unknown_truth": 0,
+      "silent": 0,
+      "missing_label": 3
+    },
+    "scadenza": {
+      "total": 16,
+      "flagged": 3,
+      "correct": 13,
+      "wrong": 3,
+      "unknown_truth": 0,
+      "silent": 0,
+      "missing_label": 3
+    }
+  },
+  "exact_field_accuracy": 0.5416666666666666,
+  "field_review_rate": 0.4583333333333333,
+  "conditions_covered": [],
+  "spatial_recall": 0.8125,
+  "gate_reasons": [
+    "Modello live non eseguito",
+    "Servono almeno tre ripetizioni live",
+    "Verità manuale non controverificata",
+    "Servono almeno 300 etichette reali annotate",
+    "Servono almeno 50 scarichi indipendenti",
+    "Etichette mancanti",
+    "Falsi positivi",
+    "Accuratezza esatta campi inferiore al 98%",
+    "Più del 15% dei campi da verificare",
+    "Quantità errate o non risolte",
+    "Casi limite non tutti rappresentati"
+  ],
+  "acceptance_thresholds": {
+    "silent_errors": 0,
+    "recall": 1.0,
+    "false_positives": 0,
+    "exact_field_accuracy": 0.98,
+    "max_field_review_rate": 0.15,
+    "quantity_errors_or_unresolved": 0,
+    "min_labels": 300,
+    "min_cases": 50,
+    "live_repeats": 3
+  }
+}

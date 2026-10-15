@@ -98,8 +98,8 @@ class FakeClient:
     def download(self,path):return self.objects[path]
 
 
-def original():
-    data=BytesIO();Image.new('RGB',(30,20),'white').save(data,format='PNG')
+def original(color='white'):
+    data=BytesIO();Image.new('RGB',(30,20),color).save(data,format='PNG')
     return OriginalDocument('source.png',data.getvalue())
 
 
@@ -147,7 +147,7 @@ def test_service_returns_partial_error_without_raising_or_saving():
         assert mode=='scarico_sala'
         if path.endswith('01.png'):raise RuntimeError('reader offline')
         return {'items':[row()],'pipeline_version':'test'}
-    result=analyze_documents([original(),original()],analyzer=analyzer)
+    result=analyze_documents([original(),original('gray')],analyzer=analyzer)
     assert len(result['items'])==1 and result['documents'][1]['status']=='failed'
     assert result['detection_warnings'] and result['review_required']
 

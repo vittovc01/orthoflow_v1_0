@@ -35,7 +35,7 @@ jobs:
       - name: Compilazione di tutti i file Python
         run: python -m compileall -q -x '(^|/)(\.git|\.venv|venv)/' .
       - name: Regressione etichette fisiche, GS1 e blocchi scarico
-        run: python -m pytest -q tests/test_label_pipeline.py tests/test_ocr_review.py
+        run: python -m pytest -q tests/test_label_pipeline.py tests/test_ocr_review.py tests/test_evaluate_ocr.py
       - name: Test scarico e filtro produttori
         run: python tests/test_scarico_form.py
       - name: Smoke test delle pagine reali

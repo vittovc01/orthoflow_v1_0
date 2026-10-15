@@ -510,7 +510,7 @@ if is_physical_ai:
     cols = st.columns(3)
     cols[0].metric("Etichette individuate", len(source_rows))
     cols[1].metric("Articoli distinti (REF / lotto)", len({(r.get("codice"), r.get("lotto")) for r in source_rows if r.get("codice") and (r.get("lotto") or r.get("senza_lotto"))}))
-    cols[2].metric("Quantità proposta da scaricare", sum(1 for r in rows if not r.get("escludi_riga")))
+    cols[2].metric("Quantità proposta da scaricare", "Da verificare" if any(r.get("cross_photo_candidates") and not r.get("physical_distinct_confirmed") and not r.get("duplicate_of") for r in rows) else sum(1 for r in rows if not r.get("escludi_riga")))
     catalog = None
     if source_rows:
         try:
@@ -623,10 +623,12 @@ with st.form("scarico_ai_confirm"):
         st.subheader("✅ Lista materiali riconosciuti")
         st.caption("Tocca una cella per correggere codice, lotto, scadenza o quantità. Per materiale non sterile senza lotto spunta Non sterile / senza lotto. Spunta Escludi riga per non inserirla nello scarico. Le modifiche vengono applicate alla conferma. Puoi anche usare il modulo Aggiungi o correggi un materiale sopra la lista.")
         df_rows = pd.DataFrame(rows)
-        preferred = ["codice", "senza_lotto", "jnj_verificato_manualmente", "escludi_riga", "descrizione", "lotto", "gtin", "scadenza", "quantita", "produttore", "confidence", "warning"]
+        preferred = ["codice", "senza_lotto", "jnj_verificato_manualmente", "escludi_riga", "descrizione", "lotto", "gtin", "scadenza", "physical_distinct_confirmed", "duplicate_of", "quantita", "produttore", "confidence", "warning"]
         if "escludi_riga" not in df_rows:
             df_rows["escludi_riga"] = False
         df_rows["senza_lotto"] = df_rows.get("senza_lotto", pd.Series(False, index=df_rows.index)).fillna(False).astype(bool)
+        df_rows["physical_distinct_confirmed"] = df_rows.get("physical_distinct_confirmed",pd.Series(False,index=df_rows.index)).fillna(False).astype(bool)
+        df_rows["duplicate_of"] = df_rows.get("duplicate_of",pd.Series("",index=df_rows.index)).fillna("")
         for col in preferred:
             if col not in df_rows.columns:
                 df_rows[col] = ""
@@ -652,6 +654,8 @@ with st.form("scarico_ai_confirm"):
                 "codice": st.column_config.TextColumn("Codice Johnson/REF"),
                 "lotto": st.column_config.TextColumn("Lotto"),
                 "gtin": st.column_config.TextColumn("GTIN (14 cifre)"),
+                "physical_distinct_confirmed": st.column_config.CheckboxColumn("Pezzo fisico distinto nelle altre foto",default=False),
+                "duplicate_of": st.column_config.TextColumn("Stessa etichetta già vista: ID della prima riga"),
                 "senza_lotto": st.column_config.CheckboxColumn("Non sterile / senza lotto", default=False,
                     help="Spunta solo materiale non sterile che non prevede lotto. La disponibilità viene cercata nelle giacenze senza lotto."),
                 "conto_deposito_struttura": st.column_config.CheckboxColumn(
@@ -889,7 +893,7 @@ if confirm or archive_review:
     }
 
     if is_physical_ai:
-        header["physical_label_count"] = len(source_rows)
+        header["physical_label_count"] = int(expected_label_count)
         header["count_verified"] = bool(count_verified)
         header["included_label_ids"] = [i for r in rpc_rows for i in r["label_ids"]]
         originals = {r.get("label_id"): r for r in st.session_state.get("scarico_ai_original_rows", source_rows)}

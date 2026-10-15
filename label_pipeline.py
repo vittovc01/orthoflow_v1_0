@@ -13,7 +13,7 @@ from pathlib import Path
 
 from PIL import Image, ImageOps, ImageFilter
 
-PIPELINE_VERSION = 'physical-label-v13-evidence-review'
+PIPELINE_VERSION = 'physical-label-v14-cross-photo-review'
 
 
 def local_ref_evidence(image):
@@ -29,7 +29,7 @@ def local_ref_evidence(image):
             result = subprocess.run(
                 ['tesseract', 'stdin', 'stdout', '-l', 'eng', '--psm', str(psm), 'tsv'],
                 input=buffer.getvalue(), capture_output=True, timeout=15, check=True)
-            words = list(csv.DictReader(result.stdout.decode('utf-8', errors='replace').splitlines(),delimiter='\t'))
+            words = list(csv.DictReader(result.stdout.decode('utf-8', errors='replace').splitlines(),delimiter='\t',quoting=csv.QUOTE_NONE))
             reads.append(' '.join(w.get('text','') for w in words if w.get('text')))
             for word in words:
                 token = (word.get('text') or '').strip()
@@ -287,7 +287,12 @@ def aggregate_labels(rows):
 
 def review_errors(rows, expected_ids, expected_count, count_verified):
     errors = []
-    if not count_verified or expected_count != len(expected_ids):
+    from ocr_review import verified_physical_count
+    try:
+        physical_count=verified_physical_count(rows)
+    except ValueError as exc:
+        errors.append(str(exc));physical_count=len(expected_ids)
+    if not count_verified or expected_count != physical_count:
         errors.append('Conteggio fisico non verificato o discordante')
     ids = [r.get('label_id') for r in rows]
     if set(ids) != set(expected_ids) or len(ids) != len(set(ids)):
@@ -295,8 +300,10 @@ def review_errors(rows, expected_ids, expected_count, count_verified):
     for row in rows:
         if not row.get('verificata'):
             errors.append(str(row.get('label_id')) + ': verifica singola etichetta richiesta')
-        if row.get('escludi_riga'):
+        if row.get('escludi_riga') or row.get('duplicate_of'):
             continue
+        if row.get('cross_photo_candidates') and not row.get('physical_distinct_confirmed'):
+            errors.append('Identità fisica da risolvere tra più foto: ' + str(row.get('label_id')))
         code = str(row.get('codice') or '').strip()
         if not code or not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9. /-]*', code) or re.fullmatch(r'\d{14}', code) or '?' in code:
             errors.append('REF incompleto o non valido: ' + code)
@@ -474,6 +481,8 @@ def analyze_labels(path, client, model, item_schema, parse):
             unconfirmed_regions.extend(page_unconfirmed)
             if page_unconfirmed:
                 warnings.append(f'Pagina {number}: proposte AI prive di riscontro fisico non contate come prodotti; verificare il conteggio sul documento originale')
+        from image_quality import geometry_alerts
+        warnings.extend(f'Pagina {number}: {message}' for message in geometry_alerts(regions))
         from PIL import ImageDraw
         overview = preview.copy()
         pen = ImageDraw.Draw(overview)
@@ -501,6 +510,8 @@ def analyze_labels(path, client, model, item_schema, parse):
                         {'type':'input_image','image_url':image_url(crop),'detail':'high'}]}],
                     text={'format':{'type':'json_schema','name':'single_label','schema':item_schema,'strict':True}})
                 first = parse(response)
+                if not decoded:
+                    first['warning']=' · '.join(filter(None,[first.get('warning'),'DataMatrix non leggibile: ripiego sul testo stampato']))
                 second = parse(client.responses.create(model=model, store=False,
                     input=[{'role':'user','content':[
                         {'type':'input_text','text':'Leggi questa sola etichetta da zero. Trascrivi il REF stampato completo di punti, zeri iniziali e suffissi S/TS, lotto, scadenza ISO e GTIN stampato dopo (01), separato dal REF. Non ricostruire caratteri da descrizioni, GTIN o cataloghi. Campi incerti a null. Non confondere 018, 020, 016, 085, 005. quantity=1.'},
@@ -516,6 +527,8 @@ def analyze_labels(path, client, model, item_schema, parse):
             row.update(label_id=label_id,page=number,bbox=region['bbox'],rotation=region['rotation'],crop_data_url=image_url(crop),source_document=digest,
                        geometry_source=region.get('geometry_source','ai_proposal'),finder_bbox=region.get('finder_bbox'),
                        deskew_angle=region.get('deskew_angle', 0))
+            from image_quality import inspect_quality
+            row['image_quality']=inspect_quality(crop)
             from ocr_review import assess_label
             row['assessment'] = assess_label(row)
             items.append(row)
