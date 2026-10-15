@@ -33,20 +33,23 @@ class ST:
  def selectbox(self,label,options,**kw):return options[0]
  def checkbox(self,*a,**kw):return True
  def form_submit_button(self,*a,**kw):
-  assert self.active and not kw['disabled'];return True
+  assert self.active
+  if a[0].startswith('Conferma e archivia'):
+   assert kw['disabled'];return False
+  assert not kw['disabled'];return True
  def columns(self,n):return [Context() for _ in range(n)]
  def date_input(self,*a,**kw):return kw['value']
  def text_input(self,*a,**kw):return kw.get('value','')
  def expander(self,*a,**kw):return Context()
  def __getattr__(self,name):return lambda *a,**kw:None
 rows=[{'codice':'1504-00-126','lotto':'A','quantita':1,'produttore':'Synthes'},{'codice':'FOREIGN','lotto':'B','quantita':1,'produttore':'Stryker'}]; base=copy.deepcopy(rows)
-ns.update({'pd':pd,'st':ST(rows),'date':date,'client_options':lambda:[{'codice_cliente':'9010013','descrizione':'MALZONI','label':'MALZONI'}],'warehouse_labels':lambda:['MAG1 - MAG1'],'agent_options':lambda:['AGENT']})
+ns.update({'pd':pd,'st':ST(rows),'date':date,'client_options':lambda:[{'codice_cliente':'9010013','descrizione':'MALZONI','label':'MALZONI'}],'warehouse_labels':lambda:['MAG1 - MAG1'],'agent_options':lambda:['AGENT'],'secret':lambda name,default=None:default})
 start=next(i for i,n in enumerate(tree.body) if isinstance(n,ast.Assign) and any(isinstance(t,ast.Name) and t.id=='meta' for t in n.targets))
-end=next(i for i,n in enumerate(tree.body) if isinstance(n,ast.If) and isinstance(n.test,ast.Name) and n.test.id=='confirm')
+end=next(i for i,n in enumerate(tree.body) if isinstance(n,ast.If) and isinstance(n.test,ast.BoolOp) and any(isinstance(v,ast.Name) and v.id=='confirm' for v in n.test.values))
 for _ in range(2):
  exec(compile(ast.Module(body=tree.body[start:end],type_ignores=[]),'form','exec'),ns)
  assert rows==base
  assert len(ns['edited'])==1 and bool(ns['edited'].iloc[0]['conto_deposito_struttura'])
-exec(compile(ast.Module(body=tree.body[end].body[:2],type_ignores=[]),'submit','exec'),ns)
+exec(compile(ast.Module(body=tree.body[end].body[:next(i+1 for i,n in enumerate(tree.body[end].body) if isinstance(n,ast.Assign) and any(isinstance(t,ast.Name) and t.id=='final_rows' for t in n.targets))],type_ignores=[]),'submit','exec'),ns)
 assert ns['final_rows'][0]['conto_deposito_struttura']==True and len(ns['final_rows'])==1
 print('PASS: stable source across reruns, editor in form, Smart Track submitted, other brands excluded, unknown brands preserved')

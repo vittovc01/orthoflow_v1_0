@@ -13,7 +13,7 @@ from pathlib import Path
 
 from PIL import Image, ImageOps, ImageFilter
 
-PIPELINE_VERSION = 'physical-label-v12-measured-sticker-edges'
+PIPELINE_VERSION = 'physical-label-v13-evidence-review'
 
 
 def local_ref_evidence(image):
@@ -83,7 +83,7 @@ def compare_reads(first, second):
     row = dict(first)
     warnings = [row['warning']] if row.get('warning') else []
     row['ocr_reads'] = [dict(first), dict(second)]
-    for field in ('code', 'lot', 'expiry'):
+    for field in ('code', 'lot', 'expiry', 'gtin'):
         a, b = first.get(field), second.get(field)
         if not a or not b or str(a).strip() != str(b).strip():
             row[field] = None
@@ -165,6 +165,16 @@ def gs1_parse(raw):
                 return {'error': 'AI GS1 non supportato: ' + ai}
             parts.append((ai, value))
     for ai, value in parts:
+        fixed = {'01':14,'17':6,'11':6,'15':6,'20':2}
+        variable = {'10':20,'21':20,'30':8,'91':90,'92':90,'93':90}
+        if ai not in fixed and ai not in variable:
+            return {'error': 'AI GS1 non supportato: ' + ai}
+        if ai in fixed and (len(value)!=fixed[ai] or not value.isdigit()):
+            return {'error': 'Campo GS1 a lunghezza fissa non valido: ' + ai}
+        if ai in variable and (not 1<=len(value)<=variable[ai] or any(ord(c)<32 for c in value)):
+            return {'error': 'Campo GS1 variabile non valido: ' + ai}
+        if ai=='30' and not value.isdigit():
+            return {'error':'Quantità GS1 non valida'}
         if ai in values and values[ai] != value:
             return {'error': 'AI GS1 in conflitto'}
         if not value:
@@ -219,7 +229,7 @@ def reconcile(item, barcodes):
     row['barcodes'] = barcodes
     valid = [b for b in barcodes if not b.get('error')]
     if any(len({b.get(f) for b in valid if b.get(f)}) > 1 for f in ('gtin', 'lot', 'expiry')):
-        row.update(code=None, lot=None, expiry=None)
+        row.update(code=None, lot=None, expiry=None, gtin=None)
         warnings.append('Più identità GS1 nel ritaglio: verificare i confini della singola etichetta')
         barcodes = []
     conflicted_fields = set()
@@ -228,9 +238,7 @@ def reconcile(item, barcodes):
             warnings.append(barcode['error'])
             continue
         # AI (01) identifies a GTIN, never a catalogue REF.
-        if barcode.get('gtin'):
-            row['gtin'] = barcode['gtin']
-        for field in ('lot', 'expiry'):
+        for field in ('gtin', 'lot', 'expiry'):
             if field in conflicted_fields:
                 continue
             decoded = barcode.get(field)
@@ -294,6 +302,9 @@ def review_errors(rows, expected_ids, expected_count, count_verified):
             errors.append('REF incompleto o non valido: ' + code)
         if row.get('is_sterile') is True and re.fullmatch(r'(?:\d{2}\.\d{3}\.\d{3}|\d{3}\.\d{3})5?', code):
             errors.append('REF sterile senza suffisso verificato: ' + code)
+        gtin = str(row.get('gtin') or '').strip()
+        if gtin and gs1_parse('(01)'+gtin).get('error'):
+            errors.append('GTIN non valido: ' + gtin)
         if not row.get('lotto') and not row.get('senza_lotto'):
             errors.append('Lotto obbligatorio: ' + code)
         if not row.get('senza_lotto'):
@@ -404,7 +415,7 @@ def analyze_labels(path, client, model, item_schema, parse):
         'warning':{'type':['string','null']}},'required':['labels','layout','warning'],'additionalProperties':False}
     pages = render_pages(path)
     digest = hashlib.sha256(Path(path).read_bytes()).hexdigest()[:20]
-    items, warnings, unconfirmed_regions = [], [], []
+    items, warnings, unconfirmed_regions, annotated_pages = [], [], [], []
     for number, page in enumerate(pages, 1):
         preview = page.copy()
         preview.thumbnail((2200,2200))
@@ -463,11 +474,21 @@ def analyze_labels(path, client, model, item_schema, parse):
             unconfirmed_regions.extend(page_unconfirmed)
             if page_unconfirmed:
                 warnings.append(f'Pagina {number}: proposte AI prive di riscontro fisico non contate come prodotti; verificare il conteggio sul documento originale')
+        from PIL import ImageDraw
+        overview = preview.copy()
+        pen = ImageDraw.Draw(overview)
+        for index, region in enumerate(regions, 1):
+            pixels = tuple(round(v * (overview.width if i%2==0 else overview.height)/1000)
+                           for i,v in enumerate(region['bbox']))
+            pen.rectangle(pixels, outline='red', width=3)
+            pen.text(pixels[:2], str(index), fill='red')
+        annotated_pages.append({'page':number, 'page_data_url':image_url(overview)})
         for index, region in enumerate(regions,1):
             label_id = f'{digest}:p{number}:l{index}'
             original = crop_region(page,region['bbox'])
             crop = original.rotate(region['rotation'] + region.get('deskew_angle', 0),
                                    resample=Image.Resampling.BICUBIC, expand=True, fillcolor='white')
+            decoded = []
             try:
                 try:
                     decoded = decode_barcodes(crop)
@@ -476,13 +497,13 @@ def analyze_labels(path, client, model, item_schema, parse):
                     warnings.append(f'{label_id}: decodifica DataMatrix non disponibile')
                 response = client.responses.create(model=model, store=False,
                     input=[{'role':'user','content':[
-                        {'type':'input_text','text':'Trascrivi SOLO questa singola etichetta: REF stampato (mai GTIN/UDI), lotto, scadenza ISO, descrizione e produttore. Non dedurre dati da descrizioni o cataloghi. Per caratteri incerti usa null e warning. quantity=1. Non usare quantità della confezione. Se il ritaglio contiene più etichette o è troncato segnala warning. Ignora eventuali adesivi interni ospedalieri con soli codici numerici e (1/1), senza REF/LOT e dati del produttore. La confidence non sostituisce verifica manuale.'},
+                        {'type':'input_text','text':'Trascrivi SOLO questa singola etichetta: REF stampato (mai GTIN/UDI), GTIN stampato dopo (01) in un campo separato, lotto, scadenza ISO, descrizione e produttore. Non dedurre dati da descrizioni o cataloghi. Per caratteri incerti usa null e warning. quantity=1. Non usare quantità della confezione. Se il ritaglio contiene più etichette o è troncato segnala warning. Ignora eventuali adesivi interni ospedalieri con soli codici numerici e (1/1), senza REF/LOT e dati del produttore. La confidence non sostituisce verifica manuale.'},
                         {'type':'input_image','image_url':image_url(crop),'detail':'high'}]}],
                     text={'format':{'type':'json_schema','name':'single_label','schema':item_schema,'strict':True}})
                 first = parse(response)
                 second = parse(client.responses.create(model=model, store=False,
                     input=[{'role':'user','content':[
-                        {'type':'input_text','text':'Leggi questa sola etichetta da zero. Trascrivi il REF stampato completo di punti, zeri iniziali e suffissi S/TS, lotto e scadenza ISO. Non ricostruire caratteri da descrizioni, GTIN o cataloghi. Campi incerti a null. Non confondere 018, 020, 016, 085, 005. quantity=1.'},
+                        {'type':'input_text','text':'Leggi questa sola etichetta da zero. Trascrivi il REF stampato completo di punti, zeri iniziali e suffissi S/TS, lotto, scadenza ISO e GTIN stampato dopo (01), separato dal REF. Non ricostruire caratteri da descrizioni, GTIN o cataloghi. Campi incerti a null. Non confondere 018, 020, 016, 085, 005. quantity=1.'},
                         {'type':'input_image','image_url':image_url(prepare_crop(crop)),'detail':'high'}]}],
                     text={'format':{'type':'json_schema','name':'independent_label_read','schema':item_schema,'strict':True}}))
                 row = verify_ref_evidence(reconcile(compare_reads(first, second),decoded),
@@ -491,9 +512,12 @@ def analyze_labels(path, client, model, item_schema, parse):
                 # Preserve failed observations; never silently reduce label count.
                 row = {key:None for key in item_schema['properties']}
                 row.update(quantity=1, confidence=0, warning=f'Lettura fallita ({type(exc).__name__}): verificare manualmente',reviewed=False)
+                row = reconcile(row, decoded)
             row.update(label_id=label_id,page=number,bbox=region['bbox'],rotation=region['rotation'],crop_data_url=image_url(crop),source_document=digest,
                        geometry_source=region.get('geometry_source','ai_proposal'),finder_bbox=region.get('finder_bbox'),
                        deskew_angle=region.get('deskew_angle', 0))
+            from ocr_review import assess_label
+            row['assessment'] = assess_label(row)
             items.append(row)
     metadata = {k: None for k in ('clinic_name', 'clinical_record', 'procedure_date', 'surgeon')}
     header_preview = pages[0].copy()
@@ -511,5 +535,5 @@ def analyze_labels(path, client, model, item_schema, parse):
     return {'document_type':'scarico_sala','items':items,'back_orders':[],
             'pipeline_version':PIPELINE_VERSION,
             'physical_label_count':len(items),'detection_warnings':warnings,
-            'unconfirmed_regions':unconfirmed_regions,
+            'unconfirmed_regions':unconfirmed_regions,'annotated_pages':annotated_pages,
             'count_verified':False, **metadata, 'confidence':0}
