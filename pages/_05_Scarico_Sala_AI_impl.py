@@ -738,6 +738,8 @@ if confirm or archive_review:
     if is_physical_ai and archive_enabled:
         try:
             original_map = {r.get("label_id"):r for r in st.session_state.get("scarico_ai_original_rows", [])}
+            if any(not r.get("manual_entry") and r.get("label_id") not in original_map for r in source_rows):
+                raise ValueError("Rianalizza i documenti: manca la copia immutabile dell’estrazione originale per questa vecchia sessione.")
             extraction = {**meta, "items":[original_map.get(r.get("label_id"),r) for r in source_rows]}
             payload_key = sha256(json.dumps(without_images(final_rows), sort_keys=True, default=str).encode()).hexdigest()
             previous = st.session_state.get("scarico_audit_request") or {}
