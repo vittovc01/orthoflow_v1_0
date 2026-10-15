@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
 """Dry-run by default; one atomic RPC on an explicitly allowlisted staging ref."""
-import argparse,csv,json,os,sys,urllib.request
+import argparse,csv,json,os,re,sys,urllib.request
 from pathlib import Path
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
 from supplier_catalog import load_supplier
 PRODUCTION_REF='foawqtscqtwhpkbfbibj'
 
 def staging_url(url,ref):
-    if not ref or ref==PRODUCTION_REF or url!=f'https://{ref}.supabase.co':
+    if not re.fullmatch(r'[a-z]{20}',ref or '') or ref==PRODUCTION_REF or url!=f'https://{ref}.supabase.co':
         raise ValueError('Destinazione staging non valida; produzione vietata')
     return url
 

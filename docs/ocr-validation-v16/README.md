@@ -33,8 +33,12 @@ Migrazione e test SQL passati su PostgreSQL WASM locale (PGlite), inclusi access
 negati anon/authenticated e rollback dei conflitti. Import locale completo:
 49.140 nuove, 0 aggiornate; seconda esecuzione 0 nuove, 0 aggiornate,
 49.140 invariate. Questo NON è un import su staging Supabase remoto.
-Docker non è disponibile nel runner di questa sessione: build immagine e test
-PostgreSQL 17 nativo sono preparati in CI, non dichiarati eseguiti. Il Dockerfile usa
+Docker non è disponibile nel runner locale. Successivamente la CI GitHub
+38811508063 ha completato con successo build del container, 23 test Python
+nel container e test SQL su PostgreSQL 17.6 nativo. Nel container (Tesseract
+5.3.0), la valutazione senza catalogo sui 16 ritagli conferma 16/16 lotti e
+scadenze, 0 REF risolti e 0 errori silenziosi. Il confronto completo prima/dopo
+qui riportato rimane quello dell’ambiente locale dichiarato sopra. Il Dockerfile usa
 un'immagine base con digest fissato e pacchetti Debian da snapshot fisso:
 la versione Tesseract del container può differire da questa esecuzione locale.
 I futuri confronti vanno eseguiti entrambi nello stesso container.

@@ -17,9 +17,9 @@ def test_multiple_gtins_same_ref_and_invalid_check_digit():
     assert len(rows)==2 and report['scartate']==1
 
 def test_only_staging_is_allowed():
-    for url,ref in [('https://foawqtscqtwhpkbfbibj.supabase.co','foawqtscqtwhpkbfbibj'),('https://evil.example','staging')]:
+    for url,ref in [('https://foawqtscqtwhpkbfbibj.supabase.co','foawqtscqtwhpkbfbibj'),('https://evil.example','staging'),('https://evil.example/path.supabase.co','evil.example/path')]:
         with pytest.raises(ValueError):staging_url(url,ref)
-    assert staging_url('https://staging.supabase.co','staging')
+    assert staging_url('https://ssssssssssssssssssss.supabase.co','ssssssssssssssssssss')
 
 def test_unknown_gtin_export_and_printed_conflict():
     item={'code':'413.040S','barcodes':[{'raw':'(01)07611819268623'}]}
