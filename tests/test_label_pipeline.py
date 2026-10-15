@@ -254,3 +254,24 @@ def test_geometry_audit_replaces_header_and_split_crops_before_reading(tmp_path,
     grouped=aggregate_labels([dict(label_id=r['label_id'],codice=r['code'],lotto=r['lot'],
                                    scadenza=r['expiry'],quantita=r['quantity']) for r in result['items']])
     assert len(grouped)==1 and grouped[0]['quantita']==2
+
+
+def test_physical_sticker_edges_survive_ai_count_disagreement(tmp_path,monkeypatch):
+    from label_geometry import locate_datamatrix_labels
+    from label_pipeline import select_label_regions
+    source=Image.open(Path(__file__).parent/'fixtures'/'synthes_mixed_angles'/'labels.png')
+    local=locate_datamatrix_labels(source)
+    # Simulate the visual detector finding only four of seven physical stickers.
+    proposals=[dict(r,page=1) for r in local[:4]]
+    assert len(select_label_regions(local,proposals,'synthes_datamatrix',1,source))==7
+
+
+def test_header_proposal_cannot_add_quantity_to_measured_stickers(monkeypatch):
+    from label_geometry import locate_datamatrix_labels
+    from label_pipeline import select_label_regions
+    source=Image.open(Path(__file__).parent/'fixtures'/'synthes_mixed_angles'/'labels.png')
+    local=locate_datamatrix_labels(source)
+    monkeypatch.setattr('label_pipeline.local_ref_evidence',lambda _: {'candidates':[]})
+    monkeypatch.setattr('label_pipeline.decode_barcodes',lambda _: [])
+    proposals=[dict(page=1,bbox=[700,900,900,990],rotation=0)]
+    assert len(select_label_regions(local,proposals,'synthes_datamatrix',1,source))==7

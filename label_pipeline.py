@@ -13,7 +13,7 @@ from pathlib import Path
 
 from PIL import Image, ImageOps, ImageFilter
 
-PIPELINE_VERSION = 'physical-label-v11-preserve-unmatched-labels'
+PIPELINE_VERSION = 'physical-label-v12-measured-sticker-edges'
 
 
 def local_ref_evidence(image):
@@ -330,12 +330,30 @@ def inventory_errors(rows, stock):
     return errors
 
 
-def select_label_regions(local_regions, proposals, layout, page):
+def select_label_regions(local_regions, proposals, layout, page, source_page=None):
     """Synthes template geometry needs independent layout and count support.
 
     A DataMatrix on ATTUNE/SmartSet cannot license the Synthes crop offsets.
     Ambiguous or incomplete local grids use the complete visual proposals.
     """
+    if (source_page is not None and layout == 'synthes_datamatrix'
+            and len(local_regions) >= 3
+            and all(r.get('geometry_source') == 'local_datamatrix_sticker' for r in local_regions)):
+        out = [dict(r, page=page) for r in local_regions]
+        for proposal in proposals:
+            if any(overlap(r['bbox'], proposal['bbox']) >= .5 for r in out):
+                continue
+            # A proposal without a physical anchor must have independent product
+            # evidence. Header fields must not become implanted-item quantities.
+            crop = crop_region(source_page, proposal['bbox'])
+            evidence = local_ref_evidence(crop)
+            try:
+                barcodes = decode_barcodes(crop)
+            except Exception:
+                barcodes = []
+            if evidence.get('candidates') or any(not b.get('error') for b in barcodes):
+                out.append(proposal)
+        return unique_regions(out)
     if layout != 'synthes_datamatrix' or not local_regions or len(local_regions) != len(proposals):
         return proposals
     remaining = list(proposals)
@@ -386,7 +404,7 @@ def analyze_labels(path, client, model, item_schema, parse):
         'warning':{'type':['string','null']}},'required':['labels','layout','warning'],'additionalProperties':False}
     pages = render_pages(path)
     digest = hashlib.sha256(Path(path).read_bytes()).hexdigest()[:20]
-    items, warnings = [], []
+    items, warnings, unconfirmed_regions = [], [], []
     for number, page in enumerate(pages, 1):
         preview = page.copy()
         preview.thumbnail((2200,2200))
@@ -437,11 +455,19 @@ def analyze_labels(path, client, model, item_schema, parse):
             if len(regions) != len(proposals):
                 warnings.append(f'Pagina {number}: conteggio AI/localizzazione barcode discordante; verificare il conteggio sul documento originale')
         else:
-            regions = select_label_regions(local_regions, proposals, located.get('layout'), number)
+            regions = select_label_regions(local_regions, proposals, located.get('layout'), number, page)
+            page_unconfirmed = []
+            for proposal in proposals:
+                if not any(overlap(r['bbox'], proposal['bbox']) >= .5 for r in regions):
+                    page_unconfirmed.append(dict(proposal, crop_data_url=image_url(crop_region(page, proposal['bbox']))))
+            unconfirmed_regions.extend(page_unconfirmed)
+            if page_unconfirmed:
+                warnings.append(f'Pagina {number}: proposte AI prive di riscontro fisico non contate come prodotti; verificare il conteggio sul documento originale')
         for index, region in enumerate(regions,1):
             label_id = f'{digest}:p{number}:l{index}'
             original = crop_region(page,region['bbox'])
-            crop = original.rotate(region['rotation'],expand=True)
+            crop = original.rotate(region['rotation'] + region.get('deskew_angle', 0),
+                                   resample=Image.Resampling.BICUBIC, expand=True, fillcolor='white')
             try:
                 try:
                     decoded = decode_barcodes(crop)
@@ -466,7 +492,8 @@ def analyze_labels(path, client, model, item_schema, parse):
                 row = {key:None for key in item_schema['properties']}
                 row.update(quantity=1, confidence=0, warning=f'Lettura fallita ({type(exc).__name__}): verificare manualmente',reviewed=False)
             row.update(label_id=label_id,page=number,bbox=region['bbox'],rotation=region['rotation'],crop_data_url=image_url(crop),source_document=digest,
-                       geometry_source=region.get('geometry_source','ai_proposal'),finder_bbox=region.get('finder_bbox'))
+                       geometry_source=region.get('geometry_source','ai_proposal'),finder_bbox=region.get('finder_bbox'),
+                       deskew_angle=region.get('deskew_angle', 0))
             items.append(row)
     metadata = {k: None for k in ('clinic_name', 'clinical_record', 'procedure_date', 'surgeon')}
     header_preview = pages[0].copy()
@@ -484,4 +511,5 @@ def analyze_labels(path, client, model, item_schema, parse):
     return {'document_type':'scarico_sala','items':items,'back_orders':[],
             'pipeline_version':PIPELINE_VERSION,
             'physical_label_count':len(items),'detection_warnings':warnings,
+            'unconfirmed_regions':unconfirmed_regions,
             'count_verified':False, **metadata, 'confidence':0}
