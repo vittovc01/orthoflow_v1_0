@@ -460,6 +460,16 @@ with upload_tab:
 
 meta = st.session_state.get("scarico_ai_meta", {}) or {}
 source_rows = st.session_state.get("scarico_ai_rows", []) or []
+if meta and st.session_state.get("scarico_source") == "AI":
+    st.caption(f"Versione usata per questi risultati: {meta.get('pipeline_version') or 'precedente'}")
+    if meta.get("pipeline_version") != PIPELINE_VERSION:
+        st.warning("Questi risultati sono stati estratti con una versione OCR precedente. Rianalizza i documenti per applicare le correzioni ai ritagli e alla lettura.")
+        if st.button("Rianalizza i documenti con la versione aggiornata", key="scarico_reanalyze_version"):
+            documents = st.session_state.get("scarico_documents") or []
+            if documents and all(Path(d.get("path", "")).is_file() for d in documents):
+                run_ai(documents[0]["path"], documents=documents)
+            else:
+                st.error("Ricarica i documenti originali e premi Analizza tutti i file.")
 excluded_indices = [i for i, r in enumerate(source_rows) if is_other_manufacturer(r.get("produttore"))]
 restored_indices = []
 if excluded_indices:
@@ -482,6 +492,13 @@ if is_physical_ai:
     st.subheader("Verifica delle etichette fisiche")
     for detection_warning in meta.get("detection_warnings", []) or []:
         st.warning(detection_warning)
+    unconfirmed_regions = meta.get("unconfirmed_regions", []) or []
+    if unconfirmed_regions:
+        with st.expander("Zone proposte dall’AI da controllare sul documento originale"):
+            st.caption("Queste zone non hanno un riscontro indipendente come etichette di prodotto e non aumentano la quantità. Se una zona contiene davvero un materiale, aggiungilo dal modulo qui sotto.")
+            for region in unconfirmed_regions:
+                if region.get("crop_data_url"):
+                    st.image(region["crop_data_url"], caption=f"Pagina {region.get('page', '')}")
     cols = st.columns(3)
     cols[0].metric("Etichette individuate", len(source_rows))
     cols[1].metric("Articoli distinti (REF / lotto / scadenza)", len({(r.get("codice"), r.get("lotto"), r.get("scadenza")) for r in source_rows}))

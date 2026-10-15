@@ -179,4 +179,5 @@ def locate_datamatrix_labels(page):
                     break
             if not duplicate:
                 regions.append(region)
-    return regions
+    from sticker_geometry import refine_sticker_edges
+    return refine_sticker_edges(page, regions)
