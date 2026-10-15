@@ -188,9 +188,69 @@ def test_pipeline_keeps_failed_reads_and_deduplicates_geometry(tmp_path):
     def create(**kwargs):
         try:return next(replies)
         except StopIteration:raise RuntimeError('OCR unavailable')
+    # Geometry audit deliberately fails without consuming label read responses.
+    original_create = create
+    def create(**kwargs):
+        if kwargs.get('text', {}).get('format', {}).get('name') == 'audited_physical_labels':
+            raise RuntimeError('audit unavailable')
+        return original_create(**kwargs)
     client=SimpleNamespace(responses=SimpleNamespace(create=create))
     result=analyze_labels(path,client,'fake',{'properties':{'code':{},'lot':{},'expiry':{}}},lambda r:r)
     assert result['physical_label_count']==2
     assert result['items'][0]['rotation']==180
     assert result['items'][1]['code'] is None and 'fallita' in result['items'][1]['warning']
     assert not result['count_verified']
+
+
+def test_linear_detector_cannot_drop_a_faint_fourth_sticker():
+    from label_pipeline import merge_linear_regions
+    proposals = [dict(page=1, bbox=[10, y, 300, y+90], rotation=0)
+                 for y in (10, 210, 410, 610)]
+    local = [dict(bbox=r['bbox'], rotation=180) for r in proposals[:3]]
+    result = merge_linear_regions(local, proposals, 1)
+    assert len(result) == 4
+    assert result[-1] == proposals[-1]
+    assert all(r['rotation'] == 180 for r in result[:3])
+
+
+def test_local_crop_spanning_two_labels_cannot_replace_either():
+    from label_pipeline import merge_linear_regions
+    proposals = [dict(page=1,bbox=b,rotation=0)
+                 for b in ([0,0,200,100],[0,110,200,210])]
+    assert merge_linear_regions([dict(bbox=[0,0,200,210],rotation=0)],proposals,1)==proposals
+
+
+def test_unmatched_local_label_is_added_without_identity_deduplication():
+    from label_pipeline import merge_linear_regions
+    proposals = [dict(page=1,bbox=[0,0,200,100],rotation=0)]
+    result=merge_linear_regions([dict(bbox=[0,200,200,300],rotation=0)],proposals,1)
+    assert len(result)==2
+    assert len(merge_linear_regions([dict(bbox=[0,0,200,100],rotation=0)],proposals,1))==1
+
+
+def test_geometry_audit_replaces_header_and_split_crops_before_reading(tmp_path, monkeypatch):
+    path=tmp_path/'page.png'
+    Image.new('RGB',(400,400),'white').save(path)
+    monkeypatch.setattr('label_geometry.locate_datamatrix_labels', lambda _: [])
+    monkeypatch.setattr('label_pipeline.decode_barcodes', lambda _: [])
+    monkeypatch.setattr('label_pipeline.local_ref_evidence', lambda _: {'status':'unreadable','candidates':[]})
+    corrected=[{'bbox':[100,400,900,600],'rotation':0},
+               {'bbox':[100,650,900,850],'rotation':0}]
+    read={'code':'413.040S','lot':'LOT','expiry':'2035-04-01'}
+    def create(**kwargs):
+        name=kwargs['text']['format']['name']
+        if name=='physical_labels':
+            return {'labels':[{'bbox':[100,100,900,200],'rotation':0}], 'layout':'synthes_datamatrix','warning':None}
+        if name=='audited_physical_labels':
+            return {'labels':corrected,'layout':'synthes_datamatrix','warning':None}
+        if name=='procedure_header':
+            return {}
+        return dict(read)
+    result=analyze_labels(path,SimpleNamespace(responses=SimpleNamespace(create=create)),
+                          'fake',{'properties':{'code':{},'lot':{},'expiry':{}}},lambda r:r)
+    assert [r['bbox'] for r in result['items']]==[r['bbox'] for r in corrected]
+    assert result['physical_label_count']==2
+    assert len({r['label_id'] for r in result['items']})==2
+    grouped=aggregate_labels([dict(label_id=r['label_id'],codice=r['code'],lotto=r['lot'],
+                                   scadenza=r['expiry'],quantita=r['quantity']) for r in result['items']])
+    assert len(grouped)==1 and grouped[0]['quantita']==2
