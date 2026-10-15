@@ -23,4 +23,8 @@ DO $$ BEGIN
   RAISE EXCEPTION 'unconfirmed accepted';
  EXCEPTION WHEN check_violation THEN NULL; END;
 END $$;
+SET LOCAL ROLE service_role;
+INSERT INTO public.ocr_review_sessions(id,actor,confirmed_at,pipeline_version,payload_sha256,documents,extracted,confirmed,aggregate_rows,physical_count,count_verified)
+VALUES('00000000-0000-0000-0000-000000000113','ci_operator',now(),'test',repeat('c',64),'[{}]','{}','[{"label_id":"one"},{"label_id":"two","duplicate_of":"one"}]','[]',1,true);
+RESET ROLE;
 ROLLBACK;

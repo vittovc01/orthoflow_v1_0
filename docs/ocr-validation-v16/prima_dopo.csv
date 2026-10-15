@@ -1,0 +1,5 @@
+campione,fase,etichette,datamatrix,ref_corretti,lotti_corretti,scadenze_corrette,errori_silenziosi,ref_da_verificare,etichette_da_verificare,quantita_non_risolte
+full,before,7,5,0,5,5,0,7,7,7
+full,after,7,5,5,5,5,0,6,7,7
+crops,before,16,16,0,16,16,0,16,16,16
+crops,after,16,16,16,16,16,0,16,16,0

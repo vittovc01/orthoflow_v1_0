@@ -74,6 +74,11 @@ def assess_label(item, *, catalog=None, today=None, soon_days=90):
             elif value:
                 method = 'datamatrix_ocr' if reads else 'datamatrix'
                 status, score = 'agreement' if reads else 'decoded', .95 if reads else .9
+        if name=='code' and item.get('catalog_resolution'):
+            state=item['catalog_resolution']
+            method='gtin_catalogue_ocr' if state=='matched' else 'gtin_catalogue'
+            status='agreement' if state=='matched' else 'conflict' if state=='conflict' else 'unknown_catalogue' if state in {'unknown_gtin','catalogue_unavailable'} else 'unverified'
+            score=.99 if state=='matched' else .45 if value else 0.0
         precision = None
         if name=='expiry' and value:
             normalized, precision = normalize_expiry(value)
@@ -95,6 +100,9 @@ def assess_label(item, *, catalog=None, today=None, soon_days=90):
                 status, score = 'invalid', 0.0
         if name in item.get('manual_fields',[]) and value and status not in {'invalid','unknown_catalogue'}:
             method, status, score = 'manual', 'reviewed', 1.0
+        quality=item.get('image_quality',{})
+        if quality.get('conditions') and name in ('code','description','lot','expiry') and 'datamatrix' not in method and status in {'agreement','unverified'}:
+            status='unverified'
         if status in {'missing','conflict','invalid','unverified','unknown_catalogue'}:
             issues.append(name + ': ' + status)
         fields[name] = {'value':value,'method':method,'status':status,'score':score,
@@ -109,6 +117,9 @@ def assess_label(item, *, catalog=None, today=None, soon_days=90):
     box = item.get('bbox') or []
     if len(box)==4 and (min(box[:2])<=0 or max(box[2:])>=1000):
         issues.append('Etichetta sul bordo: verificare completezza o acquisire una nuova foto')
+    issues.extend(item.get('image_quality',{}).get('issues',[]))
+    if item.get('cross_photo_candidates') and not item.get('physical_distinct_confirmed') and not item.get('duplicate_of'):
+        issues.append('Possibile duplicato in più foto: confermare identità fisica prima di calcolare le quantità')
     return {'fields':fields,'issues':list(dict.fromkeys(issues)),
             'needs_review':bool(issues),'expiry_status':expiry_status,
             'score_semantics':'evidence_strength_not_probability'}
@@ -135,10 +146,14 @@ def build_review(extraction, *, catalog=None, today=None, soon_days=90):
 def aggregate_review(rows):
     """Same exact REF/lot -> one row; conflicting expiry requires correction first."""
     groups, ids = {}, set()
+    if any(r.get('duplicate_of') for r in rows):
+        verified_physical_count(rows)
     for original in rows:
         row = canonical_item(original)
-        if row.get('escludi_riga'):
+        if row.get('escludi_riga') or row.get('duplicate_of'):
             continue
+        if row.get('cross_photo_candidates') and not row.get('physical_distinct_confirmed'):
+            raise ValueError('Identità fisica incerta tra più foto: quantità non calcolabile senza revisione')
         label_id = row.get('label_id')
         if not label_id or label_id in ids:
             raise ValueError('Identità fisica assente o ripetuta')
@@ -165,7 +180,7 @@ def aggregate_review(rows):
 def validate_confirmation(extraction, confirmed, *, physical_count, count_verified, actor):
     """Run again in the trusted server; UI/HTTP booleans alone are insufficient."""
     if (not isinstance(actor,str) or not actor.strip() or count_verified is not True
-            or type(physical_count) is not int or physical_count<=0 or physical_count!=len(confirmed)):
+            or type(physical_count) is not int or physical_count<=0 or physical_count!=verified_physical_count(confirmed)):
         raise ValueError('Utente e conteggio fisico verificato obbligatori')
     if any(d.get('status')=='failed' for d in extraction.get('documents',[]) if isinstance(d,dict)):
         raise ValueError('Documento non analizzato: ripetere la lettura prima della conferma')
@@ -199,7 +214,7 @@ def merge_confirmed_fields(originals, edits):
         raise ValueError('Identità fisiche originali ripetute')
     allowed = set(FIELDS) | set(ALIASES.values()) | {'label_id','quantita','quantity',
         'verificata','reviewed','escludi_riga','senza_lotto','jnj_verificato_manualmente',
-        'conto_deposito_struttura','produttore'}
+        'conto_deposito_struttura','produttore','duplicate_of','physical_distinct_confirmed'}
     merged = []
     seen = set()
     for edit in edits:
@@ -213,5 +228,49 @@ def merge_confirmed_fields(originals, edits):
                 row[name] = row[alias] = edit[alias]
             elif name in edit:
                 row[name] = row[alias] = edit[name]
+        if row.get('duplicate_of'):
+            row['escludi_riga']=True
         merged.append(row)
     return merged
+
+
+def verified_physical_count(rows):
+    """Count physical units after explicit cross-photo identity decisions.
+
+    Equal REF/lot/GTIN is a batch identity, NOT a unique physical item. Never
+    automatically merge different physical stickers on that basis.
+    """
+    by_id={r.get('label_id'):r for r in rows}
+    if None in by_id or len(by_id)!=len(rows):raise ValueError('Identità fisica assente o duplicata')
+    duplicates=0
+    for row in rows:
+        target=row.get('duplicate_of')
+        if not target:continue
+        other=by_id.get(target)
+        if other is None or target==row['label_id'] or other.get('duplicate_of'):
+            raise ValueError('Riferimento duplicato non valido o circolare')
+        a,b=canonical_item(row),canonical_item(other)
+        if not a.get('code') or not a.get('lot') or (exact_code(a['code']),a['lot'])!=(exact_code(b['code']),b['lot']):
+            raise ValueError('Identità REF/lotto del duplicato discordante')
+        if (row.get('verificata',row.get('reviewed')) is not True or
+                other.get('verificata',other.get('reviewed')) is not True):
+            raise ValueError('Confrontare entrambe le foto prima di confermare un duplicato')
+        duplicates+=1
+    return len(rows)-duplicates
+
+
+def mark_cross_photo_candidates(items):
+    """Flag ambiguous repeat appearances; do not collapse genuine same-lot units."""
+    groups={}
+    for row in items:
+        item=canonical_item(row)
+        if item.get('code') and item.get('lot'):
+            groups.setdefault((exact_code(item['code']),str(item['lot']).strip()),[]).append(row)
+    for rows in groups.values():
+        documents={r.get('document_index',0) for r in rows}
+        if len(documents)<2:continue
+        for row in rows:
+            candidates=[r['label_id'] for r in rows if r.get('document_index',0)!=row.get('document_index',0)]
+            if candidates:
+                row['cross_photo_candidates']=candidates
+    return items

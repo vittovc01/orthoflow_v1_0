@@ -1,0 +1,214 @@
+{
+  "manual_truth_verified": false,
+  "notes": "Existing product-only crop fixtures. Not a full-photo localization or independent discharge cohort. Requires operator countercheck.",
+  "labels": [
+    {
+      "file": "01.png",
+      "truth_index": 0,
+      "bbox": [
+        0,
+        0,
+        1000,
+        1000
+      ],
+      "case_id": "crop-01",
+      "physical_id": "unit-01",
+      "conditions": []
+    },
+    {
+      "file": "02.png",
+      "truth_index": 0,
+      "bbox": [
+        0,
+        0,
+        1000,
+        1000
+      ],
+      "case_id": "crop-02",
+      "physical_id": "unit-02",
+      "conditions": []
+    },
+    {
+      "file": "03.png",
+      "truth_index": 0,
+      "bbox": [
+        0,
+        0,
+        1000,
+        1000
+      ],
+      "case_id": "crop-03",
+      "physical_id": "unit-03",
+      "conditions": []
+    },
+    {
+      "file": "04.png",
+      "truth_index": 0,
+      "bbox": [
+        0,
+        0,
+        1000,
+        1000
+      ],
+      "case_id": "crop-04",
+      "physical_id": "unit-04",
+      "conditions": []
+    },
+    {
+      "file": "05.png",
+      "truth_index": 0,
+      "bbox": [
+        0,
+        0,
+        1000,
+        1000
+      ],
+      "case_id": "crop-05",
+      "physical_id": "unit-05",
+      "conditions": []
+    },
+    {
+      "file": "06.png",
+      "truth_index": 0,
+      "bbox": [
+        0,
+        0,
+        1000,
+        1000
+      ],
+      "case_id": "crop-06",
+      "physical_id": "unit-06",
+      "conditions": []
+    },
+    {
+      "file": "07.png",
+      "truth_index": 0,
+      "bbox": [
+        0,
+        0,
+        1000,
+        1000
+      ],
+      "case_id": "crop-07",
+      "physical_id": "unit-07",
+      "conditions": []
+    },
+    {
+      "file": "08.png",
+      "truth_index": 0,
+      "bbox": [
+        0,
+        0,
+        1000,
+        1000
+      ],
+      "case_id": "crop-08",
+      "physical_id": "unit-08",
+      "conditions": []
+    },
+    {
+      "file": "09.png",
+      "truth_index": 0,
+      "bbox": [
+        0,
+        0,
+        1000,
+        1000
+      ],
+      "case_id": "crop-09",
+      "physical_id": "unit-09",
+      "conditions": []
+    },
+    {
+      "file": "10.png",
+      "truth_index": 0,
+      "bbox": [
+        0,
+        0,
+        1000,
+        1000
+      ],
+      "case_id": "crop-10",
+      "physical_id": "unit-10",
+      "conditions": []
+    },
+    {
+      "file": "11.png",
+      "truth_index": 0,
+      "bbox": [
+        0,
+        0,
+        1000,
+        1000
+      ],
+      "case_id": "crop-11",
+      "physical_id": "unit-11",
+      "conditions": []
+    },
+    {
+      "file": "12.png",
+      "truth_index": 0,
+      "bbox": [
+        0,
+        0,
+        1000,
+        1000
+      ],
+      "case_id": "crop-12",
+      "physical_id": "unit-12",
+      "conditions": []
+    },
+    {
+      "file": "13.png",
+      "truth_index": 0,
+      "bbox": [
+        0,
+        0,
+        1000,
+        1000
+      ],
+      "case_id": "crop-13",
+      "physical_id": "unit-13",
+      "conditions": []
+    },
+    {
+      "file": "14.png",
+      "truth_index": 0,
+      "bbox": [
+        0,
+        0,
+        1000,
+        1000
+      ],
+      "case_id": "crop-14",
+      "physical_id": "unit-14",
+      "conditions": []
+    },
+    {
+      "file": "15.png",
+      "truth_index": 0,
+      "bbox": [
+        0,
+        0,
+        1000,
+        1000
+      ],
+      "case_id": "crop-15",
+      "physical_id": "unit-15",
+      "conditions": []
+    },
+    {
+      "file": "16.png",
+      "truth_index": 0,
+      "bbox": [
+        0,
+        0,
+        1000,
+        1000
+      ],
+      "case_id": "crop-16",
+      "physical_id": "unit-16",
+      "conditions": []
+    }
+  ]
+}

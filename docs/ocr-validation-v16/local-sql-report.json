@@ -1,0 +1,14 @@
+{
+  "environment": "local PGlite PostgreSQL WASM; NOT remote Supabase staging",
+  "sql_tests": "passed",
+  "first": {
+    "nuove": 49140,
+    "invariate": 0,
+    "aggiornate": 0
+  },
+  "second": {
+    "nuove": 0,
+    "invariate": 49140,
+    "aggiornate": 0
+  }
+}

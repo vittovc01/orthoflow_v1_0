@@ -335,7 +335,15 @@ def is_other_manufacturer(value):
         "SMITHNEPHEW", "SMITHANDNEPHEW", "ARTHREX", "BBRAUN", "AESCULAP", "INOMED"))
 
 
-def run_ai(path, documents=None):
+def run_ai(path, documents=None, *, privacy_manifest=None):
+    documents = documents or [{"path":path,"name":Path(path).name,"type":st.session_state.get("scarico_file_type", "")}]
+    if privacy_manifest is None:
+        from local_label_reader import prepare_document
+        with st.spinner("Controllo locale dei ritagli e della qualità, senza invio al modello…"):
+            proposals=[prepare_document(d["path"]) for d in documents]
+        st.session_state["scarico_privacy_pending"]={"documents":documents,"proposals":proposals}
+        st.rerun()
+        return
     if not ai_enabled():
         st.error("OCR AI non configurato. Verifica OPENAI_API_KEY ed ENABLE_AI_OCR nei Secrets.")
         return
@@ -344,7 +352,11 @@ def run_ai(path, documents=None):
                                    "type": st.session_state.get("scarico_file_type", "")}]
         originals = [OriginalDocument(d.get("name") or Path(d["path"]).name, Path(d["path"]).read_bytes()) for d in documents]
         with st.spinner(f"Analisi AI di {len(documents)} file: codici, lotti e scadenze…"):
-            meta = analyze_documents(originals, analyzer=analyze_document)
+            from gtin_catalog import supabase_lookup
+            def approved_analyzer(source,mode):
+                digest=sha256(Path(source).read_bytes()).hexdigest()
+                return analyze_document(source,mode=mode,privacy_approval=privacy_manifest.get(digest))
+            meta = analyze_documents(originals, analyzer=approved_analyzer,gtin_catalog=supabase_lookup(sb()))
             combined_rows = normalize_ai_items(meta)
         meta["physical_label_count"] = len(combined_rows)
         meta["items"] = combined_rows
@@ -363,7 +375,7 @@ def run_ai(path, documents=None):
         st.info(f"Analisi terminata: {len(st.session_state['scarico_ai_rows'])} etichette proposte. Verifica completezza, campi e avvisi prima della conferma.")
         st.rerun()
     except Exception as e:
-        st.error(f"Errore analisi AI: {e}")
+        st.error(f"Analisi non completata ({type(e).__name__}). Verifica connessione e configurazione senza condividere chiavi nei log.")
 
 
 def save_document_after_transaction(intervention_id, procedure_date, customer_code, customer_name, agent, clinical_record):
@@ -462,6 +474,43 @@ with upload_tab:
                 documents.append({"path": save_local(upload), "name": entry["name"], "type": entry["type"]})
             run_ai(documents[0]["path"], documents=documents)
 
+
+privacy_pending=st.session_state.get("scarico_privacy_pending")
+if privacy_pending:
+    from label_pipeline import render_pages,crop_region,decode_barcodes
+    from image_quality import acquisition_report
+    st.subheader("Verifica locale dei ritagli prima dell'invio")
+    st.info("Al modello saranno inviati soltanto i ritagli selezionati qui sotto. Deseleziona qualsiasi ritaglio con intestazione, iniziali, numero di cartella o altri dati del paziente. Se manca un'etichetta, aggiungi una foto ravvicinata. I dati intervento andranno compilati manualmente.")
+    selected={};all_documents_have_labels=True
+    for document,proposal in zip(privacy_pending["documents"],privacy_pending["proposals"]):
+        pages=render_pages(document["path"])
+        regions=[]
+        for number,page in enumerate(pages,1):
+            page_regions=[r for r in proposal["regions"] if r["page"]==number]
+            for message in acquisition_report(page,page_regions)["warnings"]:st.warning(message)
+        for index,region in enumerate(proposal["regions"]):
+            crop=crop_region(pages[region["page"]-1],region["bbox"])
+            st.image(crop,caption=f"{document['name']} · etichetta {index+1}",use_container_width=True)
+            decode_key=f"privacy_dm_{proposal['sha256']}_{index}"
+            if decode_key not in st.session_state:
+                from datamatrix_reader import decode_label_region
+                st.session_state[decode_key]=bool([b for b in decode_label_region(pages[region['page']-1],region) if not b.get('error')])
+            if not st.session_state[decode_key]:
+                st.warning("DataMatrix non decodificato: acquisisci una nuova foto più ravvicinata, nitida e senza riflessi. Il testo sarà soltanto un controllo, non una corrispondenza GTIN verificata.")
+            if st.checkbox("Questo ritaglio contiene solo l'etichetta del prodotto",value=False,key=f"privacy_crop_{proposal['sha256']}_{index}"):
+                regions.append(region)
+        if not regions:all_documents_have_labels=False
+        selected[proposal["sha256"]]={**proposal,"regions":regions,"approved":True,"labels_only_confirmed":True}
+    confirmed=st.checkbox("Ho controllato tutti i ritagli selezionati: nessun dato del paziente verrà inviato",value=False,key="scarico_privacy_confirmed")
+    if st.button("Invia solo le etichette approvate al modello",disabled=not confirmed or not all_documents_have_labels,type="primary"):
+        documents=privacy_pending["documents"]
+        st.session_state.pop("scarico_privacy_pending",None)
+        run_ai(documents[0]["path"],documents=documents,privacy_manifest=selected)
+    if st.button("Annulla e acquisisci foto più ravvicinate"):
+        st.session_state.pop("scarico_privacy_pending",None)
+        st.rerun()
+    st.stop()
+
 meta = st.session_state.get("scarico_ai_meta", {}) or {}
 source_rows = st.session_state.get("scarico_ai_rows", []) or []
 if meta and st.session_state.get("scarico_source") == "AI":
@@ -510,7 +559,7 @@ if is_physical_ai:
     cols = st.columns(3)
     cols[0].metric("Etichette individuate", len(source_rows))
     cols[1].metric("Articoli distinti (REF / lotto)", len({(r.get("codice"), r.get("lotto")) for r in source_rows if r.get("codice") and (r.get("lotto") or r.get("senza_lotto"))}))
-    cols[2].metric("Quantità proposta da scaricare", sum(1 for r in rows if not r.get("escludi_riga")))
+    cols[2].metric("Quantità proposta da scaricare", "Da verificare" if any(r.get("cross_photo_candidates") and not r.get("physical_distinct_confirmed") and not r.get("duplicate_of") for r in rows) else sum(1 for r in rows if not r.get("escludi_riga")))
     catalog = None
     if source_rows:
         try:
@@ -519,6 +568,12 @@ if is_physical_ai:
         except Exception:
             st.caption("Anagrafica scanner non disponibile: confronto catalogo non eseguito.")
     assessed_rows = build_review({"items":source_rows}, catalog=catalog)["items"]
+    from gtin_catalog import missing_gtins, missing_gtins_csv
+    if missing_gtins(source_rows):
+        st.warning("GTIN assenti dal catalogo: REF da verificare. Scarica l’elenco per richiedere l’aggiornamento a J&J.")
+        st.download_button("Scarica GTIN mancanti", missing_gtins_csv(source_rows),
+                           file_name="gtin_mancanti.csv", mime="text/csv", key="missing_gtins_download")
+
     for r in assessed_rows:
         with st.expander(f"{'⚠️ Da verificare' if r.get('assessment',{}).get('needs_review') else 'Da confermare'} · {r.get('label_id')} · {clean(r.get('codice'))} · {clean(r.get('lotto'))}"):
             left, right = st.columns([2, 3])
@@ -623,10 +678,12 @@ with st.form("scarico_ai_confirm"):
         st.subheader("✅ Lista materiali riconosciuti")
         st.caption("Tocca una cella per correggere codice, lotto, scadenza o quantità. Per materiale non sterile senza lotto spunta Non sterile / senza lotto. Spunta Escludi riga per non inserirla nello scarico. Le modifiche vengono applicate alla conferma. Puoi anche usare il modulo Aggiungi o correggi un materiale sopra la lista.")
         df_rows = pd.DataFrame(rows)
-        preferred = ["codice", "senza_lotto", "jnj_verificato_manualmente", "escludi_riga", "descrizione", "lotto", "gtin", "scadenza", "quantita", "produttore", "confidence", "warning"]
+        preferred = ["codice", "senza_lotto", "jnj_verificato_manualmente", "escludi_riga", "descrizione", "lotto", "gtin", "scadenza", "physical_distinct_confirmed", "duplicate_of", "quantita", "produttore", "confidence", "warning"]
         if "escludi_riga" not in df_rows:
             df_rows["escludi_riga"] = False
         df_rows["senza_lotto"] = df_rows.get("senza_lotto", pd.Series(False, index=df_rows.index)).fillna(False).astype(bool)
+        df_rows["physical_distinct_confirmed"] = df_rows.get("physical_distinct_confirmed",pd.Series(False,index=df_rows.index)).fillna(False).astype(bool)
+        df_rows["duplicate_of"] = df_rows.get("duplicate_of",pd.Series("",index=df_rows.index)).fillna("")
         for col in preferred:
             if col not in df_rows.columns:
                 df_rows[col] = ""
@@ -652,6 +709,8 @@ with st.form("scarico_ai_confirm"):
                 "codice": st.column_config.TextColumn("Codice Johnson/REF"),
                 "lotto": st.column_config.TextColumn("Lotto"),
                 "gtin": st.column_config.TextColumn("GTIN (14 cifre)"),
+                "physical_distinct_confirmed": st.column_config.CheckboxColumn("Pezzo fisico distinto nelle altre foto",default=False),
+                "duplicate_of": st.column_config.TextColumn("Stessa etichetta già vista: ID della prima riga"),
                 "senza_lotto": st.column_config.CheckboxColumn("Non sterile / senza lotto", default=False,
                     help="Spunta solo materiale non sterile che non prevede lotto. La disponibilità viene cercata nelle giacenze senza lotto."),
                 "conto_deposito_struttura": st.column_config.CheckboxColumn(
@@ -889,7 +948,7 @@ if confirm or archive_review:
     }
 
     if is_physical_ai:
-        header["physical_label_count"] = len(source_rows)
+        header["physical_label_count"] = int(expected_label_count)
         header["count_verified"] = bool(count_verified)
         header["included_label_ids"] = [i for r in rpc_rows for i in r["label_ids"]]
         originals = {r.get("label_id"): r for r in st.session_state.get("scarico_ai_original_rows", source_rows)}

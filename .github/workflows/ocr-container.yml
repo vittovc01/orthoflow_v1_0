@@ -1,0 +1,45 @@
+name: OCR reproducible offline evaluation
+on: [push, pull_request, workflow_dispatch]
+permissions:
+  contents: read
+jobs:
+  evaluate:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - run: docker build -f docker/ocr/Dockerfile -t orthoflow-ocr .
+      - run: docker run --rm --network none --entrypoint python orthoflow-ocr -m pytest -q tests/test_ocr_gtin_privacy.py tests/test_catalog_staging.py
+      - name: Run real pipeline on product-only fixtures
+        run: |
+          mkdir -p reports
+          set +e
+          docker run --rm --network none -v "$PWD/reports:/reports" orthoflow-ocr --mode local --images tests/fixtures/santa_lucia --truth tests/evaluation/ground_truth.csv --annotations tests/evaluation/annotations.json --out /reports/local
+          rc=$?
+          set -e
+          # Exit 2 means acceptance gate BLOCKED, not a successful validation.
+          test "$rc" = 0 -o "$rc" = 2
+          python -c 'import json; s=json.load(open("reports/local/summary.json")); assert s["status"]=="COMPLETED"; assert not s["counts"].get("failed_documents"); assert s["silent_errors"]==0'
+  catalog-sql:
+    runs-on: ubuntu-24.04
+    services:
+      postgres:
+        image: postgres:17.6
+        env:
+          POSTGRES_PASSWORD: ci_only
+          POSTGRES_DB: ocr_ci
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd pg_isready --health-interval 5s --health-timeout 5s --health-retries 12
+    env:
+      PGHOST: localhost
+      PGPORT: 5432
+      PGUSER: postgres
+      PGDATABASE: ocr_ci
+      PGPASSWORD: ci_only
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - run: |
+          psql -v ON_ERROR_STOP=1 -c "CREATE ROLE anon; CREATE ROLE authenticated; CREATE ROLE service_role BYPASSRLS; GRANT USAGE ON SCHEMA public TO service_role;"
+          psql -v ON_ERROR_STOP=1 -f sql/articoli_gtin.sql
+          PGOPTIONS='-c orthoflow.environment=staging' psql -v ON_ERROR_STOP=1 -f sql/articoli_gtin_staging_v2.sql
+          psql -v ON_ERROR_STOP=1 -f tests/catalog_staging_v2.sql

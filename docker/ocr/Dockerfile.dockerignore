@@ -1,0 +1,11 @@
+.git
+.env
+.env.*
+**/secrets.toml
+**/__pycache__
+.pytest_cache
+.venv
+venv
+*.sqlite
+*.db
+artifacts

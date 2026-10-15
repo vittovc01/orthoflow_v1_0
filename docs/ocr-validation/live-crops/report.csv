@@ -1,0 +1,2 @@
+﻿priority,row_type,repeat,case_id,file,truth_label,predicted_label,field,expected,predicted,correct,flagged,silent_error,method,matching,condition,problem
+-1,SUMMARY_SILENT_ERRORS,,,,,,silent_errors,,NON_MISURATI,,,,,,,RuntimeError: OPENAI_API_KEY non configurata: valutazione live NON ESEGUITA

@@ -1,0 +1,13 @@
+# Python 3.12; standalone offline evaluator, no Streamlit/Supabase client required.
+numpy==2.2.6
+opencv-python-headless==4.11.0.86
+zxing-cpp==2.3.0
+Pillow==11.3.0
+PyMuPDF==1.26.4
+xlrd==2.0.2
+pytest==9.1.1
+# Fully pinned pytest dependency closure.
+iniconfig==2.3.1
+packaging==26.3
+pluggy==1.7.0
+Pygments==2.21.0

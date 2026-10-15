@@ -1,0 +1,29 @@
+{
+  "silent_errors": null,
+  "accepted": false,
+  "status": "NOT_RUN",
+  "mode": "live",
+  "model": "gpt-4.1",
+  "generated_at": "2026-10-15T10:06:27.180963+00:00",
+  "dataset_sha256": "c29a332c930a512870fe7cc4a15ee5a08cababf20a416afd235db7c1aa3a305d",
+  "pipeline_sha256": "caa3dc2fa4d64b768c8716a134ab204dc90ddfab4475e485a0a2921e0198620c",
+  "files": 16,
+  "cases": 16,
+  "unique_label_appearances": 16,
+  "unique_physical_labels": 16,
+  "annotations_complete": true,
+  "truth_manual_review_confirmed": false,
+  "repeats": 3,
+  "unlisted_files": [],
+  "python": "3.12.14",
+  "packages": {
+    "Pillow": "12.3.0",
+    "zxing-cpp": "2.3.0",
+    "opencv-python-headless": "4.11.0.86",
+    "openai": null
+  },
+  "tesseract": "tesseract 5.3.4",
+  "gate_reasons": [
+    "RuntimeError: OPENAI_API_KEY non configurata: valutazione live NON ESEGUITA"
+  ]
+}
