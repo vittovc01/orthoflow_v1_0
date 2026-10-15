@@ -13,7 +13,7 @@ from pathlib import Path
 
 from PIL import Image, ImageOps, ImageFilter
 
-PIPELINE_VERSION = 'physical-label-v10-scanned-linear-anchors'
+PIPELINE_VERSION = 'physical-label-v11-preserve-unmatched-labels'
 
 
 def local_ref_evidence(image):
@@ -354,6 +354,27 @@ def select_label_regions(local_regions, proposals, layout, page):
     return [dict(r,page=page) for r in local_regions]
 
 
+def merge_linear_regions(local_regions, proposals, page):
+    """Refine only unambiguous one-to-one matches; preserve unmatched labels.
+
+    A barcode detector can miss a faint sticker or group two adjacent stickers.
+    Neither case licenses replacing the complete visual proposal list.
+    """
+    local = unique_regions([dict(r, page=page) for r in local_regions])
+    proposals = unique_regions(proposals)
+    links = [[i for i, proposal in enumerate(proposals)
+              if overlap(region['bbox'], proposal['bbox']) >= .5]
+             for region in local]
+    output = [dict(r) for r in proposals]
+    for region, matches in zip(local, links):
+        if len(matches) == 1 and sum(matches[0] in m for m in links) == 1:
+            output[matches[0]] = region
+        elif not matches and not any(overlap(region['bbox'], p['bbox']) > 0
+                                     for p in proposals):
+            output.append(region)
+    return sorted(output, key=lambda r: (r['page'], r['bbox'][1], r['bbox'][0]))
+
+
 def analyze_labels(path, client, model, item_schema, parse):
     """Two stages: locate geometry, then read exactly one crop per observation."""
     detector_schema = {'type':'object','properties':{
@@ -376,13 +397,43 @@ def analyze_labels(path, client, model, item_schema, parse):
                 {'type':'input_text','text':'Individua OGNI etichetta fisica adesiva originale del produttore di prodotto ortopedico, incluse le etichette con soli barcode lineari, quelle ripetute, ai bordi e verticali. Escludi gli adesivi di inventario ospedaliero contenenti soltanto codice articolo, numeri interni e (1/1), senza LOT/lotto, scadenza e dati del produttore. Non leggere i dati. layout=synthes_datamatrix soltanto per il layout delle piccole etichette Synthes a REF puntato e DataMatrix; altre etichette DePuy ATTUNE/VELYS/SmartSet sono other, anche se sterili o con DataMatrix. Per compresenza dei due layout usa mixed. Restituisci rettangoli stretti non sovrapposti in coordinate della immagine originale da 0 a 1000 [sinistra,alto,destra,basso]. Una etichetta per rettangolo, non una colonna. rotation è la rotazione antioraria necessaria a leggere quel singolo ritaglio. Non includere intestazione, firma, celle vuote. Segnala parti non localizzabili.'},
                 {'type':'input_image','image_url':image_url(preview),'detail':'high'}]}],
             text={'format':{'type':'json_schema','name':'physical_labels','schema':detector_schema,'strict':True}}))
+        # A separate geometry pass sees the proposed boxes on the source page.
+        # It can reject header fields and repair split/mixed stickers before OCR.
+        try:
+            from PIL import ImageDraw
+            audit = preview.copy()
+            draw = ImageDraw.Draw(audit)
+            for index, region in enumerate(located['labels'], 1):
+                box = region['bbox']
+                pixels = tuple(round(v * (audit.width if i % 2 == 0 else audit.height) / 1000)
+                               for i, v in enumerate(box))
+                draw.rectangle(pixels, outline='red', width=2)
+                draw.text(pixels[:2], str(index), fill='red')
+            checked = parse(client.responses.create(model=model, store=False,
+                input=[{'role':'user','content':[
+                    {'type':'input_text','text':'Controllo geometrico indipendente. I rettangoli rossi sono proposte NON affidabili. Restituisci la lista COMPLETA corretta di tutte le etichette fisiche originali di prodotti ortopedici. Elimina i rettangoli su intestazione, cartella clinica, date manoscritte e firme. Correggi ogni rettangolo troncato o contenente più etichette: includi REF, LOT, scadenza e tutti i bordi della singola etichetta. Aggiungi tutte le etichette mancanti, anche identiche. Non contare adesivi interni ospedalieri. Coordinate [sinistra,alto,destra,basso] da 0 a 1000 su TUTTA la pagina, mai in pixel. Rotazione antioraria. Non leggere gli identificativi. Controlla ogni riga e colonna.'},
+                    {'type':'input_image','image_url':image_url(audit),'detail':'high'},
+                    {'type':'input_image','image_url':image_url(preview),'detail':'high'}]}],
+                text={'format':{'type':'json_schema','name':'audited_physical_labels','schema':detector_schema,'strict':True}}))
+            unique_regions([dict(r, page=number) for r in checked['labels']])
+            if located.get('warning'):
+                warnings.append(f'Pagina {number}: prima localizzazione: {located["warning"]}')
+            if len(checked['labels']) != len(located['labels']):
+                warnings.append(f'Pagina {number}: conteggio corretto dal controllo dei ritagli; confermare sul documento originale')
+            located = checked
+        except Exception:
+            warnings.append(f'Pagina {number}: controllo indipendente dei ritagli non disponibile; verificare ogni etichetta sul documento')
         if located.get('warning'):
             warnings.append(f'Pagina {number}: {located["warning"]}')
         proposals = unique_regions([dict(r,page=number) for r in located['labels']])
         from linear_label_geometry import locate_linear_labels
-        linear_regions = locate_linear_labels(page) if located.get('layout') == 'other' else []
+        try:
+            linear_regions = locate_linear_labels(page) if located.get('layout') in {'other', 'mixed'} else []
+        except (OSError, subprocess.SubprocessError):
+            linear_regions = []
+            warnings.append(f'Pagina {number}: localizzazione barcode non disponibile; verificare i ritagli visivi')
         if linear_regions:
-            regions = [dict(r,page=number) for r in linear_regions]
+            regions = merge_linear_regions(linear_regions, proposals, number)
             if len(regions) != len(proposals):
                 warnings.append(f'Pagina {number}: conteggio AI/localizzazione barcode discordante; verificare il conteggio sul documento originale')
         else:
