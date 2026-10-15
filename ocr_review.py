@@ -66,8 +66,7 @@ def assess_label(item, *, catalog=None, today=None, soon_days=90):
         if len(decoded)>1 or (decoded and reads and any(str(r).strip()!=decoded[0] for r in reads)):
             status, score = 'conflict', 0.0
             # Preserve the verified payload candidate, never silently substitute it.
-            if name!='gtin':
-                value = None
+            value = None
             method = 'datamatrix_ocr_conflict'
         elif len(decoded)==1:
             if value and value!=decoded[0]:

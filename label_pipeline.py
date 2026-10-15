@@ -83,7 +83,7 @@ def compare_reads(first, second):
     row = dict(first)
     warnings = [row['warning']] if row.get('warning') else []
     row['ocr_reads'] = [dict(first), dict(second)]
-    for field in ('code', 'lot', 'expiry'):
+    for field in ('code', 'lot', 'expiry', 'gtin'):
         a, b = first.get(field), second.get(field)
         if not a or not b or str(a).strip() != str(b).strip():
             row[field] = None
@@ -229,7 +229,7 @@ def reconcile(item, barcodes):
     row['barcodes'] = barcodes
     valid = [b for b in barcodes if not b.get('error')]
     if any(len({b.get(f) for b in valid if b.get(f)}) > 1 for f in ('gtin', 'lot', 'expiry')):
-        row.update(code=None, lot=None, expiry=None)
+        row.update(code=None, lot=None, expiry=None, gtin=None)
         warnings.append('Più identità GS1 nel ritaglio: verificare i confini della singola etichetta')
         barcodes = []
     conflicted_fields = set()
@@ -238,9 +238,7 @@ def reconcile(item, barcodes):
             warnings.append(barcode['error'])
             continue
         # AI (01) identifies a GTIN, never a catalogue REF.
-        if barcode.get('gtin'):
-            row['gtin'] = barcode['gtin']
-        for field in ('lot', 'expiry'):
+        for field in ('gtin', 'lot', 'expiry'):
             if field in conflicted_fields:
                 continue
             decoded = barcode.get(field)
@@ -499,13 +497,13 @@ def analyze_labels(path, client, model, item_schema, parse):
                     warnings.append(f'{label_id}: decodifica DataMatrix non disponibile')
                 response = client.responses.create(model=model, store=False,
                     input=[{'role':'user','content':[
-                        {'type':'input_text','text':'Trascrivi SOLO questa singola etichetta: REF stampato (mai GTIN/UDI), lotto, scadenza ISO, descrizione e produttore. Non dedurre dati da descrizioni o cataloghi. Per caratteri incerti usa null e warning. quantity=1. Non usare quantità della confezione. Se il ritaglio contiene più etichette o è troncato segnala warning. Ignora eventuali adesivi interni ospedalieri con soli codici numerici e (1/1), senza REF/LOT e dati del produttore. La confidence non sostituisce verifica manuale.'},
+                        {'type':'input_text','text':'Trascrivi SOLO questa singola etichetta: REF stampato (mai GTIN/UDI), GTIN stampato dopo (01) in un campo separato, lotto, scadenza ISO, descrizione e produttore. Non dedurre dati da descrizioni o cataloghi. Per caratteri incerti usa null e warning. quantity=1. Non usare quantità della confezione. Se il ritaglio contiene più etichette o è troncato segnala warning. Ignora eventuali adesivi interni ospedalieri con soli codici numerici e (1/1), senza REF/LOT e dati del produttore. La confidence non sostituisce verifica manuale.'},
                         {'type':'input_image','image_url':image_url(crop),'detail':'high'}]}],
                     text={'format':{'type':'json_schema','name':'single_label','schema':item_schema,'strict':True}})
                 first = parse(response)
                 second = parse(client.responses.create(model=model, store=False,
                     input=[{'role':'user','content':[
-                        {'type':'input_text','text':'Leggi questa sola etichetta da zero. Trascrivi il REF stampato completo di punti, zeri iniziali e suffissi S/TS, lotto e scadenza ISO. Non ricostruire caratteri da descrizioni, GTIN o cataloghi. Campi incerti a null. Non confondere 018, 020, 016, 085, 005. quantity=1.'},
+                        {'type':'input_text','text':'Leggi questa sola etichetta da zero. Trascrivi il REF stampato completo di punti, zeri iniziali e suffissi S/TS, lotto, scadenza ISO e GTIN stampato dopo (01), separato dal REF. Non ricostruire caratteri da descrizioni, GTIN o cataloghi. Campi incerti a null. Non confondere 018, 020, 016, 085, 005. quantity=1.'},
                         {'type':'input_image','image_url':image_url(prepare_crop(crop)),'detail':'high'}]}],
                     text={'format':{'type':'json_schema','name':'independent_label_read','schema':item_schema,'strict':True}}))
                 row = verify_ref_evidence(reconcile(compare_reads(first, second),decoded),

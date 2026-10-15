@@ -303,3 +303,11 @@ def test_gs1_evidence_survives_ai_read_failure(tmp_path,monkeypatch):
     assert item['code'] is None and item['lot']=='LOT' and item['expiry']=='2035-04-01'
     assert item['assessment']['fields']['lot']['method']=='datamatrix'
     assert item['gtin']=='07611819268623'
+
+
+def test_printed_gtin_conflict_cannot_be_overwritten_by_datamatrix():
+    result=reconcile({'code':'413.040S','gtin':'07611819268623','lot':'LOT','expiry':'2035-04-01'},
+                     [{'gtin':'07611819425255','lot':'LOT','expiry':'2035-04-01'}])
+    assert result['gtin'] is None
+    assert result['gtin_ocr_original']=='07611819268623'
+    assert 'Conflitto OCR/GS1: gtin' in result['warning']

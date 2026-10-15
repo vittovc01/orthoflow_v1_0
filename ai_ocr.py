@@ -37,7 +37,7 @@ def _responses_json_schema_format(schema_obj):
 SUPPORTED_IMAGE_EXT={".jpg",".jpeg",".png",".webp"}
 SUPPORTED_DOCUMENT_EXT=SUPPORTED_IMAGE_EXT|{".pdf"}
 ITEM_PROPERTIES={
-    "code":{"type":["string","null"]},"lot":{"type":["string","null"]},"expiry":{"type":["string","null"]},
+    "gtin":{"type":["string","null"]},"code":{"type":["string","null"]},"lot":{"type":["string","null"]},"expiry":{"type":["string","null"]},
     "description":{"type":["string","null"]},"quantity":{"type":"number"},"manufacturer":{"type":["string","null"]},
     "is_jnj_depuy_synthes":{"type":"boolean"},"is_sterile":{"type":"boolean"},"source_text":{"type":["string","null"]},
     "confidence":{"type":"number"},"warning":{"type":["string","null"]}}
@@ -185,5 +185,5 @@ def normalize_ai_items(result):
             warning=(warning+" · " if warning else "")+"Scadenza stampata solo mese/anno: fine mese tecnica, verificare la precisione originale"
         if raw_expiry and not expiry:
             warning=(warning+" · " if warning else "")+f"Scadenza da verificare: {raw_expiry}"
-        out.append({"codice":code,"descrizione":it.get("description") or "","lotto":(it.get("lot") or "").strip(),"scadenza":expiry,"scadenza_originale":raw_expiry,"quantita":it.get("quantity") if it.get("quantity") is not None else 1,"produttore":manufacturer,"is_jnj":bool(it.get("is_jnj_depuy_synthes",False)),"is_sterile":bool(it.get("is_sterile",code.upper().endswith("S"))),"confidence":float(it.get("confidence") or 0),"warning":warning,"source_text":it.get("source_text") or "", **{k:it.get(k) for k in ("label_id","page","bbox","rotation","crop_data_url","source_document","gtin","barcodes","ocr_reads","ref_original","local_ref_evidence","assessment","geometry_source","deskew_angle","document_index","lot_ocr_original","expiry_ocr_original")}, "verificata":False})
+        out.append({"codice":code,"descrizione":it.get("description") or "","lotto":(it.get("lot") or "").strip(),"scadenza":expiry,"scadenza_originale":raw_expiry,"quantita":it.get("quantity") if it.get("quantity") is not None else 1,"produttore":manufacturer,"is_jnj":bool(it.get("is_jnj_depuy_synthes",False)),"is_sterile":bool(it.get("is_sterile",code.upper().endswith("S"))),"confidence":float(it.get("confidence") or 0),"warning":warning,"source_text":it.get("source_text") or "", **{k:it.get(k) for k in ("label_id","page","bbox","rotation","crop_data_url","source_document","gtin","barcodes","ocr_reads","ref_original","local_ref_evidence","assessment","geometry_source","deskew_angle","document_index","lot_ocr_original","expiry_ocr_original","gtin_ocr_original")}, "verificata":False})
     return out
