@@ -9,13 +9,13 @@ from datetime import date, datetime
 from pathlib import Path
 from functools import lru_cache
 from uuid import uuid4
-from ocr_review import build_review, aggregate_review
+from ocr_review import build_review, aggregate_review, merge_confirmed_fields
 from ocr_service import analyze_documents
 from ocr_repository import OriginalDocument, SupabaseReviewRepository, without_images, load_catalog_codes
 
 from ocr_runtime import current_label_pipeline
 current_label_pipeline()
-from label_pipeline import review_errors, inventory_errors, aggregate_labels, PIPELINE_VERSION
+from label_pipeline import review_errors, inventory_errors, aggregate_labels, PIPELINE_VERSION, gs1_parse
 
 import pandas as pd
 import streamlit as st
@@ -558,6 +558,7 @@ if is_physical_ai:
     with st.form(f"scarico_manual_material_{target}_{st.session_state.get('scarico_editor_revision', 0)}"):
         manual_code = st.text_input("REF / codice", value=clean(selected.get("codice")))
         manual_lot = st.text_input("Lotto stampato", value=clean(selected.get("lotto")))
+        manual_gtin = st.text_input("GTIN (14 cifre, se leggibile)", value=clean(selected.get("gtin")))
         manual_expiry = st.text_input("Scadenza stampata (AAAA-MM-GG)", value=clean(selected.get("scadenza")))
         manual_description = st.text_input("Descrizione materiale", value=clean(selected.get("descrizione")))
         manual_lotless = st.checkbox("Materiale non sterile senza lotto", value=bool(selected.get("senza_lotto", False)))
@@ -572,6 +573,8 @@ if is_physical_ai:
             st.error("Inserisci il REF e conferma il confronto con l'etichetta originale.")
         else:
             try:
+                if manual_gtin.strip() and gs1_parse('(01)'+manual_gtin.strip()).get('error'):
+                    raise ValueError("GTIN non valido: controlla le 14 cifre e il carattere di controllo.")
                 updated = dict(selected)
                 if target == -1:
                     from label_pipeline import render_pages, image_url
@@ -584,9 +587,9 @@ if is_physical_ai:
                         page=int(manual_page), bbox=[0,0,1000,1000], rotation=0,
                         crop_data_url=image_url(pages[int(manual_page)-1]), quantita=1,
                         warning="Etichetta aggiunta manualmente: prova sulla pagina originale.", manual_entry=True)
-                updated.update(codice=manual_code.strip(), lotto=manual_lot.strip(), scadenza=manual_expiry.strip(),
+                updated.update(codice=manual_code.strip(), lotto=manual_lot.strip(), gtin=manual_gtin.strip() or None, scadenza=manual_expiry.strip(),
                     descrizione=manual_description.strip(), senza_lotto=manual_lotless, verificata=True,
-                    manual_fields=["code","lot","expiry","description"])
+                    manual_fields=["code","lot","expiry","description","gtin"])
                 updated_rows = list(source_rows)
                 if target == -1:
                     updated_rows.append(updated)
@@ -620,7 +623,7 @@ with st.form("scarico_ai_confirm"):
         st.subheader("✅ Lista materiali riconosciuti")
         st.caption("Tocca una cella per correggere codice, lotto, scadenza o quantità. Per materiale non sterile senza lotto spunta Non sterile / senza lotto. Spunta Escludi riga per non inserirla nello scarico. Le modifiche vengono applicate alla conferma. Puoi anche usare il modulo Aggiungi o correggi un materiale sopra la lista.")
         df_rows = pd.DataFrame(rows)
-        preferred = ["codice", "senza_lotto", "jnj_verificato_manualmente", "escludi_riga", "descrizione", "lotto", "scadenza", "quantita", "produttore", "confidence", "warning"]
+        preferred = ["codice", "senza_lotto", "jnj_verificato_manualmente", "escludi_riga", "descrizione", "lotto", "gtin", "scadenza", "quantita", "produttore", "confidence", "warning"]
         if "escludi_riga" not in df_rows:
             df_rows["escludi_riga"] = False
         df_rows["senza_lotto"] = df_rows.get("senza_lotto", pd.Series(False, index=df_rows.index)).fillna(False).astype(bool)
@@ -648,6 +651,7 @@ with st.form("scarico_ai_confirm"):
                     help="La riga non verrà salvata e non genererà fatturato, ordini o movimenti di magazzino."),
                 "codice": st.column_config.TextColumn("Codice Johnson/REF"),
                 "lotto": st.column_config.TextColumn("Lotto"),
+                "gtin": st.column_config.TextColumn("GTIN (14 cifre)"),
                 "senza_lotto": st.column_config.CheckboxColumn("Non sterile / senza lotto", default=False,
                     help="Spunta solo materiale non sterile che non prevede lotto. La disponibilità viene cercata nelle giacenze senza lotto."),
                 "conto_deposito_struttura": st.column_config.CheckboxColumn(
@@ -723,6 +727,7 @@ if confirm or archive_review:
         st.stop()
     final_rows = edited.to_dict("records") if rows else []
     if is_physical_ai:
+        final_rows = merge_confirmed_fields(source_rows, final_rows)
         errors = review_errors(final_rows, [r.get("label_id") for r in source_rows], expected_label_count, count_verified)
         if errors:
             st.error("Conferma bloccata: " + "; ".join(errors))

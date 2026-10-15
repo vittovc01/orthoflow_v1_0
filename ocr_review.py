@@ -191,3 +191,28 @@ def validate_confirmation(extraction, confirmed, *, physical_count, count_verifi
             if gs1_parse('(01)'+str(gtin)).get('error'):
                 raise ValueError('GTIN non valido')
     return aggregate_review(confirmed)
+
+
+def merge_confirmed_fields(originals, edits):
+    """Merge only editable fields; keep identity, barcode and crop evidence server-side."""
+    source = {r['label_id']:r for r in originals}
+    if len(source)!=len(originals):
+        raise ValueError('Identità fisiche originali ripetute')
+    allowed = set(FIELDS) | set(ALIASES.values()) | {'label_id','quantita','quantity',
+        'verificata','reviewed','escludi_riga','senza_lotto','jnj_verificato_manualmente',
+        'conto_deposito_struttura','produttore'}
+    merged = []
+    seen = set()
+    for edit in edits:
+        key = edit.get('label_id')
+        if key not in source or key in seen:
+            raise ValueError('Etichetta modificata non corrispondente agli originali')
+        seen.add(key)
+        row = {**source[key], **{k:v for k,v in edit.items() if k in allowed}}
+        for name, alias in ALIASES.items():
+            if alias in edit:
+                row[name] = row[alias] = edit[alias]
+            elif name in edit:
+                row[name] = row[alias] = edit[name]
+        merged.append(row)
+    return merged

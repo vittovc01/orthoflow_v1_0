@@ -304,6 +304,9 @@ def review_errors(rows, expected_ids, expected_count, count_verified):
             errors.append('REF incompleto o non valido: ' + code)
         if row.get('is_sterile') is True and re.fullmatch(r'(?:\d{2}\.\d{3}\.\d{3}|\d{3}\.\d{3})5?', code):
             errors.append('REF sterile senza suffisso verificato: ' + code)
+        gtin = str(row.get('gtin') or '').strip()
+        if gtin and gs1_parse('(01)'+gtin).get('error'):
+            errors.append('GTIN non valido: ' + gtin)
         if not row.get('lotto') and not row.get('senza_lotto'):
             errors.append('Lotto obbligatorio: ' + code)
         if not row.get('senza_lotto'):

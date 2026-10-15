@@ -150,3 +150,16 @@ def test_service_returns_partial_error_without_raising_or_saving():
     result=analyze_documents([original(),original()],analyzer=analyzer)
     assert len(result['items'])==1 and result['documents'][1]['status']=='failed'
     assert result['detection_warnings'] and result['review_required']
+
+
+def test_editor_keeps_hidden_gtin_and_rejects_forged_provenance():
+    from ocr_review import merge_confirmed_fields
+    source=dict(row(),gtin='07611819268623',source_document='original',barcodes=[{'raw':'evidence'}])
+    edited={'label_id':'one','codice':'413.042S','lotto':'CORRECTED',
+            'source_document':'forged','barcodes':[],'verificata':True}
+    result=merge_confirmed_fields([source],[edited])[0]
+    assert result['gtin']==source['gtin'] and result['source_document']=='original'
+    assert result['barcodes']==source['barcodes']
+    assert result['code']==result['codice']=='413.042S'
+    assert result['lot']==result['lotto']=='CORRECTED'
+    with pytest.raises(ValueError):merge_confirmed_fields([source],[dict(edited,label_id='other')])
