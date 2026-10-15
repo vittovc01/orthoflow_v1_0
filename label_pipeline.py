@@ -429,7 +429,8 @@ def analyze_labels(path, client, model, item_schema, parse, *, privacy_approval=
             decoded = []
             try:
                 try:
-                    decoded = decode_barcodes(crop)
+                    from datamatrix_reader import decode_label_region
+                    decoded = decode_label_region(page,region)
                 except Exception:
                     decoded = []
                     warnings.append(f'{label_id}: decodifica DataMatrix non disponibile')

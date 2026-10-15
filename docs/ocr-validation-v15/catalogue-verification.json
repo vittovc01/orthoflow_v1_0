@@ -1,0 +1,14 @@
+{
+  "table": "public.articoli_gtin",
+  "migration": "articoli_gtin_exact_catalogue",
+  "schema_applied": true,
+  "transactional_tests_rolled_back": true,
+  "catalogue_rows_after_test": 0,
+  "rls_enabled": true,
+  "anon_select": false,
+  "authenticated_insert": false,
+  "service_role_select": true,
+  "catalogue_imported": false,
+  "archive_flag_changed": false,
+  "advisors_info": "rls_enabled_no_policy: expected server-only access, no client grants"
+}

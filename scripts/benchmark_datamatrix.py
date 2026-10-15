@@ -32,7 +32,11 @@ for name,expected in truth.items():
    regions=regions_for_page(resized);observed=[]
    for r in regions:
     crop=crop_region(resized,r['bbox']).rotate(r['rotation']+r.get('deskew_angle',0),expand=True,resample=Image.Resampling.BICUBIC,fillcolor='white')
-    observed.extend(b for b in decode_barcodes(crop) if not b.get('error'))
+    if a.decoder=='v15':
+     from datamatrix_reader import decode_label_region
+     decoded=decode_label_region(resized,r)
+    else:decoded=decode_barcodes(crop)
+    observed.extend(b for b in decoded if not b.get('error'))
    count=Counter((b.get('lot'),b.get('expiry')) for b in observed)
    correct=sum((count & wanted).values())
    row=dict(decoder=a.decoder,file=name,page=page_number,source_width=page.width,source_height=page.height,scale=scale,width=resized.width,height=resized.height,

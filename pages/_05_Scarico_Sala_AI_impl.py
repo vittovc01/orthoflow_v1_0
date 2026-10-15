@@ -493,7 +493,8 @@ if privacy_pending:
             st.image(crop,caption=f"{document['name']} · etichetta {index+1}",use_container_width=True)
             decode_key=f"privacy_dm_{proposal['sha256']}_{index}"
             if decode_key not in st.session_state:
-                st.session_state[decode_key]=bool([b for b in decode_barcodes(crop) if not b.get('error')])
+                from datamatrix_reader import decode_label_region
+                st.session_state[decode_key]=bool([b for b in decode_label_region(pages[region['page']-1],region) if not b.get('error')])
             if not st.session_state[decode_key]:
                 st.warning("DataMatrix non decodificato: acquisisci una nuova foto più ravvicinata, nitida e senza riflessi. Il testo sarà soltanto un controllo, non una corrispondenza GTIN verificata.")
             if st.checkbox("Questo ritaglio contiene solo l'etichetta del prodotto",value=False,key=f"privacy_crop_{proposal['sha256']}_{index}"):

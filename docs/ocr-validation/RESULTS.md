@@ -1,4 +1,6 @@
-# Esito della validazione — 15 ottobre 2026
+# Esito iniziale V14 — 15 ottobre 2026
+
+> Risultati storici. Il nuovo confronto è in [V15](../ocr-validation-v15/RESULTS.md).
 
 **ERRORI SILENZIOSI: 0 osservati nei due esperimenti locali. LIVE: NON MISURATI.**
 **ESITO COMPLESSIVO: BLOCKED. Archivio non attivato.**

@@ -1,5 +1,8 @@
 # Validazione prima dell'archivio OCR
 
+> Snapshot iniziale V14. Per pipeline, privacy e comandi aggiornati vedere
+> [V15](../ocr-validation-v15/README.md). I risultati iniziali sono conservati per confronto.
+
 Stato: **BLOCKED. `OCR_REVIEW_ARCHIVE_ENABLED` resta disabilitato.**
 Nessun SQL è stato applicato a staging o produzione durante questa consegna.
 
@@ -160,9 +163,10 @@ il ref. I test non sono stati eseguiti contro un progetto remoto in questa conse
   condizioni API modello e conservazione dei relativi log, accessi art.32 e
   necessità di DPIA art.35. Iniziali+cartella non rendono la foto anonima.
 - [ ] Minimizzazione: valutare mascheramento dell'intestazione PRIMA dell'invio al
-  modello e separazione dell'originale in area ad accesso ristretto. L'attuale
-  pipeline può inviare la pagina completa al modello: questo punto resta da
-  approvare/implementare prima di usare foto cliniche live, non è già risolto.
+  modello e separazione dell'originale in area ad accesso ristretto. La versione
+  iniziale V14 inviava pagine complete; V15 elimina tali chiamate e richiede
+  approvazione locale di ogni ritaglio, con test sui payload. Restano da approvare
+  finalità e condizioni dei fornitori prima di usare foto cliniche live.
 - [ ] Retention documentata per originali, estratti, revisioni, report test, log,
   backup e copie fornitore. Nessun termine universale dedotto dal GDPR; definire
   scadenze e obblighi sanitari applicabili con titolare/DPO. Inventario senza delete:

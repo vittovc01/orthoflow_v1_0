@@ -21,6 +21,7 @@ def read_catalog(path):
             record={'gtin':gtin,'ref':ref,'descrizione':description}
             if gtin in rows and rows[gtin]!=record:raise ValueError(f'GTIN duplicato discordante alla riga {line}')
             rows[gtin]=record
+            if len(rows)>50000:raise ValueError('Massimo 50000 GTIN per importazione atomica')
     if not rows:raise ValueError('Catalogo vuoto')
     return rows
 

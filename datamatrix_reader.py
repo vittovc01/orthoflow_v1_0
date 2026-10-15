@@ -74,3 +74,56 @@ def decode(image):
             read(roi,f'perspective:scale:{scale}',pure=True)
         if any(not b.get('error') for b in found.values()):return list(found.values())
     return list(found.values())
+
+
+
+def decode_micro_roi(image):
+    """Resample BEFORE local threshold on a measured, tiny symbol ROI.
+
+    Bounded to <=200 resized source pixels and 200 decoder attempts per ROI. No pure
+    mode or morphological repairs; ZXing ECC and the GS1 parser still decide.
+    """
+    import cv2,numpy as np,zxingcpp
+    from label_pipeline import gs1_parse
+    work=image.convert('L').copy();work.thumbnail((200,200));g=np.asarray(work)
+    for scale in (1,1.5,2,3,4):
+        for interpolation in (cv2.INTER_NEAREST,cv2.INTER_CUBIC):
+            enlarged=cv2.resize(g,None,fx=scale,fy=scale,interpolation=interpolation)
+            for block in (7,11,15,21,31):
+                for c in (0,2,7,11):
+                    binary=cv2.adaptiveThreshold(enlarged,255,cv2.ADAPTIVE_THRESH_GAUSSIAN_C,cv2.THRESH_BINARY,block,c)
+                    found=[]
+                    for b in zxingcpp.read_barcodes(binary,formats=zxingcpp.BarcodeFormat.DataMatrix,try_downscale=False):
+                        raw=b.bytes.decode('utf-8',errors='replace')
+                        if getattr(b,'symbology_identifier','')!=']d2' and not raw.startswith((']d2','(01)')):continue
+                        parsed=gs1_parse(raw)
+                        if parsed.get('error') or not parsed.get('gtin'):continue
+                        found.append(dict(raw=raw,format=str(b.format),decode_method=f'micro:scale:{scale}:interpolation:{interpolation}:adaptive:{block}:C:{c}',**parsed))
+                    if found:return found
+    return []
+
+def decode_label_region(page,region):
+    """Try the sticker, then measured finder ROIs inside that SAME sticker.
+
+    Micro-ROI boundaries change local adaptive statistics. The finder is local
+    geometry, never a GTIN/REF lookup or a ground-truth annotation.
+    """
+    from label_pipeline import crop_region,decode_barcodes
+    crop=crop_region(page,region['bbox']).rotate(region['rotation']+region.get('deskew_angle',0),expand=True,resample=Image.Resampling.BICUBIC,fillcolor='white')
+    found={b['raw']:b for b in decode_barcodes(crop)}
+    if any(not b.get('error') for b in found.values()):return list(found.values())
+    finder=region.get('finder_bbox')
+    if not finder:return list(found.values())
+    x,y,xx,yy=finder;w,h=xx-x,yy-y
+    left,top,right,bottom=region['bbox']
+    if w<=0 or h<=0 or not left<=(x+xx)/2<=right or not top<=(y+yy)/2<=bottom:return list(found.values())
+    for pad in (.15,.35,.6):
+        box=[max(left,x-w*pad),max(top,y-h*pad),min(right,xx+w*pad),min(bottom,yy+h*pad)]
+        if box[2]<=box[0] or box[3]<=box[1]:continue
+        micro=crop_region(page,box)
+        observations=decode_barcodes(micro)
+        if not any(not b.get('error') for b in observations):observations+=decode_micro_roi(micro)
+        for b in observations:
+            found.setdefault(b['raw'],dict(b,decode_scope='local_finder_roi',finder_padding=pad))
+        if any(not b.get('error') for b in found.values()):break
+    return list(found.values())

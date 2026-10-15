@@ -11,8 +11,8 @@ utente. La verità delle foto non è ancora controverificata da un secondo opera
 |---|---:|---:|
 | Foto completa, etichette abbinate | 7/7 | 7/7 |
 | Foto completa, regioni extra | 0 | 0 |
-| Foto completa, lotti esatti | 0/7 | 1/7 |
-| Foto completa, scadenze esatte | 0/7 | 1/7 |
+| Foto completa, lotti esatti | 0/7 | 5/7 |
+| Foto completa, scadenze esatte | 0/7 | 5/7 |
 | Foto completa, REF esatti proposti | 2/7 | 0/7, catalogo non fornito |
 | 16 ritagli, etichette abbinate | 13/16 | 16/16 |
 | 16 ritagli, regioni extra | 4 | 0 |
@@ -26,7 +26,9 @@ Il numero di REF non migliora artificialmente: con la nuova regola GTIN→REF,
 senza catalogo ufficiale il sistema non accetta più il REF dall'OCR come identità
 primaria. Tutti i REF restano da verificare. Non è stata creata una tabella di
 corrispondenze dalle annotazioni del benchmark, perché falserebbe la valutazione.
-Il nuovo catalogo vuoto deve essere popolato dal CSV ufficiale del fornitore.
+La tabella Supabase è stata creata e verificata (RLS attivo, accessi client negati,
+import discordante/checksum/idempotenza testati con rollback; zero righe residue).
+Il catalogo vuoto deve essere popolato dal CSV ufficiale del fornitore.
 
 I 16 ritagli provengono da un solo documento storico, diverso dalla foto completa
 a 7 etichette. **Non è un confronto controllato della sola dimensione di ritaglio.**
@@ -42,7 +44,7 @@ Stessi ritagli locali per i due decoder (non box della verità):
 
 | Stessi ROI nativi | Decoder PR39 | Decoder V15 |
 |---|---:|---:|
-| Sette adesivi della foto completa | 0/7 | 1/7 |
+| Sette adesivi della foto completa | 0/7 | 5/7 |
 | Sedici foto già ritagliate | 15/16 | 16/16 |
 
 Quindi il precedente 13/16 nel valutatore NON era soltanto un limite ZXing:
@@ -54,9 +56,19 @@ sola soglia non erano equivalenti per fase di campionamento e arrotondamenti.
 
 Sulla foto completa i finder misurati occupano circa **24–34 px per lato**. I
 ritagli degli adesivi restano quelli della foto originale: ingrandire non crea
-nuovi moduli leggibili. Soglia adattiva e scale recuperano un solo payload
-(`adaptive:21:scale:2` nel primo esperimento), gli altri sei restano indecodificati.
-Il codice recuperato corrisponde al lotto `92021P0`, scadenza `2035-11-01`.
+nuovi moduli leggibili. Un primo passaggio soglia adattiva/scale recuperava solo
+un payload. La ricerca nel SOLO finder, con margini locali 15/35/60% entro i
+confini dell'etichetta, e ricampionamento PRIMA della soglia adattiva recuperano
+altri quattro payload. Il metodo è generale, senza condizioni sui codici/lotti.
+Non usa box della verità o immagini ricostruite. Gli offset di soglia 0/2/7/11,
+blocchi 7/11/15/21/31 e scale 1/1.5/2/3/4 hanno un massimo di 200 tentativi per
+micro-ROI; ZXing ECC e parser GS1 con FNC1/check digit restano obbligatori.
+
+I cinque lotti recuperati sono `470L068`, `11598P5`, `470L625`, `46993P5`,
+`92021P0`; tutte le rispettive scadenze concordano con la verità diagnostica.
+I due ancora non decodificati (`332600P` e `131962P`) sono proprio le etichette
+tagliate sul bordo destro: restano vuoti e segnalati, entrambe con avviso di bordo.
+Servono nuove foto con l'intera etichetta e il codice incluso, non valori dedotti.
 Non si può attribuire con certezza tutta la perdita alla compressione: la foto
 non conserva necessariamente i metadati di ogni precedente trasformazione.
 
@@ -67,8 +79,8 @@ originale. Pipeline locale completa, inclusa individuazione dei ritagli.
 
 | Foto completa: dimensioni disponibili | Payload corretti / etichette | Tasso |
 |---|---:|---:|
-| 900×1600, nativa | 1/7 | 14,3% |
-| 675×1200 | 0/7 | 0% |
+| 900×1600, nativa | 5/7 | 71,4% |
+| 675×1200 | 1/7 | 14,3% |
 | 450×800 | 0/7 | 0% |
 | 338×600 | 0/7 | 0% |
 | 225×400 | 0/7 | 0% |
@@ -99,7 +111,7 @@ provvisori e richiedono nuovi originali reali per validazione, non una garanzia.
   presenti SUL ritaglio; nessuna euristica sostituisce questa approvazione.
 - Log: test con chiave fittizia e simulazione di processo che la emette; valore
   rimosso, log pulito e accettazione bloccata. Nessuna chiave reale usata.
-- Test locali principali: 128 superati, inclusi decoder, catalogo, privacy,
+- Test locali principali: 129 superati, inclusi decoder, catalogo, privacy,
   controllo log e preflight; regressione form superata. CI completa collegata
   alla PR verifica anche SQL su PostgreSQL isolato, pagine, container e browser.
 
@@ -107,3 +119,15 @@ L'esito resta bloccato per foto completa insufficiente, catalogo non fornito,
 quantità non risolte, campione piccolo e non controverificato, casi limite incompleti
 e modello live non eseguito. Rimangono applicabili checklist staging/retention e
 soglie di accettazione della PR39. Il nuovo schema GTIN non abilita l'archivio.
+
+## Verifica schema Supabase
+
+`articoli_gtin` creata nel progetto dell'app dopo esito positivo dei test SQL
+in CI. Eseguiti anche i test transazionali reali, con rollback dei dati sintetici:
+import, idempotenza, conflitto, checksum e accesso autenticato negato. Verifica
+finale: 0 righe, RLS true, anon SELECT false, authenticated INSERT false,
+service_role SELECT true. Nessun dato catalogo è stato inventato/importato.
+L'advisor rileva INFO `rls_enabled_no_policy`, coerente con l'accesso solo server
+e con i privilegi client revocati; non va risolto concedendo letture pubbliche.
+[Riferimento advisor](https://supabase.com/docs/guides/database/database-linter?lint=0008_rls_enabled_no_policy).
+Il flag archivio e lo schema dell'archivio restano invariati in produzione.

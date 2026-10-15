@@ -48,7 +48,8 @@ def read_local(path,mode='scarico_sala'):
             crop=crop_region(page,region['bbox']).rotate(region['rotation']+region.get('deskew_angle',0),expand=True,resample=Image.Resampling.BICUBIC,fillcolor='white')
             evidence=local_ref_evidence(crop)
             code=evidence['candidates'][0] if len(evidence.get('candidates',[]))==1 else None
-            row=verify_ref_evidence(reconcile({'code':code,'lot':None,'expiry':None,'description':None},decode_barcodes(crop)),evidence)
+            from datamatrix_reader import decode_label_region
+            row=verify_ref_evidence(reconcile({'code':code,'lot':None,'expiry':None,'description':None},decode_label_region(page,region)),evidence)
             row.update(label_id=f'{digest}:p{page_number}:l{index}',source_document=digest,page=page_number,bbox=region['bbox'],rotation=region['rotation'],geometry_source=region.get('geometry_source'),image_quality=inspect_quality(crop))
             if not row['barcodes']:row['warning']=' · '.join(filter(None,[row.get('warning'),'DataMatrix non decodificato: acquisire una nuova foto più ravvicinata']))
             result['items'].append(row)

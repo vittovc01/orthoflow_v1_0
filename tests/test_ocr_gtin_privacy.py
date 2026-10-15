@@ -134,3 +134,15 @@ def test_jpeg_compression_and_exif_resize_warnings_are_local(tmp_path):
     assert result['resized_metadata']
     assert any('compressione' in s for s in result['warnings'])
     assert any('ridimensionata' in s for s in result['warnings'])
+
+
+def test_real_small_symbols_recover_from_measured_finder_rois():
+    # Product-only fixture: no patient header is checked into the repository.
+    from label_geometry import locate_datamatrix_labels
+    from datamatrix_reader import decode_label_region
+    source=Image.open(Path('tests/fixtures/synthes_mixed_angles/labels.png'))
+    regions=locate_datamatrix_labels(source)
+    results=[b for r in regions for b in decode_label_region(source,r) if not b.get('error')]
+    lots={b['lot'] for b in results}
+    assert {'92021P0','470L625','11598P5','46993P5','470L068'}<=lots
+    assert any(b.get('decode_scope')=='local_finder_roi' for b in results)

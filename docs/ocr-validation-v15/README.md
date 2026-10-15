@@ -8,7 +8,10 @@ Queste modifiche estendono PR #39; vedere anche `RESULTS.md` e i CSV.
 `datamatrix_reader.py` usa esclusivamente pixel reali: soglie globali, contrasto
 CLAHE, Otsu, soglie adattive 11/21/31, scale .75/1.5/2/3/4, rotazioni cardinali
 PRIMA della soglia e del ricampionamento, piccole inclinazioni ±4/±8°, ritagli
-quadrati misurati e rettifica prospettica. Ogni payload conserva il metodo e passa
+quadrati misurati e rettifica prospettica. Il finder viene anche ritagliato localmente con margini 15/35/60% entro la
+singola etichetta; su questi micro-ROI si prova anche la soglia DOPO il
+ricampionamento (blocchi 7/11/15/21/31, offset 0/2/7/11, massimo 200 tentativi
+per ROI). Ogni payload conserva il metodo e passa
 il parser GS1/check digit. Nessun carattere viene ricostruito. Il decoder congela il primo gruppo di payload validi; ritagli con più simboli devono essere esclusi o separati nella revisione locale. I tentativi sono
 limitati e non usano immagini generate. Decodifica prima i ritagli per etichetta,
 non una pagina ridotta dal modello. `local_label_reader.py` riconosce anche una
