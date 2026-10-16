@@ -21,6 +21,10 @@ from label_pipeline import review_errors, inventory_errors, aggregate_labels, PI
 
 import pandas as pd
 import streamlit as st
+# Older page wrappers patched the Streamlit module globally. An overlapping
+# session can retain their obsolete scarico_verified guard after a hot update.
+# Bind the native generator method so that only this page's validation runs.
+form_submit_button = st._main.form_submit_button
 from orthoflow_branding import configure_page
 from document_compression import compress_document
 from supabase import create_client
@@ -612,8 +616,8 @@ if is_physical_ai:
         manual_expiry = st.text_input("Scadenza stampata (AAAA-MM-GG)", value=clean(selected.get("scadenza")))
         manual_quantity = st.number_input("Quantità", min_value=1, value=quantity_value(selected.get("quantita")) or 1, step=1)
         manual_description = st.text_input("Descrizione materiale", value=clean(selected.get("descrizione")))
-        apply_manual = st.form_submit_button("Applica materiale alla lista")
-        delete_manual = st.form_submit_button("Elimina questa riga", disabled=target == -1)
+        apply_manual = form_submit_button("Applica materiale alla lista")
+        delete_manual = form_submit_button("Elimina questa riga", disabled=target == -1)
     if apply_manual or delete_manual:
         changes=[]
         for index,item in enumerate(source_rows):
@@ -771,9 +775,11 @@ with st.form("scarico_ai_confirm"):
     verified = st.checkbox("Ho controllato REF, lotto, scadenza e quantità di tutte le righe", key=f"review_verified_{st.session_state.get('scarico_editor_revision',0)}")
     count_verified = verified
     duplicates_reviewed = verified
-    archive_enabled = False  # OCR archive remains disabled, including legacy configuration.
-    archive_review = st.form_submit_button("Conferma e archivia revisione OCR (senza scarico)", disabled=(not is_physical_ai or not archive_enabled or len(rows)==0))
-    confirm = st.form_submit_button("📤 Crea intervento e scarica materiali", type="primary", use_container_width=True, disabled=(len(rows) == 0))
+    archive_enabled = str(secret("OCR_REVIEW_ARCHIVE_ENABLED", "true")).lower() in {"true", "1", "yes"}
+    if archive_enabled:
+        st.caption("Archivio OCR attivo: conserva revisione, correzioni e soli ritagli delle etichette. Il documento completo non viene archiviato.")
+    archive_review = form_submit_button("Conferma e archivia revisione OCR (senza scarico)", disabled=(not is_physical_ai or not archive_enabled or len(rows)==0))
+    confirm = form_submit_button("📤 Crea intervento e scarica materiali", type="primary", use_container_width=True, disabled=(len(rows) == 0))
 
 if confirm or archive_review:
     if any(d.get("status")=="failed" for d in meta.get("documents",[]) if isinstance(d,dict)):
@@ -795,19 +801,19 @@ if confirm or archive_review:
             if any(not r.get("manual_entry") and r.get("label_id") not in original_map for r in source_rows):
                 raise ValueError("Rianalizza i documenti: manca la copia immutabile dell’estrazione originale per questa vecchia sessione.")
             extraction = {**meta, "items":[original_map.get(r.get("label_id"),r) for r in source_rows]}
-            payload_key = sha256(json.dumps(without_images(final_rows), sort_keys=True, default=str).encode()).hexdigest()
+            correction_log = st.session_state.get("scarico_correction_log", [])
+            payload_key = sha256(json.dumps([without_images(final_rows),correction_log,int(expected_label_count),user()], sort_keys=True, default=str).encode()).hexdigest()
             previous = st.session_state.get("scarico_audit_request") or {}
             if previous.get("payload_key")!=payload_key:
                 previous = {"payload_key":payload_key,"id":str(uuid4())}
                 st.session_state["scarico_audit_request"] = previous
-            documents = [OriginalDocument(d.get("name") or Path(d["path"]).name, Path(d["path"]).read_bytes())
-                         for d in st.session_state.get("scarico_documents", [])]
-            saved = SupabaseReviewRepository(sb()).save_confirmed(
+            saved = SupabaseReviewRepository(sb()).save_product_review(
+                original_rows=list(original_map.values()), correction_log=correction_log,
                 request_id=previous["id"],actor=user(),extraction=extraction,confirmed=final_rows,
-                documents=documents,physical_count=int(expected_label_count),
+                physical_count=int(expected_label_count),
                 count_verified=bool(count_verified),explicitly_confirmed=True,duplicates_reviewed=bool(duplicates_reviewed))
             if archive_review:
-                st.success(f"Revisione {saved['id']} archiviata con foto originali. Nessuno scarico di magazzino eseguito.")
+                st.success(f"Revisione {saved['id']} archiviata con i soli ritagli delle etichette. Nessuno scarico di magazzino eseguito.")
                 st.stop()
         except Exception as exc:
             st.error(f"Archivio OCR non completato: {exc}. I campi corretti restano nella sessione; nessuno scarico eseguito.")

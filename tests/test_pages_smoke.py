@@ -40,6 +40,7 @@ def app():
     at = AppTest.from_file(Path(__file__).resolve().parents[1] / "app.py", default_timeout=30)
     at.secrets["SUPABASE_URL"] = "http://127.0.0.1:1"
     at.secrets["SUPABASE_SERVICE_KEY"] = "ci-dummy-key"
+    at.secrets["OCR_REVIEW_ARCHIVE_ENABLED"] = "false"
     return at
 
 
@@ -130,7 +131,8 @@ def test_physical_label_review_blocks_unverified_count_without_writes(backend):
     assert len([c for c in at.checkbox if c.label.startswith('Ho ')])==1
 
 
-def test_single_confirmation_accepts_missing_gtin_and_advisory_count(backend,monkeypatch):
+@pytest.mark.parametrize('legacy_wrapper',[False,True])
+def test_single_confirmation_accepts_missing_gtin_and_advisory_count(backend,monkeypatch,legacy_wrapper):
     calls=[]
     def rpc(name,args):
         calls.append((name,args))
@@ -139,6 +141,15 @@ def test_single_confirmation_accepts_missing_gtin_and_advisory_count(backend,mon
     at=app()
     at.session_state['user']='ci-user';at.session_state['ruolo']='Admin';at.session_state['permessi']=['DIREZIONE']
     at.run()
+    if legacy_wrapper:
+        native_submit=st._main.form_submit_button
+        def obsolete_submit(label,*args,**kwargs):
+            clicked=native_submit(label,*args,**kwargs)
+            if clicked and label=='📤 Crea intervento e scarica materiali':
+                st.warning('Spunta la verifica di codici, lotti, scadenze e quantità prima di creare l’intervento.')
+                return False
+            return clicked
+        monkeypatch.setattr(st,'form_submit_button',obsolete_submit)
     from label_pipeline import PIPELINE_VERSION
     at.session_state['scarico_source']='AI'
     at.session_state['scarico_ai_meta']={'pipeline_version':PIPELINE_VERSION}
@@ -158,6 +169,7 @@ def test_single_confirmation_accepts_missing_gtin_and_advisory_count(backend,mon
     assert args['p_header']['reported_label_count']==3 and args['p_header']['count_difference']==2
     assert args['p_header']['label_manifest'][0]['dati_confermati']['gtin'] is None
     assert not any('nan' in e.value for e in at.error)
+    assert not any('Spunta la verifica' in w.value for w in at.warning)
 
 
 def test_manual_material_can_correct_or_add_missing_physical_label(backend, tmp_path):
@@ -300,3 +312,28 @@ def test_timeout_retry_reuses_discharge_request_uuid(backend,monkeypatch):
     assert not at.exception and len(calls)==2
     assert calls[0]==calls[1]
     assert calls[1]['p_header']['request_id']==request_id
+
+
+def test_archive_enabled_saves_product_review_without_discharge(backend,monkeypatch):
+    at=app();at.secrets['OCR_REVIEW_ARCHIVE_ENABLED']='true'
+    at.session_state['user']='agent';at.session_state['ruolo']='Admin';at.session_state['permessi']=['DIREZIONE'];at.run()
+    from label_pipeline import PIPELINE_VERSION
+    original={'label_id':'one','codice':'TEST-A','lotto':'LOT-A','scadenza':'2035-01-01','quantita':1}
+    at.session_state['scarico_source']='AI';at.session_state['scarico_ai_meta']={'pipeline_version':PIPELINE_VERSION}
+    at.session_state['scarico_ai_rows']=[original]
+    at.session_state['scarico_ai_original_rows']=[original]
+    at.session_state['scarico_documents']=[{'path':'/must-not-be-read/private-patient.pdf'}]
+    at.switch_page('pages/05_Scarico_Sala_AI.py').run()
+    import ocr_repository
+    calls=[]
+    def save(self,**kwargs):
+        calls.append(kwargs)
+        return {'id':kwargs['request_id']}
+    monkeypatch.setattr(ocr_repository.SupabaseReviewRepository,'save_product_review',save)
+    next(c for c in at.checkbox if c.label.startswith('Ho controllato REF')).check()
+    button=next(b for b in at.button if b.label.startswith('Conferma e archivia'))
+    assert not button.disabled
+    button.click();at.run()
+    assert not at.exception and len(calls)==1
+    assert 'documents' not in calls[0]
+    assert any('Nessuno scarico' in s.value for s in at.success)

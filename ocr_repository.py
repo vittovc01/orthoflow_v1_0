@@ -5,6 +5,7 @@ No writes occur before explicit confirmation. Storage and Postgres are separate
 services: ambiguous failures retain evidence for a safe retry with the same UUID.
 """
 import hashlib
+import base64
 import json
 import math
 from dataclasses import dataclass
@@ -77,14 +78,63 @@ class SupabaseReviewRepository:
         rows = self.client.table(TABLE).select('*').eq('id',request_id).limit(1).execute().data or []
         return rows[0] if rows else None
 
+    def save_product_review(self, *, original_rows, correction_log, **kwargs):
+        """Archive only immutable server-produced product crops and product fields.
+
+        Never read the uploaded source file, its name, clinical metadata or discarded
+        regions. Manual additions have no photograph; deleted labels remain in audit.
+        """
+        from label_pipeline import PIPELINE_VERSION
+        extraction = kwargs['extraction']
+        if extraction.get('pipeline_version') != PIPELINE_VERSION:
+            raise ValueError('Rianalizza il documento con la versione privacy aggiornata')
+        originals = {r['label_id']: r for r in original_rows}
+        fields = {'label_id','code','lot','expiry','description','gtin','quantity','quantita',
+                  'manual_entry','manual_fields','escludi_riga','verificata','reviewed',
+                  'page','bbox','rotation','source_document'}
+        def product(row):
+            return {k:v for k,v in canonical_item(row).items() if k in fields}
+        confirmed = kwargs['confirmed']
+        baseline = []
+        for row in confirmed:
+            original = originals.get(row['label_id'])
+            if original is None and not row.get('manual_entry'):
+                raise ValueError('Etichetta priva di estrazione originale immutabile')
+            baseline.append(product(original if original is not None else row))
+        documents = []
+        for index, original in enumerate(original_rows):
+            crop = original.get('crop_data_url')
+            if not crop:
+                continue
+            if not crop.startswith(('data:image/png;base64,','data:image/jpeg;base64,')):
+                raise ValueError('Ritaglio prodotto non valido')
+            # Decode locally; no URL fetches or source-file reads are allowed.
+            content = base64.b64decode(crop.split(',',1)[1],validate=True)
+            # Re-encode to strip EXIF/comments and any trailing source bytes.
+            with Image.open(BytesIO(content)) as image:
+                image.load()
+                clean = BytesIO()
+                image.convert('RGB').save(clean,format='PNG')
+            documents.append(OriginalDocument(f'etichetta-{index+1}.png',clean.getvalue()))
+        logs = [{k:v for k,v in entry.items() if k in
+                 {'label_id','operation','field','original','corrected','method','user','timestamp'}}
+                for entry in correction_log]
+        kwargs.update(extraction={'pipeline_version':PIPELINE_VERSION,'items':baseline,
+                      'original_items':[product(r) for r in original_rows],
+                      'correction_log':logs,'archive_scope':'product_labels_only'},
+                      confirmed=[product(r) for r in confirmed], documents=documents,
+                      product_crops=True)
+        return self.save_confirmed(**kwargs)
+
     def save_confirmed(self, *, request_id, actor, extraction, confirmed, documents,
-                       physical_count, count_verified, explicitly_confirmed=False, duplicates_reviewed=False):
+                       physical_count, count_verified, explicitly_confirmed=False, duplicates_reviewed=False,
+                       product_crops=False):
         if explicitly_confirmed is not True:
             raise ValueError('Conferma esplicita richiesta: nessun salvataggio automatico')
         request_id = str(UUID(str(request_id)))
         aggregate = validate_confirmation(extraction,confirmed,physical_count=physical_count,
                                           count_verified=count_verified,actor=actor,duplicates_reviewed=duplicates_reviewed)
-        if not 1<=len(documents)<=20:
+        if not (0 if product_crops else 1)<=len(documents)<=(200 if product_crops else 20):
             raise ValueError('Servono da 1 a 20 documenti originali')
         manifest, uploads = [], []
         for index, doc in enumerate(documents):
@@ -95,7 +145,7 @@ class SupabaseReviewRepository:
                              'path':path,'content_type':mime,'size':len(doc.content)})
             uploads.append((path,doc.content,mime))
         digests={d['sha256'] for d in manifest} | {d['sha256'][:20] for d in manifest}
-        if any(r.get('source_document') and r['source_document'] not in digests for r in extraction.get('items',[])):
+        if not product_crops and any(r.get('source_document') and r['source_document'] not in digests for r in extraction.get('items',[])):
             raise ValueError('Documento originale diverso dalla fonte delle etichette')
         payload = {'actor':str(actor),'documents':manifest,'extracted':without_images(extraction),
                    'confirmed':confirmed_evidence(extraction,confirmed),'aggregate_rows':aggregate,

@@ -10,6 +10,9 @@ DO $$ BEGIN
 END $$;
 INSERT INTO public.ocr_review_sessions(id,actor,confirmed_at,pipeline_version,payload_sha256,documents,extracted,confirmed,aggregate_rows,physical_count,count_verified)
 VALUES('00000000-0000-0000-0000-000000000111','ci_operator',now(),'test',repeat('a',64),'[{"path":"test"}]','{}','[{"label_id":"one"}]','[]',1,true);
+-- Manual-only review, reported count mismatch: neither implies missing evidence.
+INSERT INTO public.ocr_review_sessions(id,actor,confirmed_at,pipeline_version,payload_sha256,documents,extracted,confirmed,aggregate_rows,physical_count,count_verified)
+VALUES('00000000-0000-0000-0000-000000000113','ci_operator',now(),'test',repeat('c',64),'[]','{}','[{"label_id":"manual:one"}]','[]',7,true);
 DO $$ BEGIN
  BEGIN UPDATE public.ocr_review_sessions SET actor='changed';
   RAISE EXCEPTION 'mutation accepted';
