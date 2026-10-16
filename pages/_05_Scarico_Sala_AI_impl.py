@@ -497,13 +497,16 @@ source_rows = [canonical_values(r) for r in (st.session_state.get("scarico_ai_ro
 if meta and st.session_state.get("scarico_source") == "AI":
     st.caption(f"Versione usata per questi risultati: {meta.get('pipeline_version') or 'precedente'}")
     if meta.get("pipeline_version") != PIPELINE_VERSION:
-        st.warning("Questi risultati sono stati estratti con una versione OCR precedente. Rianalizza i documenti per applicare le correzioni ai ritagli e alla lettura.")
+        st.warning("Questi risultati provengono da una versione OCR precedente: rianalizza i documenti con il filtro privacy e la lettura aggiornati.")
         if st.button("Rianalizza i documenti con la versione aggiornata", key="scarico_reanalyze_version"):
             documents = st.session_state.get("scarico_documents") or []
             if documents and all(Path(d.get("path", "")).is_file() for d in documents):
                 run_ai(documents[0]["path"], documents=documents)
             else:
                 st.error("Ricarica i documenti originali e premi Analizza tutti i file.")
+        # Keep the reanalysis action available on the next rerun; never display
+        # stale crops or silently clear the only route back to the source files.
+        st.stop()
 excluded_indices = [i for i, r in enumerate(source_rows) if is_other_manufacturer(r.get("produttore"))]
 restored_indices = []
 if excluded_indices:

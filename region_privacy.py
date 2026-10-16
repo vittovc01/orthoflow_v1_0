@@ -85,7 +85,7 @@ def contrast_regions(page):
     return output
 
 
-def safe_product_regions(page, anchors=()):
+def _safe_product_regions(page, anchors=(), symbols=()):
     """Return safe accepted and recoverable regions; private candidates disappear."""
     from label_pipeline import crop_region,decode_barcodes,overlap
     words=local_words(page); blocked=private_bands(words)
@@ -100,9 +100,12 @@ def safe_product_regions(page, anchors=()):
     if sum(r.get('geometry_source')=='local_linear_barcodes' for r in ordered)>=3:
         ordered=[r for r in ordered if r.get('geometry_source')=='local_linear_barcodes']
     patches=contrast_regions(page)
+    from product_anchors import logo_regions
+    logos=logo_regions(page,words,symbols)
+    ordered += [r for r in logos if not any(overlap(r['bbox'],a['bbox'])>.5 for a in ordered)]
     if sum(r.get('geometry_source')=='local_datamatrix_sticker' for r in ordered)>=3:
-        ordered=[r for r in ordered if r.get('geometry_source')=='local_datamatrix_sticker']
-    elif len(patches)>=3 and not any(r.get('geometry_source')=='local_linear_barcodes' for r in ordered):
+        ordered=[r for r in ordered if r.get('geometry_source') in {'local_datamatrix_sticker','local_product_logo'}]
+    elif len(patches)>=3 and not any(r.get('geometry_source') in {'local_linear_barcodes','local_product_logo'} for r in ordered):
         ordered=[]  # Measured sticker edges outrank template guesses on gray forms.
     # Repair a template cropped short at the printed REF end using measured paper edges.
     from label_pipeline import overlap
@@ -125,7 +128,7 @@ def safe_product_regions(page, anchors=()):
         text=text_in(words,box)
         if re.search(r'\bspazio\b|\bpatch\b',text,re.I):continue
         # A physical patch or product field is required before making a crop.
-        if not (r.get('geometry_source')=='local_contrast_patch' or r.get('geometry_source') in {'local_datamatrix_sticker','local_datamatrix_finder','local_linear_barcodes'} or PRODUCT.search(text) or BRAND.search(text)):
+        if not (r.get('geometry_source')=='local_contrast_patch' or r.get('geometry_source') in {'local_datamatrix_sticker','local_datamatrix_finder','local_linear_barcodes','local_product_logo'} or PRODUCT.search(text) or BRAND.search(text)):
             continue
         if any(overlap(box,o['bbox'])>.65 for o in accepted+rejected):continue
         crop=crop_region(page,box).rotate(r.get('rotation',0),expand=True,fillcolor='white')
@@ -139,8 +142,29 @@ def safe_product_regions(page, anchors=()):
             local_text+=' '+' '.join(w['text'] for angle in (-10,-15,90,180,270) for w in _words(binary.rotate(angle,expand=True,fillcolor=255)))
         evidence=bool(any(not b.get('error') for b in decoded) or PRODUCT.search(text+' '+local_text) or BRAND.search(text+' '+local_text))
         entry=dict(r,local_product_signal=evidence)
-        (accepted if evidence else rejected).append(entry)
+        if evidence:
+            accepted.append(entry)
+        elif r.get('geometry_source')!='local_contrast_patch':
+            rejected.append(entry)  # Unclassified form cells are never persisted or returned.
     return sorted(accepted,key=lambda r:(r['bbox'][1],r['bbox'][0])), rejected
+
+
+def safe_product_regions(page, anchors=()):
+    """Apply the privacy gate in product reading orientation, then map back.
+
+    Clinical-line bands must rotate with the page; a sideways header must not
+    suppress a whole column of real labels or become a discarded crop.
+    """
+    from product_anchors import decoded_symbols,dominant_turn,turn_region
+    symbols=decoded_symbols(page)
+    angle=dominant_turn(symbols,anchors)
+    upright=page.rotate(angle,expand=True)
+    transformed=[turn_region(r,angle) for r in anchors]
+    if angle:
+        symbols=decoded_symbols(upright)
+    accepted,rejected=_safe_product_regions(upright,transformed,symbols)
+    return ([turn_region(r,(-angle)%360) for r in accepted],
+            [turn_region(r,(-angle)%360) for r in rejected])
 
 
 def product_canvas(page,regions):

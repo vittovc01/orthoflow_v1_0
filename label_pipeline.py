@@ -13,7 +13,7 @@ from pathlib import Path
 
 from PIL import Image, ImageOps, ImageFilter
 
-PIPELINE_VERSION = 'physical-label-v13-private-product-gate'
+PIPELINE_VERSION = 'physical-label-v14-oriented-product-anchors'
 
 
 def local_ref_evidence(image):
@@ -29,7 +29,7 @@ def local_ref_evidence(image):
             result = subprocess.run(
                 ['tesseract', 'stdin', 'stdout', '-l', 'eng', '--psm', str(psm), 'tsv'],
                 input=buffer.getvalue(), capture_output=True, timeout=15, check=True)
-            words = list(csv.DictReader(result.stdout.decode('utf-8', errors='replace').splitlines(),delimiter='\t'))
+            words = list(csv.DictReader(result.stdout.decode('utf-8', errors='replace').splitlines(),delimiter='\t',quoting=csv.QUOTE_NONE))
             reads.append(' '.join(w.get('text','') for w in words if w.get('text')))
             for word in words:
                 token = (word.get('text') or '').strip()
@@ -465,6 +465,9 @@ def analyze_labels(path, client, model, item_schema, parse):
             original = crop_region(page,region['bbox'])
             crop = original.rotate(region['rotation'] + region.get('deskew_angle', 0),
                                    resample=Image.Resampling.BICUBIC, expand=True, fillcolor='white')
+            # A global turn does not remove an individual sticker's small tilt.
+            from product_anchors import align_product_crop
+            crop, residual_turn = align_product_crop(crop)
             decoded = []
             try:
                 try:
@@ -492,6 +495,7 @@ def analyze_labels(path, client, model, item_schema, parse):
                 row = reconcile(row, decoded)
             row.update(label_id=label_id,page=number,bbox=region['bbox'],rotation=region['rotation'],crop_data_url=image_url(crop),source_document=digest,
                        geometry_source=region.get('geometry_source','ai_proposal'),finder_bbox=region.get('finder_bbox'),
+                       residual_turn=residual_turn,
                        deskew_angle=region.get('deskew_angle', 0))
             from ocr_review import assess_label
             row['assessment'] = assess_label(row)
