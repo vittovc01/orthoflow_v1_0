@@ -134,6 +134,20 @@ def canonical_item(row):
     return item
 
 
+def cross_photo_candidates(rows):
+    """Identity equality is ambiguous: two physical stickers may share REF and lot."""
+    groups = {}
+    for original in rows:
+        row = canonical_item(original)
+        if row.get('escludi_riga') or row.get('document_index') is None:
+            continue
+        key = (exact_code(row.get('code')), str(row.get('lot') or '').strip())
+        if all(key):
+            groups.setdefault(key, []).append(row)
+    return [ [r['label_id'] for r in group] for group in groups.values()
+             if len({r['document_index'] for r in group}) > 1 ]
+
+
 def build_review(extraction, *, catalog=None, today=None, soon_days=90):
     """JSON contract; edits belong in confirmed records, never overwrite extraction."""
     labels = []
@@ -141,6 +155,7 @@ def build_review(extraction, *, catalog=None, today=None, soon_days=90):
         item = canonical_item(original)
         labels.append({**item, 'assessment':assess_label(item,catalog=catalog,today=today,soon_days=soon_days)})
     return {**extraction, 'items':labels,'review_required':True,
+            'cross_photo_candidates':cross_photo_candidates(labels),
             'physical_label_count':len(labels),'soon_days':soon_days,
             'catalogue_checked':catalog is not None,
             'missing_gtins':[{'label_id':r.get('label_id'),'gtin':r.get('gtin'),
@@ -178,13 +193,15 @@ def aggregate_review(rows):
     return list(groups.values())
 
 
-def validate_confirmation(extraction, confirmed, *, physical_count, count_verified, actor):
+def validate_confirmation(extraction, confirmed, *, physical_count, count_verified, actor, duplicates_reviewed=False):
     """Run again in the trusted server; UI/HTTP booleans alone are insufficient."""
     if (not isinstance(actor,str) or not actor.strip() or count_verified is not True
             or type(physical_count) is not int or physical_count<=0 or physical_count!=len(confirmed)):
         raise ValueError('Utente e conteggio fisico verificato obbligatori')
     if any(d.get('status')=='failed' for d in extraction.get('documents',[]) if isinstance(d,dict)):
         raise ValueError('Documento non analizzato: ripetere la lettura prima della conferma')
+    if cross_photo_candidates(extraction.get('items') or []) and not duplicates_reviewed:
+        raise ValueError('Verificare le etichette ripetute tra foto: escludere le osservazioni dello stesso pezzo')
     expected = {i.get('label_id') for i in extraction.get('items') or []}
     actual = [r.get('label_id') for r in confirmed]
     # Added manual physical labels must be explicitly represented in extraction.

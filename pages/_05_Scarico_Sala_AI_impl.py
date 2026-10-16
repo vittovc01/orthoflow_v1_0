@@ -743,6 +743,11 @@ with st.form("scarico_ai_confirm"):
 
     expected_label_count = st.number_input("Numero di etichette contate sul documento originale", min_value=0, step=1, value=0, key=f"physical_count_{st.session_state.get('scarico_editor_revision', 0)}") if is_physical_ai else 0
     count_verified = st.checkbox("Ho confrontato tutti i ritagli con il documento originale e verificato il conteggio fisico.", value=False, key=f"physical_verified_{st.session_state.get('scarico_editor_revision', 0)}") if is_physical_ai else True
+    duplicate_candidates = build_review({"items":source_rows}).get("cross_photo_candidates", []) if is_physical_ai else []
+    if duplicate_candidates:
+        st.warning("Stesso REF e lotto in foto diverse: confronta i ritagli. Se mostrano lo stesso pezzo, escludi la riga ripetuta; se sono due etichette fisiche distinte, mantienile entrambe.")
+        st.write({"Etichette da confrontare": duplicate_candidates})
+    duplicates_reviewed = st.checkbox("Ho verificato i possibili duplicati tra foto ed escluso le ripetizioni dello stesso pezzo.", value=False) if duplicate_candidates else True
     header_verified = st.checkbox("Ho verificato struttura, data e dati intervento sul documento originale.", value=False, key=f"physical_header_verified_{st.session_state.get('scarico_editor_revision', 0)}") if is_physical_ai else True
     verified = st.checkbox("Ho verificato codice Johnson/REF, lotto, scadenza e quantità di tutte le righe.")
     archive_enabled = False  # OCR archive remains disabled, including legacy configuration.
@@ -752,6 +757,9 @@ with st.form("scarico_ai_confirm"):
 if confirm or archive_review:
     if any(d.get("status")=="failed" for d in meta.get("documents",[]) if isinstance(d,dict)):
         st.error("Uno o più documenti non sono stati analizzati: ripeti la lettura o acquisisci una nuova foto prima della conferma.")
+        st.stop()
+    if not duplicates_reviewed:
+        st.error("Verifica i possibili duplicati tra foto prima di confermare.")
         st.stop()
     if not verified:
         st.error("Conferma di aver verificato i materiali prima di creare l’intervento.")
@@ -782,7 +790,7 @@ if confirm or archive_review:
             saved = SupabaseReviewRepository(sb()).save_confirmed(
                 request_id=previous["id"],actor=user(),extraction=extraction,confirmed=final_rows,
                 documents=documents,physical_count=int(expected_label_count),
-                count_verified=bool(count_verified),explicitly_confirmed=True)
+                count_verified=bool(count_verified),explicitly_confirmed=True,duplicates_reviewed=bool(duplicates_reviewed))
             if archive_review:
                 st.success(f"Revisione {saved['id']} archiviata con foto originali. Nessuno scarico di magazzino eseguito.")
                 st.stop()

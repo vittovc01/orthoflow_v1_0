@@ -3,6 +3,7 @@
 Upload byte validation and extraction never persist anything in Supabase.
 The caller must authenticate, throttle requests and keep review state isolated.
 """
+from hashlib import sha256
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
@@ -15,13 +16,23 @@ def analyze_documents(documents, *, analyzer, catalog=None, soon_days=90):
         raise ValueError('Caricare da 1 a 20 documenti, massimo 50 MiB totali')
     result = {'items':[],'annotated_pages':[],'detection_warnings':[],
               'unconfirmed_regions':[],'documents':[],'review_required':True}
+    seen_documents = {}
     with TemporaryDirectory(prefix='orthoflow-review-') as tmp:
         for index, document in enumerate(documents):
             mime, extension = document.validate()
             path = Path(tmp)/f'{index:02}{extension}'
             path.write_bytes(document.content)
             try:
+                from label_pipeline import render_pages
+                pages = render_pages(path)
+                fingerprint = tuple((page.size, sha256(page.tobytes()).hexdigest()) for page in pages)
+                if fingerprint in seen_documents:
+                    result['documents'].append({'index':index,'name':document.name,'status':'duplicate',
+                                                'duplicate_of':seen_documents[fingerprint]})
+                    result['detection_warnings'].append(f'Documento {index+1}: immagine già analizzata, non conteggiata due volte')
+                    continue
                 incoming = analyzer(str(path),mode='scarico_sala')
+                seen_documents[fingerprint] = index
             except Exception as exc:
                 result['detection_warnings'].append(f'Documento {index+1}: analisi non completata ({type(exc).__name__}); riprovare o acquisire una nuova foto')
                 result['documents'].append({'index':index,'name':document.name,'status':'failed'})

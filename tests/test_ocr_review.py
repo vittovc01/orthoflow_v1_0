@@ -147,7 +147,9 @@ def test_service_returns_partial_error_without_raising_or_saving():
         assert mode=='scarico_sala'
         if path.endswith('01.png'):raise RuntimeError('reader offline')
         return {'items':[row()],'pipeline_version':'test'}
-    result=analyze_documents([original(),original()],analyzer=analyzer)
+    buffer=BytesIO(); Image.new('RGB',(30,20),'black').save(buffer,format='PNG')
+    second=OriginalDocument('second.png',buffer.getvalue())
+    result=analyze_documents([original(),second],analyzer=analyzer)
     assert len(result['items'])==1 and result['documents'][1]['status']=='failed'
     assert result['detection_warnings'] and result['review_required']
 
@@ -176,3 +178,53 @@ def test_gtin_catalog_compares_mapping_not_partial_scanner_membership():
     assert result['missing_gtins']==[{'label_id':'x','gtin':'07611819268623','reason':'non_in_catalogo'}]
     result=build_review({'items':[dict(row,gtin=None)]},catalog={})
     assert result['missing_gtins'][0]['reason']=='assente'
+
+
+def test_two_physical_identical_stickers_in_one_photo_are_quantity_two():
+    rows=[dict(row('left'),document_index=0),dict(row('right'),document_index=0)]
+    assert aggregate_review(rows)[0]['quantity']==2
+    from ocr_review import cross_photo_candidates
+    assert cross_photo_candidates(rows)==[]
+
+
+def test_same_photo_reencoded_is_analyzed_and_counted_once():
+    image=Image.new('RGB',(30,20),'white');buffer=BytesIO();image.save(buffer,format='PNG',compress_level=0)
+    calls=[]
+    def analyzer(path,mode):
+        calls.append(path);return {'items':[row('one')]}
+    result=analyze_documents([original(),OriginalDocument('same.png',buffer.getvalue())],analyzer=analyzer)
+    assert len(calls)==1 and result['physical_label_count']==1
+    assert result['documents'][1]['status']=='duplicate'
+    assert aggregate_review(result['items'])[0]['quantity']==1
+
+
+def test_same_sticker_in_different_photos_requires_review_and_counts_once():
+    first=dict(row('photo1'),document_index=0)
+    repeated=dict(row('photo2'),document_index=1)
+    extraction={'items':[first,repeated]}
+    confirmed=[first,dict(repeated,escludi_riga=True)]
+    with pytest.raises(ValueError,match='ripetute tra foto'):
+        validate_confirmation(extraction,confirmed,physical_count=2,count_verified=True,actor='operator')
+    groups=validate_confirmation(extraction,confirmed,physical_count=2,count_verified=True,actor='operator',duplicates_reviewed=True)
+    assert len(groups)==1 and groups[0]['quantity']==1
+    # Equal fields alone must never silently erase a second physical sticker.
+    groups=validate_confirmation(extraction,[first,repeated],physical_count=2,count_verified=True,actor='operator',duplicates_reviewed=True)
+    assert groups[0]['quantity']==2
+
+
+def test_four_equal_refs_with_distinct_lots_remain_seven_rows():
+    rows=[dict(row(str(i),lot=f'LOT-{i}'),code='TEST-A' if i<4 else f'TEST-{i}') for i in range(7)]
+    groups=aggregate_review(rows)
+    assert len(groups)==7 and all(g['quantity']==1 for g in groups)
+    assert len([g for g in groups if g['code']=='TEST-A'])==4
+
+
+def test_failed_photo_analysis_can_be_retried_with_same_image():
+    calls=[]
+    def analyzer(path,mode):
+        calls.append(path)
+        if len(calls)==1:raise RuntimeError('temporary failure')
+        return {'items':[row()]}
+    result=analyze_documents([original(),original()],analyzer=analyzer)
+    assert len(calls)==2
+    assert [d['status'] for d in result['documents']]==['failed','analyzed']

@@ -78,12 +78,12 @@ class SupabaseReviewRepository:
         return rows[0] if rows else None
 
     def save_confirmed(self, *, request_id, actor, extraction, confirmed, documents,
-                       physical_count, count_verified, explicitly_confirmed=False):
+                       physical_count, count_verified, explicitly_confirmed=False, duplicates_reviewed=False):
         if explicitly_confirmed is not True:
             raise ValueError('Conferma esplicita richiesta: nessun salvataggio automatico')
         request_id = str(UUID(str(request_id)))
         aggregate = validate_confirmation(extraction,confirmed,physical_count=physical_count,
-                                          count_verified=count_verified,actor=actor)
+                                          count_verified=count_verified,actor=actor,duplicates_reviewed=duplicates_reviewed)
         if not 1<=len(documents)<=20:
             raise ValueError('Servono da 1 a 20 documenti originali')
         manifest, uploads = [], []
