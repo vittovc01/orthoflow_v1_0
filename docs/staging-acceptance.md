@@ -47,7 +47,7 @@ Eseguire in ordine; per casi indipendenti usare una cartella sintetica diversa (
 
 ## Prove tecniche indipendenti dalla pagina
 
-La RPC valida i campi anche se il client altera sia righe sia manifesto: REF obbligatorio con formato ammesso, lotto obbligatorio e massimo 20 caratteri senza controlli, scadenza ISO esistente nel calendario, quantità finita/intera/positiva. Il prefisso `manual:` non esenta dai controlli. Il catalogo/GTIN non è una condizione di salvataggio.
+La pagina usa l’endpoint dedicato `crea_intervento_scarico_ai_verificato_v2`, che forza il contratto rigoroso anche se il client dichiara una versione precedente. La RPC valida i campi anche se il client altera sia righe sia manifesto: REF obbligatorio con formato ammesso, lotto obbligatorio e massimo 20 caratteri senza controlli, scadenza ISO esistente nel calendario, quantità finita/intera/positiva. Il prefisso `manual:` non esenta dai controlli. Il catalogo/GTIN non è una condizione di salvataggio.
 
 Il contratto v2 richiede un UUID di richiesta. Database e scarico sono nella stessa transazione: UUID e risposta vengono salvati solo insieme agli effetti dell'intervento. Un errore annulla tutto e non consuma la chiave. Lock transazionali e vincoli univoci serializzano richieste concorrenti per UUID, cartella/struttura/data e documento originale. La cartella non è globalmente unica: stessa cartella in altra struttura o data non viene automaticamente considerata lo stesso intervento; il riutilizzo dello stesso documento resta comunque bloccato. Nessuna deroga automatica per un secondo intervento legittimo sulla stessa cartella/data: serve revisione della registrazione esistente.
 

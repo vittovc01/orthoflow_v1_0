@@ -252,3 +252,13 @@ end $function$
 
 REVOKE ALL ON FUNCTION public.crea_intervento_scarico_ai_verificato(jsonb,jsonb,text) FROM PUBLIC, anon, authenticated;
 GRANT EXECUTE ON FUNCTION public.crea_intervento_scarico_ai_verificato(jsonb,jsonb,text) TO service_role;
+
+-- Dedicated endpoint: callers cannot select the weaker legacy contract.
+CREATE OR REPLACE FUNCTION public.crea_intervento_scarico_ai_verificato_v2(
+ p_header jsonb,p_rows jsonb,p_utente text DEFAULT NULL
+) RETURNS jsonb LANGUAGE sql SECURITY INVOKER SET search_path TO 'public' AS $$
+ SELECT public.crea_intervento_scarico_ai_verificato(
+   coalesce(p_header,'{}'::jsonb)||'{"review_contract_version":2}'::jsonb,p_rows,p_utente);
+$$;
+REVOKE ALL ON FUNCTION public.crea_intervento_scarico_ai_verificato_v2(jsonb,jsonb,text) FROM PUBLIC,anon,authenticated;
+GRANT EXECUTE ON FUNCTION public.crea_intervento_scarico_ai_verificato_v2(jsonb,jsonb,text) TO service_role;

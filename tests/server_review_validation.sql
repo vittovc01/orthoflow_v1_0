@@ -20,7 +20,7 @@ BEGIN
    bad_header:=jsonb_set(h,array['label_manifest','0',c->>'field'],c->'value');
    failed:=false;
    begin
-     perform crea_intervento_scarico_ai_verificato(bad_header,bad_rows,'test-agent');
+     perform crea_intervento_scarico_ai_verificato_v2(bad_header||'{"review_contract_version":1}',bad_rows,'test-agent');
    exception when others then failed:=true;
    end;
    if not failed then raise exception 'server accepted invalid field: %',c; end if;
@@ -30,6 +30,6 @@ BEGIN
    raise exception 'failed validation left partial records or consumed request key';
  end if;
  -- Same key succeeds after a fully rolled-back invalid attempt.
- perform crea_intervento_scarico_ai_verificato(h,r,'test-agent');
+ perform crea_intervento_scarico_ai_verificato_v2(h,r,'test-agent');
 END $$;
 ROLLBACK;

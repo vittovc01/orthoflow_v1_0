@@ -153,7 +153,7 @@ def test_single_confirmation_accepts_missing_gtin_and_advisory_count(backend,mon
     next(b for b in at.button if b.label=='📤 Crea intervento e scarica materiali').click()
     at.run()
     assert not at.exception
-    name,args=next((name,args) for name,args in calls if name=='crea_intervento_scarico_ai_verificato')
+    name,args=next((name,args) for name,args in calls if name=='crea_intervento_scarico_ai_verificato_v2')
     assert args['p_rows'][0]['quantita']==2
     assert args['p_header']['reported_label_count']==3 and args['p_header']['count_difference']==2
     assert args['p_header']['label_manifest'][0]['dati_confermati']['gtin'] is None
@@ -278,7 +278,7 @@ def test_invalid_row_is_red_and_blocks_with_ref_and_lot(backend):
 def test_timeout_retry_reuses_discharge_request_uuid(backend,monkeypatch):
     calls=[]
     def rpc(name,args):
-        if name!='crea_intervento_scarico_ai_verificato':
+        if name!='crea_intervento_scarico_ai_verificato_v2':
             return SimpleNamespace(execute=lambda:SimpleNamespace(data=[]))
         calls.append(args)
         def execute():

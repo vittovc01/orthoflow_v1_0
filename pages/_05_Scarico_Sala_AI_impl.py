@@ -968,7 +968,7 @@ if confirm or archive_review:
             "esclusa": bool(r.get("escludi_riga")) or (is_other_manufacturer(r.get("produttore")) and not r.get("jnj_verificato_manualmente")),
         } for r in final_rows]
     try:
-        result = sb().rpc("crea_intervento_scarico_ai_verificato" if is_physical_ai else "crea_intervento_scarico_ai_flessibile", {
+        result = sb().rpc("crea_intervento_scarico_ai_verificato_v2" if is_physical_ai else "crea_intervento_scarico_ai_flessibile", {
             "p_header": header,
             "p_rows": rpc_rows,
             "p_utente": user(),

@@ -12,7 +12,7 @@ BEGIN IF NEW.magazzino_scarico='TEST-CONCURRENT' THEN PERFORM pg_sleep(1); END I
 CREATE TRIGGER test_slow_discharge BEFORE INSERT ON interventi FOR EACH ROW EXECUTE FUNCTION test_slow_discharge();
 SQL
 cat > "$trial_dir/request.sql" <<'SQL'
-SELECT crea_intervento_scarico_ai_verificato(
+SELECT crea_intervento_scarico_ai_verificato_v2(
 '{"request_id":"00000000-0000-4000-8000-000000000030","data_intervento":"2026-10-16","codice_cliente":"TEST-CONCURRENT","cartella_clinica":"TEST-CONCURRENT","magazzino_scarico":"TEST-CONCURRENT","review_contract_version":2,"count_verified":true,"physical_label_count":1,"included_label_ids":["one"],"label_manifest":[{"label_id":"one","codice":"TEST-A","lotto":"TEST-LOT","scadenza":"2035-01-01","quantita":2}]}',
 '[{"codice":"TEST-A","lotto":"TEST-LOT","scadenza":"2035-01-01","quantita":2,"label_ids":["one"],"verificata":true}]', 'test-agent');
 SQL
