@@ -619,6 +619,8 @@ if is_physical_ai:
                 else:
                     updated_rows[target] = updated
                 st.session_state["scarico_ai_rows"] = updated_rows
+                meta["pipeline_version"]=PIPELINE_VERSION
+                st.session_state["scarico_ai_meta"]=meta
                 st.session_state["scarico_editor_revision"] = int(st.session_state.get("scarico_editor_revision", 0)) + 1
                 st.rerun()
             except (ValueError, OSError) as exc:
