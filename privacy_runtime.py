@@ -11,7 +11,7 @@ _signatures={}
 
 def refresh_ocr_modules():
     with _lock:
-        for name in ('review_editor','region_privacy','sticker_geometry','label_geometry','linear_label_geometry',
+        for name in ('review_editor','product_anchors','region_privacy','sticker_geometry','label_geometry','linear_label_geometry',
                      'label_pipeline','ocr_review','ocr_repository','ocr_service'):
             module=importlib.import_module(name)
             stat=Path(module.__file__).stat()

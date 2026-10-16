@@ -232,6 +232,9 @@ def test_old_preprivacy_session_cannot_render_stale_header_crops(backend):
     assert not at.exception
     assert any('filtro privacy' in w.value for w in at.warning)
     assert not at.expander
+    at.run()
+    assert not at.exception and not at.expander
+    assert any(b.label=='Rianalizza i documenti con la versione aggiornata' for b in at.button)
 
 
 def test_table_edits_additions_and_deletions_update_count_and_audit(backend):
