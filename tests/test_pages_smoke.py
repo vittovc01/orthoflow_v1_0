@@ -131,7 +131,8 @@ def test_physical_label_review_blocks_unverified_count_without_writes(backend):
     assert len([c for c in at.checkbox if c.label.startswith('Ho ')])==1
 
 
-def test_single_confirmation_accepts_missing_gtin_and_advisory_count(backend,monkeypatch):
+@pytest.mark.parametrize('legacy_wrapper',[False,True])
+def test_single_confirmation_accepts_missing_gtin_and_advisory_count(backend,monkeypatch,legacy_wrapper):
     calls=[]
     def rpc(name,args):
         calls.append((name,args))
@@ -140,6 +141,15 @@ def test_single_confirmation_accepts_missing_gtin_and_advisory_count(backend,mon
     at=app()
     at.session_state['user']='ci-user';at.session_state['ruolo']='Admin';at.session_state['permessi']=['DIREZIONE']
     at.run()
+    if legacy_wrapper:
+        native_submit=st._main.form_submit_button
+        def obsolete_submit(label,*args,**kwargs):
+            clicked=native_submit(label,*args,**kwargs)
+            if clicked and label=='📤 Crea intervento e scarica materiali':
+                st.warning('Spunta la verifica di codici, lotti, scadenze e quantità prima di creare l’intervento.')
+                return False
+            return clicked
+        monkeypatch.setattr(st,'form_submit_button',obsolete_submit)
     from label_pipeline import PIPELINE_VERSION
     at.session_state['scarico_source']='AI'
     at.session_state['scarico_ai_meta']={'pipeline_version':PIPELINE_VERSION}
@@ -159,6 +169,7 @@ def test_single_confirmation_accepts_missing_gtin_and_advisory_count(backend,mon
     assert args['p_header']['reported_label_count']==3 and args['p_header']['count_difference']==2
     assert args['p_header']['label_manifest'][0]['dati_confermati']['gtin'] is None
     assert not any('nan' in e.value for e in at.error)
+    assert not any('Spunta la verifica' in w.value for w in at.warning)
 
 
 def test_manual_material_can_correct_or_add_missing_physical_label(backend, tmp_path):

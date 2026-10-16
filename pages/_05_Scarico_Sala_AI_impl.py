@@ -21,6 +21,10 @@ from label_pipeline import review_errors, inventory_errors, aggregate_labels, PI
 
 import pandas as pd
 import streamlit as st
+# Older page wrappers patched the Streamlit module globally. An overlapping
+# session can retain their obsolete scarico_verified guard after a hot update.
+# Bind the native generator method so that only this page's validation runs.
+form_submit_button = st._main.form_submit_button
 from orthoflow_branding import configure_page
 from document_compression import compress_document
 from supabase import create_client
@@ -612,8 +616,8 @@ if is_physical_ai:
         manual_expiry = st.text_input("Scadenza stampata (AAAA-MM-GG)", value=clean(selected.get("scadenza")))
         manual_quantity = st.number_input("Quantità", min_value=1, value=quantity_value(selected.get("quantita")) or 1, step=1)
         manual_description = st.text_input("Descrizione materiale", value=clean(selected.get("descrizione")))
-        apply_manual = st.form_submit_button("Applica materiale alla lista")
-        delete_manual = st.form_submit_button("Elimina questa riga", disabled=target == -1)
+        apply_manual = form_submit_button("Applica materiale alla lista")
+        delete_manual = form_submit_button("Elimina questa riga", disabled=target == -1)
     if apply_manual or delete_manual:
         changes=[]
         for index,item in enumerate(source_rows):
@@ -774,8 +778,8 @@ with st.form("scarico_ai_confirm"):
     archive_enabled = str(secret("OCR_REVIEW_ARCHIVE_ENABLED", "true")).lower() in {"true", "1", "yes"}
     if archive_enabled:
         st.caption("Archivio OCR attivo: conserva revisione, correzioni e soli ritagli delle etichette. Il documento completo non viene archiviato.")
-    archive_review = st.form_submit_button("Conferma e archivia revisione OCR (senza scarico)", disabled=(not is_physical_ai or not archive_enabled or len(rows)==0))
-    confirm = st.form_submit_button("📤 Crea intervento e scarica materiali", type="primary", use_container_width=True, disabled=(len(rows) == 0))
+    archive_review = form_submit_button("Conferma e archivia revisione OCR (senza scarico)", disabled=(not is_physical_ai or not archive_enabled or len(rows)==0))
+    confirm = form_submit_button("📤 Crea intervento e scarica materiali", type="primary", use_container_width=True, disabled=(len(rows) == 0))
 
 if confirm or archive_review:
     if any(d.get("status")=="failed" for d in meta.get("documents",[]) if isinstance(d,dict)):
