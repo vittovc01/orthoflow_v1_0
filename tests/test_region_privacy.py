@@ -97,3 +97,22 @@ def test_single_label_photographs_keep_the_complete_ref_end():
         accepted,rejected=safe_product_regions(page,locate_datamatrix_labels(page))
         assert len(accepted)==1 and not rejected
         assert accepted[0]['bbox']==[0,0,1000,1000]
+
+
+def test_original_inputs_use_temporary_paths_and_anonymous_names():
+    import ast
+    from uuid import uuid4
+    source=Path(__file__).resolve().parents[1]/'pages'/'_05_Scarico_Sala_AI_impl.py'
+    tree=ast.parse(source.read_text())
+    selected=[n for n in tree.body if isinstance(n,ast.FunctionDef) and n.name in {'temporary_input_dir','save_local','save_camera'}]
+    state={}
+    namespace={'Path':Path,'uuid4':uuid4,'st':SimpleNamespace(session_state=state)}
+    exec(compile(ast.Module(body=selected,type_ignores=[]),str(source),'exec'),namespace)
+    upload=BytesIO(b'%PDF-test-original');upload.name='private-clinical-record.pdf'
+    path=Path(namespace['save_local'](upload))
+    try:
+        assert path.read_bytes()==b'%PDF-test-original'
+        assert 'uploads' not in path.parts and 'clinical' not in path.name
+    finally:
+        state['scarico_input_tempdir'].cleanup()
+    assert not path.exists()

@@ -126,19 +126,25 @@ def collect_scarico_files(saved, uploaded):
     return result
 
 
+def temporary_input_dir():
+    from tempfile import TemporaryDirectory
+    if "scarico_input_tempdir" not in st.session_state:
+        st.session_state["scarico_input_tempdir"] = TemporaryDirectory(prefix="orthoflow-ocr-")
+    return Path(st.session_state["scarico_input_tempdir"].name)
+
+
 def save_local(upload, category="scarico_sala"):
-    base = Path("uploads") / category
-    base.mkdir(parents=True, exist_ok=True)
-    name = str(getattr(upload, "name", "foto_sala.jpg") or "foto_sala.jpg").replace("/", "_").replace("\\", "_")
-    path = base / f"{pd.Timestamp.now().strftime('%Y%m%d_%H%M%S_%f')}_{name}"
-    path.write_bytes(upload.getvalue() if hasattr(upload, "getvalue") else upload.getbuffer())
+    # Originals exist only as processing inputs, never in the persistent uploads tree.
+    suffix=Path(str(getattr(upload,"name","input.jpg"))).suffix.lower()
+    if suffix not in {".pdf",".png",".jpg",".jpeg",".webp"}:
+        suffix=".jpg"
+    path=temporary_input_dir()/f"{uuid4().hex}{suffix}"
+    path.write_bytes(upload.getvalue() if hasattr(upload,"getvalue") else upload.getbuffer())
     return str(path)
 
 
 def save_camera(camera):
-    base = Path("uploads") / "scarico_sala"
-    base.mkdir(parents=True, exist_ok=True)
-    path = base / f"{pd.Timestamp.now().strftime('%Y%m%d_%H%M%S_%f')}_camera.jpg"
+    path=temporary_input_dir()/f"{uuid4().hex}.jpg"
     path.write_bytes(camera.getvalue())
     return str(path)
 
@@ -979,6 +985,9 @@ if confirm or archive_review:
         if not doc_ok:
             st.warning("Intervento e magazzino sono stati salvati correttamente, ma il documento originale non è stato archiviato. Puoi ricaricarlo dall'Archivio impianti.")
 
+        temporary_inputs=st.session_state.pop("scarico_input_tempdir",None)
+        if temporary_inputs is not None:
+            temporary_inputs.cleanup()
         for k in ["scarico_pending_files", "scarico_documents", "scarico_ai_rows", "scarico_ai_original_rows", "scarico_audit_request", "scarico_ai_meta", "scarico_file_path", "scarico_file_name", "scarico_file_type", "scarico_source", "scarico_missing_prices", "scarico_stock_errors", "scarico_verified"]:
             st.session_state.pop(k, None)
         for k in list(st.session_state.keys()):
