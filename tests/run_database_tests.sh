@@ -13,3 +13,5 @@ for test in tests/*.sql; do
   psql -X -v ON_ERROR_STOP=1 -f "$test"
 done
 
+
+bash tests/discharge_concurrency.sh

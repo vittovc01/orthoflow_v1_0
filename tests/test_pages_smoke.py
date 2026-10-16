@@ -273,3 +273,30 @@ def test_invalid_row_is_red_and_blocks_with_ref_and_lot(backend):
     errors=[e.value for e in at.error]
     assert errors and all('TEST-BAD, lotto LOT-BAD: scadenza mancante' in e for e in errors)
     assert not any('nan' in e for e in errors)
+
+
+def test_timeout_retry_reuses_discharge_request_uuid(backend,monkeypatch):
+    calls=[]
+    def rpc(name,args):
+        if name!='crea_intervento_scarico_ai_verificato':
+            return SimpleNamespace(execute=lambda:SimpleNamespace(data=[]))
+        calls.append(args)
+        def execute():
+            if len(calls)==1:raise TimeoutError('response lost')
+            return SimpleNamespace(data={'intervento_id':123,'righe':1,'totale':0,'replayed':True})
+        return SimpleNamespace(execute=execute)
+    monkeypatch.setitem(backend.__dict__,'rpc',rpc)
+    at=app();at.session_state['user']='agent';at.session_state['ruolo']='Admin';at.session_state['permessi']=['DIREZIONE'];at.run()
+    from label_pipeline import PIPELINE_VERSION
+    at.session_state['scarico_source']='AI';at.session_state['scarico_ai_meta']={'pipeline_version':PIPELINE_VERSION}
+    at.session_state['scarico_ai_rows']=[{'label_id':'one','codice':'TEST-A','lotto':'TEST-LOT','scadenza':'2035-01-01','quantita':1}]
+    at.switch_page('pages/05_Scarico_Sala_AI.py').run()
+    next(c for c in at.checkbox if c.label.startswith('Ho controllato REF')).check()
+    next(b for b in at.button if b.label=='📤 Crea intervento e scarica materiali').click();at.run()
+    assert not at.exception and len(calls)==1
+    request_id=at.session_state['scarico_discharge_request_id']
+    assert any('Esito scarico da verificare' in e.value for e in at.error)
+    next(b for b in at.button if b.label=='📤 Crea intervento e scarica materiali').click();at.run()
+    assert not at.exception and len(calls)==2
+    assert calls[0]==calls[1]
+    assert calls[1]['p_header']['request_id']==request_id

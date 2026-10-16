@@ -358,6 +358,7 @@ def run_ai(path, documents=None):
         meta["items"] = combined_rows
         st.session_state.pop("scarico_audit_request", None)
         st.session_state["scarico_correction_log"] = []
+        st.session_state.pop("scarico_discharge_request_id",None)
         st.session_state["scarico_ai_rows"] = combined_rows
         st.session_state["scarico_ai_original_rows"] = copy.deepcopy(combined_rows)
         st.session_state["scarico_documents"] = documents
@@ -422,6 +423,20 @@ if status.get("enabled"):
     st.success(f"OCR AI attivo · {status.get('label_model', status.get('model', ''))}")
 else:
     st.warning("OCR AI non attivo: " + ", ".join(status.get("missing", [])))
+
+# A staging banner requires both a separate project and its database marker.
+if str(secret("ORTHOFLOW_ENVIRONMENT","production")).lower()=="staging":
+    from staging_identity import verify_staging
+    try:
+        marker_rows=sb().table("orthoflow_environment").select("environment").eq("singleton",True).execute().data or []
+        stage_ref=verify_staging(str(secret("SUPABASE_URL","")),str(secret("ORTHOFLOW_STAGING_PROJECT_REF","")),
+            marker_rows[0].get("environment") if marker_rows else None)
+        st.info(f"Ambiente STAGING verificato · progetto {stage_ref}. Usare solo magazzini e dati sintetici di collaudo.")
+    except Exception:
+        st.error("Staging non verificato: operazioni bloccate. Il progetto deve essere separato dalla produzione e marcato staging.")
+        st.stop()
+else:
+    st.warning("Ambiente PRODUZIONE: gli scarichi modificano i magazzini operativi. Non usare questa pagina per il collaudo con dati di prova.")
 
 camera_tab, upload_tab = st.tabs(["📷 Scatta foto con AI", "📄 Carica foto / PDF"])
 with camera_tab:
@@ -928,11 +943,12 @@ if confirm or archive_review:
     }
 
     if is_physical_ai:
+        header["request_id"] = st.session_state.setdefault("scarico_discharge_request_id",str(uuid4()))
         header["review_contract_version"] = 2
         header["physical_label_count"] = initial_label_count(final_rows)
         header["reported_label_count"] = int(expected_label_count)
         header["count_difference"] = int(expected_label_count)-initial_label_count(final_rows)
-        header["correction_log"] = st.session_state.get("scarico_correction_log",[])
+        header["correction_log"] = without_images(st.session_state.get("scarico_correction_log",[]))
         header["count_verified"] = bool(count_verified)
         header["included_label_ids"] = [i for r in rpc_rows for i in r["label_ids"]]
         originals = {r.get("label_id"): r for r in st.session_state.get("scarico_ai_original_rows", source_rows)}
@@ -963,7 +979,7 @@ if confirm or archive_review:
 
         # Se lo scarico proviene da un magazzino associato a un Kit, genera automaticamente i reintegri.
         try:
-            kits = sb().table("kit_logistici").select("id,codice").eq("codice_magazzino", mag).execute().data or []
+            kits = [] if result.get("replayed") else (sb().table("kit_logistici").select("id,codice").eq("codice_magazzino", mag).execute().data or [])
             if len(kits) == 1 and intervention_id:
                 kit_id = int(kits[0]["id"])
                 saved_rows = sb().table("righe_intervento").select("id,codice,lotto,quantita,origine").eq("intervento_id", intervention_id).execute().data or []
@@ -1001,7 +1017,7 @@ if confirm or archive_review:
         temporary_inputs=st.session_state.pop("scarico_input_tempdir",None)
         if temporary_inputs is not None:
             temporary_inputs.cleanup()
-        for k in ["scarico_correction_log", "scarico_pending_files", "scarico_documents", "scarico_ai_rows", "scarico_ai_original_rows", "scarico_audit_request", "scarico_ai_meta", "scarico_file_path", "scarico_file_name", "scarico_file_type", "scarico_source", "scarico_missing_prices", "scarico_stock_errors", "scarico_verified"]:
+        for k in ["scarico_discharge_request_id", "scarico_correction_log", "scarico_pending_files", "scarico_documents", "scarico_ai_rows", "scarico_ai_original_rows", "scarico_audit_request", "scarico_ai_meta", "scarico_file_path", "scarico_file_name", "scarico_file_type", "scarico_source", "scarico_missing_prices", "scarico_stock_errors", "scarico_verified"]:
             st.session_state.pop(k, None)
         for k in list(st.session_state.keys()):
             if str(k).startswith("manual_price_") or str(k).startswith("free_goods_"):
@@ -1014,7 +1030,7 @@ if confirm or archive_review:
         if "GIACENZA_INSUFFICIENTE" in msg:
             st.error("Giacenza modificata o insufficiente al momento della conferma. La transazione è stata annullata: nessun intervento, riga o movimento è stato salvato.")
         else:
-            st.error(f"Scarico non completato. La transazione è stata annullata: {e}")
+            st.error(f"Esito scarico da verificare: {e}. In caso di timeout riprova la stessa richiesta: il server evita un secondo scarico.")
 
 
 

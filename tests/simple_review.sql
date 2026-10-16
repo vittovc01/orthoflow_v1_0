@@ -2,7 +2,7 @@
 BEGIN;
 DO $$
 DECLARE
- header jsonb := '{"data_intervento":"2026-10-16","codice_cliente":"TEST","cliente":"TEST","magazzino_scarico":"SIMPLE_TEST","review_contract_version":2,"count_verified":true,"physical_label_count":1,"reported_label_count":3,"count_difference":2,"included_label_ids":["one"],"label_manifest":[{"label_id":"one","codice":"TEST-A","lotto":"LOT-A","scadenza":"2035-01-01","quantita":2}],"correction_log":[{"label_id":"one","field":"quantita","original":1,"corrected":2,"method":"manuale","user":"agent","timestamp":"2026-10-16T10:00:00Z"}]}';
+ header jsonb := '{"data_intervento":"2026-10-16","codice_cliente":"TEST","cartella_clinica":"TEST-SIMPLE","cliente":"TEST","magazzino_scarico":"SIMPLE_TEST","request_id":"00000000-0000-4000-8000-000000000001","review_contract_version":2,"count_verified":true,"physical_label_count":1,"reported_label_count":3,"count_difference":2,"included_label_ids":["one"],"label_manifest":[{"label_id":"one","codice":"TEST-A","lotto":"LOT-A","scadenza":"2035-01-01","quantita":2}],"correction_log":[{"label_id":"one","field":"quantita","original":1,"corrected":2,"method":"manuale","user":"agent","timestamp":"2026-10-16T10:00:00Z"}]}';
  rows jsonb := '[{"codice":"TEST-A","lotto":"LOT-A","scadenza":"2035-01-01","quantita":2,"label_ids":["one"],"verificata":true,"gtin":"nan","prezzo":1}]';
  result jsonb; failed boolean;
 BEGIN
