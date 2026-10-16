@@ -182,7 +182,8 @@ def test_santa_lucia_reference_quantities():
     assert next(r for r in grouped if r['codice']=='292.720S')['quantita']==2
 
 
-def test_pipeline_keeps_failed_reads_and_deduplicates_geometry(tmp_path):
+def test_pipeline_keeps_failed_reads_and_deduplicates_geometry(tmp_path,monkeypatch):
+    monkeypatch.setattr("region_privacy.safe_product_regions",lambda *a: ([{"bbox":[1,1,400,400],"rotation":180},{"bbox":[500,500,999,999],"rotation":90}],[]))
     path=tmp_path/'photo.png';Image.new('RGB',(100,100),'white').save(path)
     replies=iter([{'labels':[{'bbox':[1,1,400,400],'rotation':180},{'bbox':[2,2,401,401],'rotation':180},{'bbox':[500,500,999,999],'rotation':90}],'warning':None}, {'code':'REF','lot':'A','expiry':'2035-01-01','warning':None}])
     def create(**kwargs):
@@ -236,6 +237,7 @@ def test_geometry_audit_replaces_header_and_split_crops_before_reading(tmp_path,
     monkeypatch.setattr('label_pipeline.local_ref_evidence', lambda _: {'status':'unreadable','candidates':[]})
     corrected=[{'bbox':[100,400,900,600],'rotation':0},
                {'bbox':[100,650,900,850],'rotation':0}]
+    monkeypatch.setattr('region_privacy.safe_product_regions',lambda *a: (corrected,[]))
     read={'code':'413.040S','lot':'LOT','expiry':'2035-04-01'}
     def create(**kwargs):
         name=kwargs['text']['format']['name']
@@ -290,6 +292,7 @@ def test_parenthesized_gs1_validates_lengths_and_supported_ais(raw):
 def test_gs1_evidence_survives_ai_read_failure(tmp_path,monkeypatch):
     path=tmp_path/'barcode.png';Image.new('RGB',(100,100),'white').save(path)
     monkeypatch.setattr('label_geometry.locate_datamatrix_labels',lambda _: [])
+    monkeypatch.setattr('region_privacy.safe_product_regions',lambda *a: ([{'bbox':[100,100,900,900],'rotation':0}],[]))
     barcode=gs1_parse('(01)07611819268623(17)350401(10)LOT')
     monkeypatch.setattr('label_pipeline.decode_barcodes',lambda _: [dict(raw='(01)07611819268623(17)350401(10)LOT',**barcode)])
     def create(**kwargs):

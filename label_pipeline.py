@@ -13,7 +13,7 @@ from pathlib import Path
 
 from PIL import Image, ImageOps, ImageFilter
 
-PIPELINE_VERSION = 'physical-label-v13-evidence-review'
+PIPELINE_VERSION = 'physical-label-v13-private-product-gate'
 
 
 def local_ref_evidence(image):
@@ -417,10 +417,27 @@ def analyze_labels(path, client, model, item_schema, parse):
     digest = hashlib.sha256(Path(path).read_bytes()).hexdigest()[:20]
     items, warnings, unconfirmed_regions, annotated_pages = [], [], [], []
     for number, page in enumerate(pages, 1):
+        from region_privacy import safe_product_regions, product_canvas
+        from label_geometry import locate_datamatrix_labels
+        from linear_label_geometry import locate_linear_labels
+        local_regions = locate_datamatrix_labels(page)
+        try:
+            local_regions += locate_linear_labels(page)
+        except (OSError, subprocess.SubprocessError):
+            pass
+        safe_regions, safe_rejected = safe_product_regions(page, local_regions)
+        # Mask before *any* external call, overview, or discarded-region preview.
+        page = product_canvas(page, safe_regions)
         preview = page.copy()
         preview.thumbnail((2200,2200))
-        from label_geometry import locate_datamatrix_labels
-        local_regions = locate_datamatrix_labels(page)
+        if not safe_regions:
+            warnings.append(f'Pagina {number}: nessuna etichetta con riscontro locale; acquisire una foto separata dei soli prodotti')
+        # Rejected regions are local-only and have already passed privacy checks.
+        for region in safe_rejected:
+            unconfirmed_regions.append(dict(region,page=number,source_document=digest,
+                crop_data_url=image_url(crop_region(pages[number-1],region['bbox']))))
+        if not safe_regions:
+            continue
         located = parse(client.responses.create(model=model, store=False,
             input=[{'role':'user','content':[
                 {'type':'input_text','text':'Individua OGNI etichetta fisica adesiva originale del produttore di prodotto ortopedico, incluse le etichette con soli barcode lineari, quelle ripetute, ai bordi e verticali. Escludi gli adesivi di inventario ospedaliero contenenti soltanto codice articolo, numeri interni e (1/1), senza LOT/lotto, scadenza e dati del produttore. Non leggere i dati. layout=synthes_datamatrix soltanto per il layout delle piccole etichette Synthes a REF puntato e DataMatrix; altre etichette DePuy ATTUNE/VELYS/SmartSet sono other, anche se sterili o con DataMatrix. Per compresenza dei due layout usa mixed. Restituisci rettangoli stretti non sovrapposti in coordinate della immagine originale da 0 a 1000 [sinistra,alto,destra,basso]. Una etichetta per rettangolo, non una colonna. rotation è la rotazione antioraria necessaria a leggere quel singolo ritaglio. Non includere intestazione, firma, celle vuote. Segnala parti non localizzabili.'},
@@ -454,26 +471,8 @@ def analyze_labels(path, client, model, item_schema, parse):
             warnings.append(f'Pagina {number}: controllo indipendente dei ritagli non disponibile; verificare ogni etichetta sul documento')
         if located.get('warning'):
             warnings.append(f'Pagina {number}: {located["warning"]}')
-        proposals = unique_regions([dict(r,page=number) for r in located['labels']])
-        from linear_label_geometry import locate_linear_labels
-        try:
-            linear_regions = locate_linear_labels(page) if located.get('layout') in {'other', 'mixed'} else []
-        except (OSError, subprocess.SubprocessError):
-            linear_regions = []
-            warnings.append(f'Pagina {number}: localizzazione barcode non disponibile; verificare i ritagli visivi')
-        if linear_regions:
-            regions = merge_linear_regions(linear_regions, proposals, number)
-            if len(regions) != len(proposals):
-                warnings.append(f'Pagina {number}: conteggio AI/localizzazione barcode discordante; verificare il conteggio sul documento originale')
-        else:
-            regions = select_label_regions(local_regions, proposals, located.get('layout'), number, page)
-            page_unconfirmed = []
-            for proposal in proposals:
-                if not any(overlap(r['bbox'], proposal['bbox']) >= .5 for r in regions):
-                    page_unconfirmed.append(dict(proposal, crop_data_url=image_url(crop_region(page, proposal['bbox']))))
-            unconfirmed_regions.extend(page_unconfirmed)
-            if page_unconfirmed:
-                warnings.append(f'Pagina {number}: proposte AI prive di riscontro fisico non contate come prodotti; verificare il conteggio sul documento originale')
+        # AI may report proposals, but only local product evidence authorizes pixels.
+        regions = [dict(r,page=number) for r in safe_regions]
         from PIL import ImageDraw
         overview = preview.copy()
         pen = ImageDraw.Draw(overview)
@@ -520,18 +519,7 @@ def analyze_labels(path, client, model, item_schema, parse):
             row['assessment'] = assess_label(row)
             items.append(row)
     metadata = {k: None for k in ('clinic_name', 'clinical_record', 'procedure_date', 'surgeon')}
-    header_preview = pages[0].copy()
-    header_preview.thumbnail((2200, 2200))
-    header_schema = {'type': 'object', 'properties': {k: {'type': ['string', 'null']} for k in metadata},
-                     'required': list(metadata), 'additionalProperties': False}
-    try:
-        metadata = parse(client.responses.create(model=model, store=False,
-            input=[{'role': 'user', 'content': [
-                {'type': 'input_text', 'text': 'Leggi soltanto intestazione e dati intervento: struttura, cartella clinica, data intervento ISO YYYY-MM-DD, chirurgo. Non estrarre etichette. Non confondere destinatario, fornitore o firma con chirurgo. Campi non stampati, non presenti o illeggibili a null.'},
-                {'type': 'input_image', 'image_url': image_url(header_preview), 'detail': 'high'}]}],
-            text={'format': {'type': 'json_schema', 'name': 'procedure_header', 'schema': header_schema, 'strict': True}}))
-    except Exception:
-        warnings.append('Intestazione non letta: compilare manualmente i dati intervento')
+    warnings.append('Privacy: intestazione esclusa dai servizi esterni; compilare i dati intervento manualmente')
     return {'document_type':'scarico_sala','items':items,'back_orders':[],
             'pipeline_version':PIPELINE_VERSION,
             'physical_label_count':len(items),'detection_warnings':warnings,

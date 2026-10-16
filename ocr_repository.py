@@ -150,3 +150,18 @@ def load_catalog_codes(client, table='codici_prodotto_scan', column='codice_arti
         if len(rows)<500:
             return codes
         offset += len(rows)
+
+
+def load_gtin_catalog(client):
+    """Authoritative GTIN -> REF comparison; never fall back to scan registrations."""
+    catalog,offset={},0
+    while True:
+        rows=client.table('articoli_gtin').select('gtin,ref').order('gtin').range(offset,offset+499).execute().data or []
+        for row in rows:
+            gtin=str(row.get('gtin') or '').strip(); ref=str(row.get('ref') or '').strip()
+            if gtin and ref:
+                if gtin in catalog and catalog[gtin]!=ref:
+                    raise ValueError('GTIN associato a REF discordanti nel catalogo')
+                catalog[gtin]=ref
+        if len(rows)<500:return catalog
+        offset+=len(rows)
