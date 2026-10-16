@@ -163,3 +163,16 @@ def test_editor_keeps_hidden_gtin_and_rejects_forged_provenance():
     assert result['code']==result['codice']=='413.042S'
     assert result['lot']==result['lotto']=='CORRECTED'
     with pytest.raises(ValueError):merge_confirmed_fields([source],[dict(edited,label_id='other')])
+
+
+def test_gtin_catalog_compares_mapping_not_partial_scanner_membership():
+    from ocr_review import assess_label,build_review
+    row={'label_id':'x','code':'413.040S','gtin':'07611819268623','lot':'A','expiry':'2035-04-01'}
+    result=assess_label(row,catalog={'07611819268623':'413.041S'})
+    assert result['fields']['code']['status']=='conflict'
+    assert result['fields']['code']['value']=='413.040S'
+    assert result['needs_review']
+    result=build_review({'items':[row]},catalog={})
+    assert result['missing_gtins']==[{'label_id':'x','gtin':'07611819268623','reason':'non_in_catalogo'}]
+    result=build_review({'items':[dict(row,gtin=None)]},catalog={})
+    assert result['missing_gtins'][0]['reason']=='assente'

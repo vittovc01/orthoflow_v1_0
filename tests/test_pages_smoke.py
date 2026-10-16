@@ -109,6 +109,8 @@ def test_physical_label_review_blocks_unverified_count_without_writes(backend):
     at.session_state['permessi'] = ['DIREZIONE']
     at.run()
     at.session_state['scarico_source'] = 'AI'
+    from label_pipeline import PIPELINE_VERSION
+    at.session_state['scarico_ai_meta']={'pipeline_version':PIPELINE_VERSION}
     at.session_state['scarico_editor_revision'] = 1
     at.session_state['scarico_ai_rows'] = [{
         'label_id': 'document:p1:l1', 'codice': '413.040S', 'lotto': 'LOT',
@@ -135,6 +137,8 @@ def test_reviewed_labels_cannot_save_unverified_procedure_header(backend):
     at.session_state['permessi'] = ['DIREZIONE']
     at.run()
     at.session_state['scarico_source'] = 'AI'
+    from label_pipeline import PIPELINE_VERSION
+    at.session_state['scarico_ai_meta']={'pipeline_version':PIPELINE_VERSION}
     at.session_state['scarico_editor_revision'] = 1
     at.session_state['scarico_ai_rows'] = [{
         'label_id': 'document:p1:l1', 'codice': '413.040S', 'lotto': 'LOT',
@@ -163,6 +167,8 @@ def test_manual_material_can_correct_or_add_missing_physical_label(backend, tmp_
     at.session_state['permessi']=['DIREZIONE']
     at.run()
     at.session_state['scarico_source']='AI'
+    from label_pipeline import PIPELINE_VERSION
+    at.session_state['scarico_ai_meta']={'pipeline_version':PIPELINE_VERSION}
     at.session_state['scarico_ai_rows']=[{'label_id':'original', 'codice':'3092-040',
         'lotto':'LOT', 'scadenza':'2030-01-01', 'quantita':1, 'verificata':False}]
     at.session_state['scarico_documents']=[{'name':'labels.jpg','path':str(document)}]
@@ -184,6 +190,21 @@ def test_manual_material_can_correct_or_add_missing_physical_label(backend, tmp_
     assert not at.exception
     rows=at.session_state['scarico_ai_rows']
     assert len(rows)==2
-    assert rows[1]['source_document'] and rows[1]['crop_data_url']
+    assert rows[1]['source_document'] and rows[1]['crop_data_url'] is None
     assert rows[1]['page']==1 and rows[1]['quantita']==1
     assert not review_errors(rows,[r['label_id'] for r in rows],2,True)
+
+
+def test_old_preprivacy_session_cannot_render_stale_header_crops(backend):
+    at=app()
+    at.session_state['user']='ci-user'
+    at.session_state['ruolo']='Admin'
+    at.session_state['permessi']=['DIREZIONE']
+    at.run()
+    at.session_state['scarico_source']='AI'
+    at.session_state['scarico_ai_rows']=[{'label_id':'old-header','codice':''}]
+    at.session_state['scarico_ai_meta']={'pipeline_version':'old-unredacted-version'}
+    at.switch_page('pages/05_Scarico_Sala_AI.py').run()
+    assert not at.exception
+    assert any('filtro privacy' in w.value for w in at.warning)
+    assert not at.expander

@@ -8,11 +8,11 @@ from io import BytesIO
 from PIL import Image
 
 
-def _words(image):
+def _words(image, psm=11):
     if not shutil.which('tesseract'):
         return []
     buffer=BytesIO(); image.save(buffer,format='PNG')
-    result=subprocess.run(['tesseract','stdin','stdout','--psm','11','tsv'],input=buffer.getvalue(),capture_output=True,timeout=30)
+    result=subprocess.run(['tesseract','stdin','stdout','--psm',str(psm),'tsv'],input=buffer.getvalue(),capture_output=True,timeout=30)
     return [dict(text=r['text'],x=int(r['left']),y=int(r['top']),w=int(r['width']),h=int(r['height']))
             for r in csv.DictReader(result.stdout.decode(errors='replace').splitlines(),delimiter='\t',quoting=csv.QUOTE_NONE) if r.get('text','').strip()]
 

@@ -9,12 +9,12 @@ from datetime import date, datetime
 from pathlib import Path
 from functools import lru_cache
 from uuid import uuid4
+from privacy_runtime import refresh_ocr_modules
+refresh_ocr_modules()
 from ocr_review import build_review, aggregate_review, merge_confirmed_fields
 from ocr_service import analyze_documents
-from ocr_repository import OriginalDocument, SupabaseReviewRepository, without_images, load_catalog_codes
+from ocr_repository import OriginalDocument, SupabaseReviewRepository, without_images, load_gtin_catalog
 
-from ocr_runtime import current_label_pipeline
-current_label_pipeline()
 from label_pipeline import review_errors, inventory_errors, aggregate_labels, PIPELINE_VERSION, gs1_parse
 
 import pandas as pd
@@ -367,6 +367,8 @@ def run_ai(path, documents=None):
 
 
 def save_document_after_transaction(intervention_id, procedure_date, customer_code, customer_name, agent, clinical_record):
+    if st.session_state.get("scarico_source") == "AI":
+        return True
     documents = st.session_state.get("scarico_documents") or [{
         "path": st.session_state.get("scarico_file_path"),
         "name": st.session_state.get("scarico_file_name"),
@@ -488,6 +490,11 @@ rows = [{**r, "jnj_verificato_manualmente": i in restored_indices}
         for i, r in enumerate(source_rows) if i not in excluded_indices or i in restored_indices]
 is_physical_ai = st.session_state.get("scarico_source") == "AI"
 if is_physical_ai:
+    if (source_rows or meta.get("unconfirmed_regions") or meta.get("annotated_pages")) and meta.get("pipeline_version") != PIPELINE_VERSION:
+        for key in ("scarico_ai_rows","scarico_ai_original_rows","scarico_ai_meta"):
+            st.session_state.pop(key,None)
+        st.warning("Rianalizza i documenti: le anteprime della precedente versione sono state rimosse per applicare il filtro privacy.")
+        st.stop()
     # Every detected observation remains reviewable, including other manufacturers.
     rows = [{**r, "jnj_verificato_manualmente": i in restored_indices,
              "escludi_riga": is_other_manufacturer(r.get("produttore")) and i not in restored_indices}
@@ -498,12 +505,21 @@ if is_physical_ai:
         st.warning(detection_warning)
     unconfirmed_regions = meta.get("unconfirmed_regions", []) or []
     if unconfirmed_regions:
-        with st.expander("Zone proposte dall’AI da controllare sul documento originale"):
+        with st.expander("Regioni scartate", expanded=False):
             st.caption("Queste zone non hanno un riscontro indipendente come etichette di prodotto e non aumentano la quantità. Se una zona contiene davvero un materiale, aggiungilo dal modulo qui sotto.")
-            for region in unconfirmed_regions:
+            for discarded_index, region in enumerate(unconfirmed_regions):
                 if region.get("crop_data_url"):
                     st.image(region["crop_data_url"], caption=f"Pagina {region.get('page', '')}")
-    with st.expander("Foto originali con le etichette individuate"):
+                if st.button("Recupera questa etichetta", key=f"recover_region_{discarded_index}_{st.session_state.get('scarico_editor_revision',0)}"):
+                    from uuid import uuid4
+                    recovered=dict(region,label_id=f"manual:{uuid4().hex}",codice="",lotto="",scadenza="",
+                        quantita=1,verificata=False,manual_entry=True,warning="Regione recuperata manualmente: compilare e verificare tutti i campi.")
+                    st.session_state["scarico_ai_rows"]=list(source_rows)+[recovered]
+                    meta["unconfirmed_regions"]=[r for i,r in enumerate(unconfirmed_regions) if i!=discarded_index]
+                    st.session_state["scarico_ai_meta"]=meta
+                    st.session_state["scarico_editor_revision"]=int(st.session_state.get("scarico_editor_revision",0))+1
+                    st.rerun()
+    with st.expander("Etichette individuate — intestazione oscurata"):
         for page in meta.get("annotated_pages", []) or []:
             if page.get("page_data_url"):
                 st.image(page["page_data_url"], caption=f"Pagina {page.get('page')}")
@@ -514,11 +530,18 @@ if is_physical_ai:
     catalog = None
     if source_rows:
         try:
-            catalog = load_catalog_codes(sb())
-            st.caption("Confronto REF con l’anagrafica scanner disponibile: può contenere solo parte del catalogo. I codici assenti vanno verificati, mai sostituiti automaticamente.")
+            catalog = load_gtin_catalog(sb())
+            st.caption("Confronto GTIN → REF con articoli_gtin. GTIN assenti o non censiti restano da verificare; nessun REF viene sostituito automaticamente.")
         except Exception:
-            st.caption("Anagrafica scanner non disponibile: confronto catalogo non eseguito.")
-    assessed_rows = build_review({"items":source_rows}, catalog=catalog)["items"]
+            st.caption("articoli_gtin non disponibile: confronto GTIN → REF non eseguito, verifica manuale richiesta.")
+    review = build_review({"items":source_rows}, catalog=catalog)
+    assessed_rows = review["items"]
+    st.session_state["scarico_missing_gtins"]=review["missing_gtins"]
+    if review["missing_gtins"]:
+        with st.expander("Registro GTIN mancanti o non censiti", expanded=False):
+            st.dataframe(pd.DataFrame(review["missing_gtins"]),hide_index=True)
+            st.download_button("Esporta registro GTIN",pd.DataFrame(review["missing_gtins"]).to_csv(index=False).encode("utf-8"),file_name="gtin_da_verificare.csv",mime="text/csv")
+            st.caption("Registro della sessione: nessun documento o dato del paziente viene archiviato.")
     for r in assessed_rows:
         with st.expander(f"{'⚠️ Da verificare' if r.get('assessment',{}).get('needs_review') else 'Da confermare'} · {r.get('label_id')} · {clean(r.get('codice'))} · {clean(r.get('lotto'))}"):
             left, right = st.columns([2, 3])
@@ -585,8 +608,8 @@ if is_physical_ai:
                         raise ValueError("La pagina indicata non esiste nel documento.")
                     updated.update(label_id=f"manual:{uuid4().hex}", source_document=sha256(Path(document["path"]).read_bytes()).hexdigest(),
                         page=int(manual_page), bbox=[0,0,1000,1000], rotation=0,
-                        crop_data_url=image_url(pages[int(manual_page)-1]), quantita=1,
-                        warning="Etichetta aggiunta manualmente: prova sulla pagina originale.", manual_entry=True)
+                        crop_data_url=None, quantita=1,
+                        warning="Etichetta aggiunta manualmente: confronto locale con il documento originale, anteprima disattivata per privacy.", manual_entry=True)
                 updated.update(codice=manual_code.strip(), lotto=manual_lot.strip(), gtin=manual_gtin.strip() or None, scadenza=manual_expiry.strip(),
                     descrizione=manual_description.strip(), senza_lotto=manual_lotless, verificata=True,
                     manual_fields=["code","lot","expiry","description","gtin"])
@@ -714,7 +737,7 @@ with st.form("scarico_ai_confirm"):
     count_verified = st.checkbox("Ho confrontato tutti i ritagli con il documento originale e verificato il conteggio fisico.", value=False, key=f"physical_verified_{st.session_state.get('scarico_editor_revision', 0)}") if is_physical_ai else True
     header_verified = st.checkbox("Ho verificato struttura, data e dati intervento sul documento originale.", value=False, key=f"physical_header_verified_{st.session_state.get('scarico_editor_revision', 0)}") if is_physical_ai else True
     verified = st.checkbox("Ho verificato codice Johnson/REF, lotto, scadenza e quantità di tutte le righe.")
-    archive_enabled = str(secret("OCR_REVIEW_ARCHIVE_ENABLED", "false")).lower() in {"true","1","yes"}
+    archive_enabled = False  # OCR archive remains disabled, including legacy configuration.
     archive_review = st.form_submit_button("Conferma e archivia revisione OCR (senza scarico)", disabled=(not is_physical_ai or not archive_enabled or len(rows)==0))
     confirm = st.form_submit_button("📤 Crea intervento e scarica materiali", type="primary", use_container_width=True, disabled=(len(rows) == 0))
 

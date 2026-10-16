@@ -87,7 +87,7 @@ def assess_label(item, *, catalog=None, today=None, soon_days=90):
         if name=='code' and value:
             if not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9. /-]*',value) or re.fullmatch(r'\d{14}',value):
                 status, score = 'invalid', 0.0
-            if catalog is not None and exact_code(value) not in {exact_code(c) for c in catalog}:
+            if catalog is not None and not isinstance(catalog,dict) and exact_code(value) not in {exact_code(c) for c in catalog}:
                 issues.append('REF non presente nel catalogo: ' + value)
                 status = 'unknown_catalogue'
         if name=='gtin' and value:
@@ -99,6 +99,19 @@ def assess_label(item, *, catalog=None, today=None, soon_days=90):
             issues.append(name + ': ' + status)
         fields[name] = {'value':value,'method':method,'status':status,'score':score,
                         'precision':precision,'observations':observations}
+    if isinstance(catalog,dict):
+        gtin=fields['gtin']['value']
+        ref=catalog.get(gtin) if gtin else None
+        if not gtin:
+            issues.append('GTIN assente: confronto GTIN → REF non eseguibile')
+        elif ref is None:
+            issues.append('GTIN non presente in articoli_gtin: ' + gtin)
+            fields['gtin']['status']='unknown_catalogue'
+        elif fields['code']['value'] and exact_code(ref)!=exact_code(fields['code']['value']):
+            issues.append('REF discordante da articoli_gtin: verificare, nessuna sostituzione automatica')
+            fields['code']['status']='conflict'
+        elif fields['code']['value']:
+            fields['code']['catalogue_ref']=ref
     expiry = fields['expiry']['value']
     expiry_status = 'unknown'
     if expiry and fields['expiry']['status']!='invalid':
@@ -129,7 +142,10 @@ def build_review(extraction, *, catalog=None, today=None, soon_days=90):
         labels.append({**item, 'assessment':assess_label(item,catalog=catalog,today=today,soon_days=soon_days)})
     return {**extraction, 'items':labels,'review_required':True,
             'physical_label_count':len(labels),'soon_days':soon_days,
-            'catalogue_checked':catalog is not None}
+            'catalogue_checked':catalog is not None,
+            'missing_gtins':[{'label_id':r.get('label_id'),'gtin':r.get('gtin'),
+                'reason':'assente' if not r.get('gtin') else 'non_in_catalogo'}
+                for r in labels if not r.get('gtin') or (isinstance(catalog,dict) and r.get('gtin') not in catalog)]}
 
 
 def aggregate_review(rows):
