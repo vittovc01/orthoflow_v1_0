@@ -226,3 +226,70 @@ def test_failed_photo_analysis_can_be_retried_with_same_image():
     result=analyze_documents([original(),original()],analyzer=analyzer)
     assert len(calls)==2
     assert [d['status'] for d in result['documents']]==['failed','analyzed']
+
+
+def product_archive_arguments():
+    from label_pipeline import PIPELINE_VERSION
+    import base64
+    args = arguments()
+    args.pop('documents')
+    source = dict(row(), crop_data_url='data:image/png;base64,' + base64.b64encode(original().content).decode())
+    args.update(original_rows=[source], correction_log=[], extraction={
+        'pipeline_version':PIPELINE_VERSION,'items':[source],
+        'patient_name':'PRIVATE_HEADER_SENTINEL','clinical_record':'PRIVATE_HEADER_SENTINEL',
+        'documents':[{'name':'PRIVATE_HEADER_SENTINEL.pdf','path':'/never/read/source.pdf'}],
+        'unconfirmed_regions':[{'crop_data_url':'PRIVATE_HEADER_SENTINEL'}]})
+    return args
+
+
+def test_product_archive_never_sends_header_source_names_or_discarded_regions():
+    import json
+    client=FakeClient(); args=product_archive_arguments()
+    saved=SupabaseReviewRepository(client).save_product_review(**args)
+    assert 'PRIVATE_HEADER_SENTINEL' not in json.dumps(saved)
+    assert 'never/read' not in json.dumps(saved)
+    assert saved['extracted']['archive_scope']=='product_labels_only'
+    assert len(client.objects)==1
+    assert saved['documents'][0]['name']=='etichetta-1.png'
+    assert saved['extracted']['items'][0]['lot']=='LOT'
+    assert SupabaseReviewRepository(client).save_product_review(**args)==saved
+    assert client.writes==2
+
+
+def test_product_archive_manual_add_delete_edit_and_quantity_preserve_audit():
+    from review_editor import apply_review_edits
+    client=FakeClient(); args=product_archive_arguments()
+    source=args['original_rows'][0]
+    second=dict(row('deleted'),crop_data_url=source['crop_data_url'])
+    args['original_rows'].append(second)
+    confirmed,logs=apply_review_edits([source,second],[dict(source,lotto='CORRECTED',quantita=2),
+        dict(codice='413.016S',lotto='MANUAL',scadenza='2035-01-01',quantita=1)],actor='operator')
+    args.update(confirmed=[dict(r,verificata=True) for r in confirmed],correction_log=logs,physical_count=7)
+    saved=SupabaseReviewRepository(client).save_product_review(**args)
+    assert len(saved['confirmed'])==2
+    assert sum(r['quantity'] for r in saved['aggregate_rows'])==3
+    assert saved['physical_count']==7  # disagreement is advisory
+    assert saved['extracted']['original_items'][0]['lot']=='LOT'
+    assert {r['operation'] for r in saved['extracted']['correction_log']}=={'add','update','delete'}
+    assert saved['confirmed'][0]['confirmed_methods']['lot']=='manual'
+
+
+def test_manual_only_archive_requires_confirmation_but_no_source_photo():
+    client=FakeClient();args=product_archive_arguments()
+    args['original_rows']=[]
+    args['confirmed']=[dict(row('manual:one'),manual_entry=True)]
+    args['explicitly_confirmed']=False
+    with pytest.raises(ValueError,match='esplicita'):
+        SupabaseReviewRepository(client).save_product_review(**args)
+    assert client.writes==0
+    args['explicitly_confirmed']=True
+    saved=SupabaseReviewRepository(client).save_product_review(**args)
+    assert saved['documents']==[] and client.objects=={}
+
+
+def test_stale_product_extraction_cannot_be_archived():
+    client=FakeClient();args=product_archive_arguments()
+    args['extraction']['pipeline_version']='old'
+    with pytest.raises(ValueError,match='privacy'):
+        SupabaseReviewRepository(client).save_product_review(**args)
+    assert client.writes==0

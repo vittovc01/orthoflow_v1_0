@@ -8,13 +8,13 @@ CREATE TABLE IF NOT EXISTS public.ocr_review_sessions (
  confirmed_at timestamptz NOT NULL,
  pipeline_version text NOT NULL,
  payload_sha256 text NOT NULL CHECK (payload_sha256 ~ '^[0-9a-f]{64}$'),
- documents jsonb NOT NULL CHECK (jsonb_typeof(documents)='array' AND jsonb_array_length(documents) BETWEEN 1 AND 20),
+ documents jsonb NOT NULL CHECK (jsonb_typeof(documents)='array' AND jsonb_array_length(documents) BETWEEN 0 AND 200),
  extracted jsonb NOT NULL CHECK (jsonb_typeof(extracted)='object'),
  confirmed jsonb NOT NULL CHECK (jsonb_typeof(confirmed)='array'),
  aggregate_rows jsonb NOT NULL CHECK (jsonb_typeof(aggregate_rows)='array'),
- physical_count integer NOT NULL CHECK (physical_count>0),
+ physical_count integer NOT NULL CHECK (physical_count>=0),
  count_verified boolean NOT NULL CHECK (count_verified),
- CHECK (jsonb_array_length(confirmed)=physical_count)
+ CHECK (jsonb_array_length(confirmed)>0)
 );
 CREATE INDEX IF NOT EXISTS ocr_review_actor_created_idx ON public.ocr_review_sessions(actor,created_at DESC);
 ALTER TABLE public.ocr_review_sessions ENABLE ROW LEVEL SECURITY;

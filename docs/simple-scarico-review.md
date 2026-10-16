@@ -22,9 +22,9 @@ Prima del salvataggio il registro vive nella sessione ed è consultabile nella p
 
 La pagina invia `review_contract_version=2` alla RPC verificata. Per questo contratto la quantità positiva può essere diversa dal numero di identificativi di etichetta. La RPC controlla invece che identità, quantità, REF, lotto e scadenza corrispondano al manifesto della revisione; rifiuta valori alterati e mantiene il controllo delle identità duplicate. Il contratto precedente rimane compatibile. Prezzi/giacenze discordanti continuano a generare anomalie senza sostituire lotti o scalare stock non corrispondenti.
 
-**Non pubblicare la sola interfaccia sul vecchio SQL.** Applicare prima la definizione aggiornata in `sql/verified_physical_label_discharge.sql` su un database staging separato, poi provarvi la pagina e il salvataggio con quantità modificate. La produzione non è stata modificata. La PR resta in bozza, senza merge o deployment.
+**Non pubblicare la sola interfaccia sul vecchio SQL.** Applicare prima la definizione aggiornata in `sql/verified_physical_label_discharge.sql` su un database staging separato, poi provarvi la pagina e il salvataggio con quantità modificate. La PR #41 è stata pubblicata con autorizzazione esplicita. L’attivazione successiva dell’archivio richiede anche `sql/ocr_review_archive.sql`.
 
-`archive_enabled=False` resta forzato nella pagina. `OCR_REVIEW_ARCHIVE_ENABLED` non viene attivato; nessun originale viene archiviato. Un'eventuale riattivazione futura dell'archivio richiede il suo collaudo separato, compresa l'identità dopo aggiunte/cancellazioni.
+Archivio attivo per impostazione predefinita, disattivabile con `OCR_REVIEW_ARCHIVE_ENABLED=false`. Conserva campi prodotto, estrazione originale delle etichette, correzioni e soli ritagli prodotti dal filtro privacy. Non legge né salva fogli completi, nomi dei file, intestazioni o regioni scartate. Aggiunte ed eliminazioni restano nel log; il conteggio discordante resta un avviso. Il pulsante senza scarico salva la revisione senza movimenti; la conferma dello scarico archivia prima della transazione e si ferma se l'archivio non è verificabile.
 
 ## Verifiche riproducibili
 

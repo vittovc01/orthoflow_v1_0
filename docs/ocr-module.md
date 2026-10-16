@@ -167,3 +167,19 @@ manual correction, retry e timeout dopo commit. I mock validano orchestration/co
 non l’accuratezza del modello. Per il collaudo finale serve il modello live configurato
 nel server e confronto di ogni REF/lotto/scadenza su foto/PDF rappresentativi; una CI verde
 non sostituisce questa prova. La migrazione nuova non è applicata alla produzione da questo lavoro.
+
+
+## Attivazione archivio prodotto (16 ottobre 2026)
+
+La pagina usa ora `save_product_review`: nessun documento completo viene letto o
+caricato nell'archivio. Si conservano solo ritagli delle etichette già passati dal
+filtro privacy, ricodificati senza metadati, e campi prodotto selezionati. Intestazioni,
+nomi file, metadati clinici e regioni scartate non entrano nel payload. Il bucket
+resta privato e la tabella immutabile, accessibile solo al servizio server.
+Questa modalità sostituisce le indicazioni sugli originali completi riportate sopra.
+
+`OCR_REVIEW_ARCHIVE_ENABLED` è ora true per default; false consente il rollback.
+La migrazione consente revisioni solo manuali senza immagini e conteggi discordanti.
+Sono registrati valori estratti, valori confermati e log di aggiunte/modifiche/eliminazioni
+con utente, timestamp e metodo. Il retry della stessa revisione non duplica i dati.
+L'archiviazione non esegue scarichi e non salva automaticamente quanto non confermato.
