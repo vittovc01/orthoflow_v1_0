@@ -89,6 +89,13 @@ def safe_product_regions(page, anchors=()):
     """Return safe accepted and recoverable regions; private candidates disappear."""
     from label_pipeline import crop_region,decode_barcodes,overlap
     words=local_words(page); blocked=private_bands(words)
+    text=' '.join(w['text'] for w in words)
+    # A dedicated landscape photograph of one branded product label needs no
+    # template offset, which can cut the REF off very small source images.
+    if not blocked and 2<page.width/page.height<5 and BRAND.search(text):
+        if PRODUCT.search(text) or any(not b.get('error') and b.get('gtin') for b in decode_barcodes(page)):
+            return [{'bbox':[0,0,1000,1000],'rotation':0,
+                     'geometry_source':'local_single_product','local_product_signal':True}],[]
     ordered=sorted(anchors,key=lambda r:0 if r.get('geometry_source')=='local_linear_barcodes' else 1)
     if sum(r.get('geometry_source')=='local_linear_barcodes' for r in ordered)>=3:
         ordered=[r for r in ordered if r.get('geometry_source')=='local_linear_barcodes']

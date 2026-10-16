@@ -88,3 +88,12 @@ def test_missing_local_privacy_dependency_fails_before_any_service_call(tmp_path
     with pytest.raises(RuntimeError,match='nessun invio esterno'):
         label_pipeline.analyze_labels(path,SimpleNamespace(responses=SimpleNamespace(create=forbidden)),
             'test',{'properties':{}},lambda x:x)
+
+
+def test_single_label_photographs_keep_the_complete_ref_end():
+    from label_geometry import locate_datamatrix_labels
+    for n in (1,2,4):
+        page=Image.open(Path(__file__).parent/'fixtures'/'santa_lucia'/f'{n:02}.png')
+        accepted,rejected=safe_product_regions(page,locate_datamatrix_labels(page))
+        assert len(accepted)==1 and not rejected
+        assert accepted[0]['bbox']==[0,0,1000,1000]
