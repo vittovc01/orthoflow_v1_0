@@ -18,6 +18,10 @@ misurata sul DataMatrix raddrizza il prodotto prima delle letture indipendenti.
 L'OCR letterale locale interpreta i TSV senza trattare le virgolette come delimitatori:
 un carattere riconosciuto come virgolette non può assorbire righe successive.
 
+Un controllo indipendente confronta inoltre le posizioni dei DataMatrix decodificati
+con i ritagli: eventuali prodotti fuori dai ritagli generano un avviso di lettura
+incompleta. Due simboli con lo stesso GTIN restano due posizioni fisiche.
+
 I campi restano letterali: nessuna sostituzione 5/S, nessuna aggiunta di suffissi o
 ricostruzione dal nome del prodotto. Lotti e scadenze vengono confrontati col GS1.
 Le discordanze restano esplicite e richiedono verifica. GTIN tecnico e assenza dal

@@ -62,3 +62,10 @@ def test_literal_ocr_tsv_quotes_cannot_swallow_subsequent_ref_rows(monkeypatch):
     result=local_ref_evidence(Image.new('RGB',(300,100),'white'))
     assert result['candidates']==['413.016S']
     assert all('\t' not in read for read in result['reads'])
+
+
+def test_coverage_audit_does_not_hide_two_pieces_with_same_identity():
+    from product_anchors import uncovered_symbols
+    symbols=[{'center':[200,300],'gtin':'same'},{'center':[600,300],'gtin':'same'}]
+    assert uncovered_symbols(symbols,[{'bbox':[100,200,400,400]}])==[symbols[1]]
+    assert uncovered_symbols(symbols,[{'bbox':[100,200,400,400]},{'bbox':[500,200,800,400]}])==[]

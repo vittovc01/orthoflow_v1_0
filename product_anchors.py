@@ -102,3 +102,9 @@ def align_product_crop(crop):
     if abs(angle)<1:return crop,0
     from PIL import Image
     return crop.rotate(angle,resample=Image.Resampling.BICUBIC,expand=True,fillcolor='white'),angle
+
+
+def uncovered_symbols(symbols, regions):
+    """Count physical positions, never distinct GTIN/REF identities."""
+    return [s for s in symbols if not any(r['bbox'][0]<=s['center'][0]<=r['bbox'][2]
+            and r['bbox'][1]<=s['center'][1]<=r['bbox'][3] for r in regions)]

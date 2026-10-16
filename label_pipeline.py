@@ -404,6 +404,10 @@ def analyze_labels(path, client, model, item_schema, parse):
         except (OSError, subprocess.SubprocessError):
             pass
         safe_regions, safe_rejected = safe_product_regions(page, local_regions)
+        from product_anchors import decoded_symbols,uncovered_symbols
+        missing=uncovered_symbols(decoded_symbols(page),safe_regions)
+        if missing:
+            warnings.append(f'Pagina {number}: {len(missing)} segnali di etichette fuori dai ritagli; lettura incompleta, confrontare tutto il documento originale')
         # Mask before *any* external call, overview, or discarded-region preview.
         page = product_canvas(page, safe_regions)
         preview = page.copy()
