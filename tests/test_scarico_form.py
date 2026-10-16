@@ -45,6 +45,8 @@ class ST:
  def __getattr__(self,name):return lambda *a,**kw:None
 rows=[{'codice':'1504-00-126','lotto':'A','quantita':1,'produttore':'Synthes'},{'codice':'FOREIGN','lotto':'B','quantita':1,'produttore':'Stryker'}]; base=copy.deepcopy(rows)
 ns.update({'pd':pd,'st':ST(rows),'date':date,'client_options':lambda:[{'codice_cliente':'9010013','descrizione':'MALZONI','label':'MALZONI'}],'warehouse_labels':lambda:['MAG1 - MAG1'],'agent_options':lambda:['AGENT'],'secret':lambda name,default=None:default})
+# This isolated AST fragment omits the page imports and native-method binding.
+ns['form_submit_button']=ns['st'].form_submit_button
 start=next(i for i,n in enumerate(tree.body) if isinstance(n,ast.Assign) and any(isinstance(t,ast.Name) and t.id=='meta' for t in n.targets))
 end=next(i for i,n in enumerate(tree.body) if isinstance(n,ast.If) and isinstance(n.test,ast.BoolOp) and any(isinstance(v,ast.Name) and v.id=='confirm' for v in n.test.values))
 for _ in range(2):
