@@ -7,8 +7,9 @@ CREATE OR REPLACE FUNCTION public.crea_intervento_scarico_ai_verificato(p_header
  SECURITY INVOKER
  SET search_path TO 'public'
 AS $function$
-declare v_id bigint; r jsonb; v_q numeric; v_av numeric; v_gid bigint; v_total numeric:=0; v_count int:=0; v_anomalies int:=0; v_reason text; v_structure boolean; v_no_lot boolean; v_remaining numeric; v_take numeric; g record;
+declare v_id bigint; r jsonb; v_q numeric; v_av numeric; v_gid bigint; v_total numeric:=0; v_count int:=0; v_anomalies int:=0; v_reason text; v_structure boolean; v_no_lot boolean; v_remaining numeric; v_take numeric; g record; v_simple boolean; v_label text;
 begin
+ v_simple:=coalesce(p_header->>'review_contract_version','1')='2';
  if not coalesce((p_header->>'count_verified')::boolean,false)
     or jsonb_typeof(p_rows) is distinct from 'array' or jsonb_array_length(p_rows)=0
     or coalesce((p_header->>'physical_label_count')::int,0)<=0 then
@@ -18,20 +19,52 @@ begin
    raise exception 'IDENTITA_FISICHE_MANCANTI';
  end if;
  for r in select * from jsonb_array_elements(p_rows) loop
+   v_label:=coalesce(nullif(trim(r->>'codice'),''),'REF mancante') || ', lotto ' || coalesce(nullif(trim(r->>'lotto'),''),'mancante');
+   if coalesce(r->>'quantita','') !~ '^[0-9]+(\.[0-9]+)?$' then
+     raise exception '%: quantità non valida o conferma mancante (ETICHETTA_QUANTITA_NON_VERIFICATA)',v_label;
+   end if;
    if not coalesce((r->>'verificata')::boolean,false)
       or jsonb_typeof(r->'label_ids') is distinct from 'array'
       or jsonb_array_length(r->'label_ids')=0
-      or (r->>'quantita')::numeric <> jsonb_array_length(r->'label_ids') then
-     raise exception 'ETICHETTA_QUANTITA_NON_VERIFICATA';
+      or nullif(r->>'quantita','')::numeric is null
+      or (r->>'quantita')::numeric::text in ('NaN','Infinity','-Infinity')
+      or (r->>'quantita')::numeric<=0
+      or trunc((r->>'quantita')::numeric)<>(r->>'quantita')::numeric
+      or (not v_simple and (r->>'quantita')::numeric <> jsonb_array_length(r->'label_ids')) then
+     raise exception '%: quantità non valida o conferma mancante (ETICHETTA_QUANTITA_NON_VERIFICATA)',v_label;
+   end if;
+   if v_simple then
+     -- Quantity is editable; keep its server-side trace tied to real review rows.
+     if jsonb_typeof(p_header->'label_manifest') is distinct from 'array' then
+       raise exception '%: revisione delle righe mancante',v_label;
+     end if;
+     if (select count(distinct m->>'label_id') from jsonb_array_elements(p_header->'label_manifest') m
+          where m->>'label_id' in (select jsonb_array_elements_text(r->'label_ids')))
+           <>jsonb_array_length(r->'label_ids')
+        or (select sum((m->>'quantita')::numeric) from jsonb_array_elements(p_header->'label_manifest') m
+          where m->>'label_id' in (select jsonb_array_elements_text(r->'label_ids')))
+           is distinct from (r->>'quantita')::numeric
+        or exists(select 1 from jsonb_array_elements(p_header->'label_manifest') m
+          where m->>'label_id' in (select jsonb_array_elements_text(r->'label_ids'))
+          and (m->>'codice' is distinct from r->>'codice' or m->>'lotto' is distinct from r->>'lotto'
+            or m->>'scadenza' is distinct from r->>'scadenza'
+            or coalesce((m->>'esclusa')::boolean,false)
+            or coalesce((m->>'quantita')::numeric,0)<=0
+            or trunc((m->>'quantita')::numeric)<>(m->>'quantita')::numeric)) then
+       raise exception '%: quantità o dati diversi dalla revisione confermata',v_label;
+     end if;
+     if coalesce(trim(r->>'lotto'),'')='' then raise exception '%: lotto mancante',v_label; end if;
+     if nullif(r->>'scadenza','') is null then raise exception '%: scadenza mancante',v_label; end if;
+     if coalesce(trim(p_utente),'')='' then raise exception 'Utente della revisione mancante'; end if;
    end if;
    if coalesce(trim(r->>'codice'),'')='' or r->>'codice' ~ '^[0-9]{14}$'
       or r->>'codice' !~ '^[A-Za-z0-9][A-Za-z0-9. /-]*$' then
-     raise exception 'REF_NON_VALIDO';
+     raise exception '%: REF non valido (REF_NON_VALIDO)',v_label;
    end if;
    if exists(select 1 from jsonb_array_elements_text(r->'label_ids') as labels(label_id) where label_id is null or trim(label_id)='') then
      raise exception 'IDENTITA_FISICA_VUOTA';
    end if;
-   if coalesce((r->>'is_sterile')::boolean,false)
+   if not v_simple and coalesce((r->>'is_sterile')::boolean,false)
       and r->>'codice' ~ '^([0-9]{2}\.[0-9]{3}\.[0-9]{3}|[0-9]{3}\.[0-9]{3})5?$' then
      raise exception 'REF_STERILE_SENZA_SUFFISSO_VERIFICATO';
    end if;
@@ -123,7 +156,10 @@ begin
  insert into audit_log(utente,azione,tabella,riferimento,dettagli)
  values(p_utente,'SCARICO_ETICHETTE_VERIFICATE','interventi',v_id::text,
    jsonb_build_object('physical_label_count',p_header->'physical_label_count',
-     'label_manifest',p_header->'label_manifest','rows',p_rows)::text);
+     'label_manifest',p_header->'label_manifest','rows',p_rows,
+     'reported_label_count',p_header->'reported_label_count',
+     'count_difference',p_header->'count_difference',
+     'correction_log',coalesce(p_header->'correction_log','[]'::jsonb))::text);
  return jsonb_build_object('intervento_id',v_id,'righe',v_count,'totale',v_total,'anomalie',v_anomalies);
 end $function$
 ;

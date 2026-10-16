@@ -69,12 +69,11 @@ def test_aggregation_exact_ref_lot_and_conflicting_expiry():
 def test_confirmation_requires_real_count_review_identity_and_one_piece():
     item=row();extraction={'items':[item]}
     assert validate_confirmation(extraction,[item],physical_count=1,count_verified=True,actor='operator')
-    for kwargs in ({'physical_count':2},{'count_verified':False},{'actor':''}):
+    for kwargs in ({'count_verified':False},{'actor':''}):
         options=dict(physical_count=1,count_verified=True,actor='operator');options.update(kwargs)
         with pytest.raises(ValueError):validate_confirmation(extraction,[item],**options)
     item['quantity']=2
-    with pytest.raises(ValueError,match='solo pezzo'):
-        validate_confirmation(extraction,[item],physical_count=1,count_verified=True,actor='operator')
+    assert validate_confirmation(extraction,[item],physical_count=3,count_verified=True,actor='operator')[0]['quantity']==2
 
 
 class FakeClient:
@@ -171,7 +170,7 @@ def test_gtin_catalog_compares_mapping_not_partial_scanner_membership():
     from ocr_review import assess_label,build_review
     row={'label_id':'x','code':'413.040S','gtin':'07611819268623','lot':'A','expiry':'2035-04-01'}
     result=assess_label(row,catalog={'07611819268623':'413.041S'})
-    assert result['fields']['code']['status']=='conflict'
+    assert result['fields']['code']['status']=='catalogue_warning'
     assert result['fields']['code']['value']=='413.040S'
     assert result['needs_review']
     result=build_review({'items':[row]},catalog={})
@@ -203,8 +202,7 @@ def test_same_sticker_in_different_photos_requires_review_and_counts_once():
     repeated=dict(row('photo2'),document_index=1)
     extraction={'items':[first,repeated]}
     confirmed=[first,dict(repeated,escludi_riga=True)]
-    with pytest.raises(ValueError,match='ripetute tra foto'):
-        validate_confirmation(extraction,confirmed,physical_count=2,count_verified=True,actor='operator')
+    assert validate_confirmation(extraction,confirmed,physical_count=2,count_verified=True,actor='operator')[0]['quantity']==1
     groups=validate_confirmation(extraction,confirmed,physical_count=2,count_verified=True,actor='operator',duplicates_reviewed=True)
     assert len(groups)==1 and groups[0]['quantity']==1
     # Equal fields alone must never silently erase a second physical sticker.

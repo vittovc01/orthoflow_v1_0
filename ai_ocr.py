@@ -175,9 +175,10 @@ def _ddt_text_fallback(path, result):
     return result
 
 def normalize_ai_items(result):
+    from review_editor import technical_gtin, text_value
     out=[]
     for it in result.get("items",[]):
-        code=(it.get("code") or "").strip(); manufacturer=(it.get("manufacturer") or "").strip()
+        code=text_value(it.get("code")); manufacturer=text_value(it.get("manufacturer"))
         raw_expiry=it.get("expiry") or ""
         expiry=_normalize_expiry(raw_expiry)
         warning=it.get("warning") or ""
@@ -185,5 +186,6 @@ def normalize_ai_items(result):
             warning=(warning+" · " if warning else "")+"Scadenza stampata solo mese/anno: fine mese tecnica, verificare la precisione originale"
         if raw_expiry and not expiry:
             warning=(warning+" · " if warning else "")+f"Scadenza da verificare: {raw_expiry}"
-        out.append({"codice":code,"descrizione":it.get("description") or "","lotto":(it.get("lot") or "").strip(),"scadenza":expiry,"scadenza_originale":raw_expiry,"quantita":it.get("quantity") if it.get("quantity") is not None else 1,"produttore":manufacturer,"is_jnj":bool(it.get("is_jnj_depuy_synthes",False)),"is_sterile":bool(it.get("is_sterile",code.upper().endswith("S"))),"confidence":float(it.get("confidence") or 0),"warning":warning,"source_text":it.get("source_text") or "", **{k:it.get(k) for k in ("label_id","page","bbox","rotation","crop_data_url","source_document","gtin","barcodes","ocr_reads","ref_original","local_ref_evidence","assessment","geometry_source","deskew_angle","document_index","lot_ocr_original","expiry_ocr_original","gtin_ocr_original")}, "verificata":False})
+        out.append({"codice":code,"descrizione":it.get("description") or "","lotto":text_value(it.get("lot")),"scadenza":expiry,"scadenza_originale":raw_expiry,"quantita":it.get("quantity") if it.get("quantity") is not None else 1,"produttore":manufacturer,"is_jnj":bool(it.get("is_jnj_depuy_synthes",False)),"is_sterile":bool(it.get("is_sterile",code.upper().endswith("S"))),"confidence":float(it.get("confidence") or 0),"warning":warning,"source_text":it.get("source_text") or "", **{k:it.get(k) for k in ("label_id","page","bbox","rotation","crop_data_url","source_document","gtin","barcodes","ocr_reads","ref_original","local_ref_evidence","assessment","geometry_source","deskew_angle","document_index","lot_ocr_original","expiry_ocr_original","gtin_ocr_original","ref_source","ref_ocr_original")}, "verificata":False})
+    for row in out: row["gtin"]=technical_gtin(row.get("gtin"))
     return out
