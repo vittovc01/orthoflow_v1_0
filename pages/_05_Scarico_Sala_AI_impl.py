@@ -12,6 +12,8 @@ from uuid import uuid4
 from privacy_runtime import refresh_ocr_modules
 refresh_ocr_modules()
 from ocr_review import build_review, aggregate_review, merge_confirmed_fields
+from review_editor import (apply_review_edits, row_errors, row_name, expected_label_count as initial_label_count,
+                           count_warning, catalogue_warning, canonical_values, text_value, quantity_value)
 from ocr_service import analyze_documents
 from ocr_repository import OriginalDocument, SupabaseReviewRepository, without_images, load_gtin_catalog
 
@@ -103,9 +105,7 @@ def generate_implant_document(intervention_id, header):
 
 
 def clean(v):
-    if v is None or (isinstance(v, float) and pd.isna(v)):
-        return ""
-    return str(v).strip()
+    return text_value(v)
 def role(): return str(st.session_state.get("ruolo", "")).strip()
 def user(): return str(st.session_state.get("user", "")).strip()
 def ncode(v): return re.sub(r"[^A-Z0-9]", "", clean(v).upper())
@@ -350,11 +350,15 @@ def run_ai(path, documents=None):
                                    "type": st.session_state.get("scarico_file_type", "")}]
         originals = [OriginalDocument(d.get("name") or Path(d["path"]).name, Path(d["path"]).read_bytes()) for d in documents]
         with st.spinner(f"Analisi AI di {len(documents)} file: codici, lotti e scadenze…"):
-            meta = analyze_documents(originals, analyzer=analyze_document)
+            try: extraction_catalog=load_gtin_catalog(sb())
+            except Exception: extraction_catalog=None
+            meta = analyze_documents(originals, analyzer=analyze_document,catalog=extraction_catalog)
             combined_rows = normalize_ai_items(meta)
         meta["physical_label_count"] = len(combined_rows)
         meta["items"] = combined_rows
         st.session_state.pop("scarico_audit_request", None)
+        st.session_state["scarico_correction_log"] = []
+        st.session_state.pop("scarico_discharge_request_id",None)
         st.session_state["scarico_ai_rows"] = combined_rows
         st.session_state["scarico_ai_original_rows"] = copy.deepcopy(combined_rows)
         st.session_state["scarico_documents"] = documents
@@ -420,6 +424,20 @@ if status.get("enabled"):
 else:
     st.warning("OCR AI non attivo: " + ", ".join(status.get("missing", [])))
 
+# A staging banner requires both a separate project and its database marker.
+if str(secret("ORTHOFLOW_ENVIRONMENT","production")).lower()=="staging":
+    from staging_identity import verify_staging
+    try:
+        marker_rows=sb().table("orthoflow_environment").select("environment").eq("singleton",True).execute().data or []
+        stage_ref=verify_staging(str(secret("SUPABASE_URL","")),str(secret("ORTHOFLOW_STAGING_PROJECT_REF","")),
+            marker_rows[0].get("environment") if marker_rows else None)
+        st.info(f"Ambiente STAGING verificato · progetto {stage_ref}. Usare solo magazzini e dati sintetici di collaudo.")
+    except Exception:
+        st.error("Staging non verificato: operazioni bloccate. Il progetto deve essere separato dalla produzione e marcato staging.")
+        st.stop()
+else:
+    st.warning("Ambiente PRODUZIONE: gli scarichi modificano i magazzini operativi. Non usare questa pagina per il collaudo con dati di prova.")
+
 camera_tab, upload_tab = st.tabs(["📷 Scatta foto con AI", "📄 Carica foto / PDF"])
 with camera_tab:
     st.subheader("Fotografa etichette e foglio di scarico")
@@ -471,7 +489,7 @@ with upload_tab:
             run_ai(documents[0]["path"], documents=documents)
 
 meta = st.session_state.get("scarico_ai_meta", {}) or {}
-source_rows = st.session_state.get("scarico_ai_rows", []) or []
+source_rows = [canonical_values(r) for r in (st.session_state.get("scarico_ai_rows", []) or [])]
 if meta and st.session_state.get("scarico_source") == "AI":
     st.caption(f"Versione usata per questi risultati: {meta.get('pipeline_version') or 'precedente'}")
     if meta.get("pipeline_version") != PIPELINE_VERSION:
@@ -503,7 +521,7 @@ if is_physical_ai:
         st.stop()
     # Every detected observation remains reviewable, including other manufacturers.
     rows = [{**r, "jnj_verificato_manualmente": i in restored_indices,
-             "escludi_riga": is_other_manufacturer(r.get("produttore")) and i not in restored_indices}
+             "escludi_riga": (is_other_manufacturer(r.get("produttore")) and i not in restored_indices) or (bool(r.get("escludi_riga")) and not is_other_manufacturer(r.get("produttore")))}
             for i, r in enumerate(source_rows)]
     excluded_rows = []
     st.subheader("Verifica delle etichette fisiche")
@@ -520,7 +538,12 @@ if is_physical_ai:
                     from uuid import uuid4
                     recovered=dict(region,label_id=f"manual:{uuid4().hex}",codice="",lotto="",scadenza="",
                         quantita=1,verificata=False,manual_entry=True,warning="Regione recuperata manualmente: compilare e verificare tutti i campi.")
-                    st.session_state["scarico_ai_rows"]=list(source_rows)+[recovered]
+                    recovered.pop("label_id",None)
+                    updated_rows,corrections=apply_review_edits(source_rows,list(source_rows)+[recovered],actor=user())
+                    for field in ("source_document","page","bbox","rotation","crop_data_url"):
+                        updated_rows[-1][field]=recovered.get(field)
+                    st.session_state["scarico_ai_rows"]=updated_rows
+                    st.session_state.setdefault("scarico_correction_log",[]).extend(corrections)
                     meta["unconfirmed_regions"]=[r for i,r in enumerate(unconfirmed_regions) if i!=discarded_index]
                     st.session_state["scarico_ai_meta"]=meta
                     st.session_state["scarico_editor_revision"]=int(st.session_state.get("scarico_editor_revision",0))+1
@@ -532,7 +555,7 @@ if is_physical_ai:
     cols = st.columns(3)
     cols[0].metric("Etichette individuate", len(source_rows))
     cols[1].metric("Articoli distinti (REF / lotto)", len({(r.get("codice"), r.get("lotto")) for r in source_rows if r.get("codice") and (r.get("lotto") or r.get("senza_lotto"))}))
-    cols[2].metric("Quantità proposta da scaricare", sum(1 for r in rows if not r.get("escludi_riga")))
+    cols[2].metric("Quantità proposta da scaricare", sum(quantity_value(r.get("quantita")) or 0 for r in rows if not r.get("escludi_riga")))
     catalog = None
     if source_rows:
         try:
@@ -543,35 +566,35 @@ if is_physical_ai:
     review = build_review({"items":source_rows}, catalog=catalog)
     assessed_rows = review["items"]
     st.session_state["scarico_missing_gtins"]=review["missing_gtins"]
-    if review["missing_gtins"]:
-        with st.expander("Registro GTIN mancanti o non censiti", expanded=False):
-            st.dataframe(pd.DataFrame(review["missing_gtins"]),hide_index=True)
-            st.download_button("Esporta registro GTIN",pd.DataFrame(review["missing_gtins"]).to_csv(index=False).encode("utf-8"),file_name="gtin_da_verificare.csv",mime="text/csv")
-            st.caption("Registro della sessione: nessun documento o dato del paziente viene archiviato.")
+    for item in source_rows:
+        notice=catalogue_warning(item,catalog)
+        if notice: st.caption("⚠️ "+notice)
+    with st.expander("Dettaglio tecnico del riconoscimento", expanded=False):
+        st.write({"GTIN non letti o non censiti":review["missing_gtins"]})
     for r in assessed_rows:
         with st.expander(f"{'⚠️ Da verificare' if r.get('assessment',{}).get('needs_review') else 'Da confermare'} · {r.get('label_id')} · {clean(r.get('codice'))} · {clean(r.get('lotto'))}"):
             left, right = st.columns([2, 3])
             if r.get("crop_data_url"):
                 left.image(r["crop_data_url"], use_container_width=True)
-            right.write({k:r.get(k) for k in ("codice", "lotto", "scadenza", "scadenza_originale", "descrizione", "produttore", "gtin")})
+            right.write({k:r.get(k) for k in ("codice", "lotto", "scadenza", "scadenza_originale", "descrizione", "produttore")})
             if r.get("local_ref_evidence"):
                 right.write({"REF letto inizialmente": r.get("ref_original"), "Controllo OCR locale": r["local_ref_evidence"]})
             if r.get("ocr_reads"):
-                right.write({"Letture indipendenti": r["ocr_reads"]})
+                right.write({"Letture indipendenti": [{k:v for k,v in read.items() if k in {"code","lot","expiry","quantity"}} for read in r["ocr_reads"]]})
             assessment = r.get("assessment", {})
             right.dataframe(pd.DataFrame([{"Campo":name,"Esito":f["status"],"Metodo":f["method"],
-                "Forza evidenza":f["score"]} for name,f in assessment.get("fields",{}).items()]),
+                "Forza evidenza":f["score"]} for name,f in assessment.get("fields",{}).items() if name in {"code","lot","expiry"}]),
                 hide_index=True, use_container_width=True)
             right.caption("Forza dell’evidenza: indicatore tecnico, non probabilità di correttezza. Tutti i campi richiedono revisione.")
-            for issue in assessment.get("issues",[]):
-                right.warning(issue)
+            for issue in row_errors(r):
+                right.error(issue)
             right.caption(f"Pagina {r.get('page')} · posizione {r.get('bbox')} · rotazione {r.get('rotation')}°")
             if r.get("warning"):
-                right.warning(r["warning"])
+                right.warning(row_name(r)+": "+re.sub(r"(?i)\bnan\b","non letto",clean(r["warning"])))
     try:
         preview_rows = aggregate_review(rows)
         if preview_rows:
-            st.caption("Anteprima aggregata: ogni etichetta fisica vale un pezzo; stesso REF e lotto sommano la quantità.")
+            st.caption("Anteprima aggregata: le quantità delle righe con lo stesso REF e lotto vengono sommate.")
             st.dataframe(pd.DataFrame(preview_rows)[["code","lot","expiry","description","quantity"]], hide_index=True, use_container_width=True)
     except ValueError as exc:
         st.info(f"Anteprima aggregata disponibile dopo la verifica dei campi: {exc}")
@@ -580,57 +603,32 @@ if is_physical_ai:
     st.subheader("Aggiungi o correggi un materiale")
     choices = list(range(len(source_rows))) + [-1]
     target = st.selectbox("Materiale da correggere", choices,
-        format_func=lambda i: "➕ Nuova etichetta non riconosciuta" if i == -1 else f"{i+1} · {clean(source_rows[i].get('codice'))} · {clean(source_rows[i].get('lotto'))}",
+        format_func=lambda i: "➕ Nuova etichetta non riconosciuta" if i == -1 else row_name(source_rows[i]),
         key="scarico_manual_target")
     selected = source_rows[target] if target >= 0 else {}
-    documents = st.session_state.get("scarico_documents", []) or []
     with st.form(f"scarico_manual_material_{target}_{st.session_state.get('scarico_editor_revision', 0)}"):
         manual_code = st.text_input("REF / codice", value=clean(selected.get("codice")))
         manual_lot = st.text_input("Lotto stampato", value=clean(selected.get("lotto")))
-        manual_gtin = st.text_input("GTIN (14 cifre, se leggibile)", value=clean(selected.get("gtin")))
         manual_expiry = st.text_input("Scadenza stampata (AAAA-MM-GG)", value=clean(selected.get("scadenza")))
+        manual_quantity = st.number_input("Quantità", min_value=1, value=quantity_value(selected.get("quantita")) or 1, step=1)
         manual_description = st.text_input("Descrizione materiale", value=clean(selected.get("descrizione")))
-        manual_lotless = st.checkbox("Materiale non sterile senza lotto", value=bool(selected.get("senza_lotto", False)))
-        manual_verified = st.checkbox("Ho confrontato questi campi con l'etichetta originale", value=False)
-        if target == -1 and documents:
-            manual_document = st.selectbox("Documento contenente l'etichetta mancante", list(range(len(documents))), format_func=lambda i: documents[i]["name"])
-            manual_page = st.number_input("Pagina dell'etichetta mancante", min_value=1, max_value=12, value=1, step=1)
-            st.caption("La pagina originale sarà mostrata come prova. Una nuova riga rappresenta una sola etichetta fisica e un pezzo.")
-        apply_manual = st.form_submit_button("Applica materiale alla lista", disabled=target == -1 and not documents)
-    if apply_manual:
-        if not manual_code.strip() or not manual_verified:
-            st.error("Inserisci il REF e conferma il confronto con l'etichetta originale.")
-        else:
-            try:
-                if manual_gtin.strip() and gs1_parse('(01)'+manual_gtin.strip()).get('error'):
-                    raise ValueError("GTIN non valido: controlla le 14 cifre e il carattere di controllo.")
-                updated = dict(selected)
-                if target == -1:
-                    from label_pipeline import render_pages, image_url
-                    from uuid import uuid4
-                    document = documents[manual_document]
-                    pages = render_pages(document["path"])
-                    if manual_page > len(pages):
-                        raise ValueError("La pagina indicata non esiste nel documento.")
-                    updated.update(label_id=f"manual:{uuid4().hex}", source_document=sha256(Path(document["path"]).read_bytes()).hexdigest(),
-                        page=int(manual_page), bbox=[0,0,1000,1000], rotation=0,
-                        crop_data_url=None, quantita=1,
-                        warning="Etichetta aggiunta manualmente: confronto locale con il documento originale, anteprima disattivata per privacy.", manual_entry=True)
-                updated.update(codice=manual_code.strip(), lotto=manual_lot.strip(), gtin=manual_gtin.strip() or None, scadenza=manual_expiry.strip(),
-                    descrizione=manual_description.strip(), senza_lotto=manual_lotless, verificata=True,
-                    manual_fields=["code","lot","expiry","description","gtin"])
-                updated_rows = list(source_rows)
-                if target == -1:
-                    updated_rows.append(updated)
-                else:
-                    updated_rows[target] = updated
-                st.session_state["scarico_ai_rows"] = updated_rows
-                meta["pipeline_version"]=PIPELINE_VERSION
-                st.session_state["scarico_ai_meta"]=meta
-                st.session_state["scarico_editor_revision"] = int(st.session_state.get("scarico_editor_revision", 0)) + 1
-                st.rerun()
-            except (ValueError, OSError) as exc:
-                st.error(str(exc))
+        apply_manual = st.form_submit_button("Applica materiale alla lista")
+        delete_manual = st.form_submit_button("Elimina questa riga", disabled=target == -1)
+    if apply_manual or delete_manual:
+        changes=[]
+        for index,item in enumerate(source_rows):
+            if index==target and delete_manual: continue
+            changes.append(dict(item))
+        update=dict(selected,codice=manual_code,lotto=manual_lot,scadenza=manual_expiry,
+                    quantita=int(manual_quantity),descrizione=manual_description)
+        if apply_manual:
+            if target==-1: changes.append(update)
+            else: changes[target]=update
+        updated_rows,corrections=apply_review_edits(source_rows,changes,actor=user())
+        st.session_state["scarico_ai_rows"]=updated_rows
+        st.session_state.setdefault("scarico_correction_log",[]).extend(corrections)
+        st.session_state["scarico_editor_revision"]=int(st.session_state.get("scarico_editor_revision",0))+1
+        st.rerun()
 clients = client_options()
 ai_clinic = clean(meta.get("clinic_name"))
 if clients:
@@ -648,54 +646,75 @@ if excluded_rows:
     st.warning(f"{len(excluded_rows)} righe di altri produttori escluse dallo scarico, dal fatturato e dagli ordini P.M. Medical.")
     with st.expander("Materiale di altre aziende escluso"):
         st.dataframe(pd.DataFrame(excluded_rows), use_container_width=True, hide_index=True)
-with st.form("scarico_ai_confirm"):
-    if rows:
-        st.divider()
-        st.subheader("✅ Lista materiali riconosciuti")
-        st.caption("Tocca una cella per correggere codice, lotto, scadenza o quantità. Per materiale non sterile senza lotto spunta Non sterile / senza lotto. Spunta Escludi riga per non inserirla nello scarico. Le modifiche vengono applicate alla conferma. Puoi anche usare il modulo Aggiungi o correggi un materiale sopra la lista.")
-        df_rows = pd.DataFrame(rows)
-        preferred = ["codice", "senza_lotto", "jnj_verificato_manualmente", "escludi_riga", "descrizione", "lotto", "gtin", "scadenza", "quantita", "produttore", "confidence", "warning"]
-        if "escludi_riga" not in df_rows:
-            df_rows["escludi_riga"] = False
-        df_rows["senza_lotto"] = df_rows.get("senza_lotto", pd.Series(False, index=df_rows.index)).fillna(False).astype(bool)
-        for col in preferred:
-            if col not in df_rows.columns:
-                df_rows[col] = ""
-        if is_malzoni:
-            if "conto_deposito_struttura" not in df_rows.columns:
-                df_rows["conto_deposito_struttura"] = False
-            df_rows["conto_deposito_struttura"] = df_rows["conto_deposito_struttura"].fillna(False).astype(bool)
-            preferred.insert(1, "conto_deposito_struttura")
-            st.info("Malzoni: spunta il materiale della struttura Smart Track. Prezzi, fatturato e ordini restano inclusi; queste righe non scaricano la vostra giacenza.")
-        if is_physical_ai:
-            df_rows["verificata"] = df_rows.get("verificata", pd.Series(False, index=df_rows.index)).fillna(False).astype(bool)
-            preferred = ["label_id", "verificata"] + preferred
-        edited = st.data_editor(
-            df_rows[preferred], num_rows="fixed" if is_physical_ai else "dynamic", use_container_width=True,
-            disabled=["label_id", "confidence", "warning"] if is_physical_ai else [],
-            height=min(1600, max(220, 35 * (len(df_rows) + 3))), row_height=35,
-            column_config={
-                "verificata": st.column_config.CheckboxColumn("Etichetta verificata", default=False, help="Confronta REF, lotto, scadenza e quantità con il singolo ritaglio e correggi prima di spuntare."),
-                "jnj_verificato_manualmente": None,
-                "escludi_riga": st.column_config.CheckboxColumn(
-                    "Escludi riga", default=False,
-                    help="La riga non verrà salvata e non genererà fatturato, ordini o movimenti di magazzino."),
-                "codice": st.column_config.TextColumn("Codice Johnson/REF"),
-                "lotto": st.column_config.TextColumn("Lotto"),
-                "gtin": st.column_config.TextColumn("GTIN (14 cifre)"),
-                "senza_lotto": st.column_config.CheckboxColumn("Non sterile / senza lotto", default=False,
-                    help="Spunta solo materiale non sterile che non prevede lotto. La disponibilità viene cercata nelle giacenze senza lotto."),
-                "conto_deposito_struttura": st.column_config.CheckboxColumn(
-                "Conto deposito struttura", default=False,
-                help="Materiale Malzoni / Smart Track: incluso nel fatturato, senza scarico del nostro magazzino.")},
-            key=f"scarico_ai_editor_{clean(selected_client.get('codice_cliente'))}_{st.session_state.get('scarico_editor_revision', 0)}")
-        # Mantieni immutabile la base OCR: Streamlit applica le modifiche tramite lo stato del widget.
-        warnings = [clean(r.get("warning")) for r in edited.to_dict("records") if clean(r.get("warning"))]
-        if warnings:
-            with st.expander("⚠️ Avvisi AI"):
-                for w in warnings:
-                    st.write("•", w)
+if rows or is_physical_ai:
+    st.divider()
+    st.subheader("✅ Lista materiali riconosciuti")
+    st.caption("Tocca una cella per correggere codice, lotto, scadenza o quantità. Puoi eliminare o aggiungere righe direttamente nella tabella. Le correzioni vengono mantenute nella sessione e registrate con autore e data. Puoi anche usare il modulo Aggiungi o correggi un materiale sopra la lista.")
+    df_rows = pd.DataFrame(rows)
+    if is_physical_ai and "label_id" not in df_rows: df_rows["label_id"] = pd.Series(dtype="object")
+    preferred = ["codice", "senza_lotto", "jnj_verificato_manualmente", "escludi_riga", "descrizione", "lotto", "scadenza", "quantita", "produttore", "confidence", "warning"]
+    if "escludi_riga" not in df_rows:
+        df_rows["escludi_riga"] = False
+    df_rows["senza_lotto"] = df_rows.get("senza_lotto", pd.Series(False, index=df_rows.index)).fillna(False).astype(bool)
+    for col in preferred:
+        if col not in df_rows.columns:
+            df_rows[col] = ""
+    if is_malzoni:
+        if "conto_deposito_struttura" not in df_rows.columns:
+            df_rows["conto_deposito_struttura"] = False
+        df_rows["conto_deposito_struttura"] = df_rows["conto_deposito_struttura"].fillna(False).astype(bool)
+        preferred.insert(1, "conto_deposito_struttura")
+        st.info("Malzoni: spunta il materiale della struttura Smart Track. Prezzi, fatturato e ordini restano inclusi; queste righe non scaricano la vostra giacenza.")
+    if is_physical_ai:
+        preferred = ["label_id", "esito"] + [c for c in preferred if c!="senza_lotto"]
+        df_rows["esito"] = ["🔴 "+"; ".join(row_errors(r)) if row_errors(r) else "" for r in rows]
+    editor_frame=df_rows[preferred]
+    if is_physical_ai:
+        editor_frame=editor_frame.style.apply(lambda r: ["background-color: #ffe0e0; color: #a40000" if r.get("esito") else "" for _ in r],axis=1)
+    edited = st.data_editor(
+        editor_frame, num_rows="dynamic", use_container_width=True,
+        disabled=["label_id", "confidence", "warning", "esito"] if is_physical_ai else [],
+        height=min(1600, max(220, 35 * (len(df_rows) + 3))), row_height=35,
+        column_config={
+            "label_id": None,
+            "esito": st.column_config.TextColumn("Campi da correggere"),
+            "jnj_verificato_manualmente": None,
+            "escludi_riga": st.column_config.CheckboxColumn(
+                "Escludi riga", default=False,
+                help="La riga non verrà salvata e non genererà fatturato, ordini o movimenti di magazzino."),
+            "codice": st.column_config.TextColumn("Codice Johnson/REF"),
+            "lotto": st.column_config.TextColumn("Lotto"),
 
+            "senza_lotto": st.column_config.CheckboxColumn("Non sterile / senza lotto", default=False,
+                help="Spunta solo materiale non sterile che non prevede lotto. La disponibilità viene cercata nelle giacenze senza lotto."),
+            "conto_deposito_struttura": st.column_config.CheckboxColumn(
+            "Conto deposito struttura", default=False,
+            help="Materiale Malzoni / Smart Track: incluso nel fatturato, senza scarico del nostro magazzino.")},
+        key=f"scarico_ai_editor_{clean(selected_client.get('codice_cliente'))}_{st.session_state.get('scarico_editor_revision', 0)}")
+    if is_physical_ai:
+        updated_rows,corrections=apply_review_edits(rows,edited.to_dict("records"),actor=user())
+        if corrections:
+            preserved=[r for r in source_rows if r.get("label_id") not in {x.get("label_id") for x in rows}]
+            st.session_state["scarico_ai_rows"]=updated_rows+preserved
+            st.session_state.setdefault("scarico_correction_log",[]).extend(corrections)
+            st.session_state["scarico_editor_revision"]=int(st.session_state.get("scarico_editor_revision",0))+1
+            st.rerun()
+        for item in updated_rows:
+            for error in row_errors(item): st.error(error)
+    # The original OCR extraction remains immutable; edits live in session state.
+
+    warnings = [row_name(r)+": "+re.sub(r"(?i)\bnan\b","non letto",clean(r.get("warning"))) for r in edited.to_dict("records") if clean(r.get("warning"))]
+    if warnings:
+        with st.expander("⚠️ Avvisi AI"):
+            for w in warnings:
+                st.write("•", w)
+
+
+if is_physical_ai and st.session_state.get("scarico_correction_log"):
+    with st.expander("Registro delle correzioni", expanded=False):
+        st.dataframe(pd.DataFrame(st.session_state["scarico_correction_log"]),hide_index=True)
+
+with st.form("scarico_ai_confirm"):
     st.divider()
     st.subheader("🏥 Dati intervento e conferma scarico")
     warehouses = warehouse_labels()
@@ -741,10 +760,17 @@ with st.form("scarico_ai_confirm"):
         mag = wh.split(" - ")[0]
         agent = st.selectbox("Agente", agents) if agents and agents != [""] else st.text_input("Agente")
 
-    expected_label_count = st.number_input("Numero di etichette contate sul documento originale", min_value=0, step=1, value=0, key=f"physical_count_{st.session_state.get('scarico_editor_revision', 0)}") if is_physical_ai else 0
-    count_verified = st.checkbox("Ho confrontato tutti i ritagli con il documento originale e verificato il conteggio fisico.", value=False, key=f"physical_verified_{st.session_state.get('scarico_editor_revision', 0)}") if is_physical_ai else True
-    header_verified = st.checkbox("Ho verificato struttura, data e dati intervento sul documento originale.", value=False, key=f"physical_header_verified_{st.session_state.get('scarico_editor_revision', 0)}") if is_physical_ai else True
-    verified = st.checkbox("Ho verificato codice Johnson/REF, lotto, scadenza e quantità di tutte le righe.")
+    expected_label_count = st.number_input("Numero di etichette contate sul documento originale", min_value=0, step=1,
+        value=initial_label_count(rows), key=f"physical_count_{st.session_state.get('scarico_editor_revision', 0)}") if is_physical_ai else 0
+    if is_physical_ai:
+        notice=count_warning(rows,expected_label_count)
+        if notice:st.warning(notice)
+        duplicate_candidates=build_review({"items":source_rows}).get("cross_photo_candidates",[])
+        if duplicate_candidates:
+            st.warning("Stesso REF e lotto in foto diverse: escludi le ripetizioni dello stesso pezzo e mantieni le etichette fisiche distinte prima di confermare.")
+    verified = st.checkbox("Ho controllato REF, lotto, scadenza e quantità di tutte le righe", key=f"review_verified_{st.session_state.get('scarico_editor_revision',0)}")
+    count_verified = verified
+    duplicates_reviewed = verified
     archive_enabled = False  # OCR archive remains disabled, including legacy configuration.
     archive_review = st.form_submit_button("Conferma e archivia revisione OCR (senza scarico)", disabled=(not is_physical_ai or not archive_enabled or len(rows)==0))
     confirm = st.form_submit_button("📤 Crea intervento e scarica materiali", type="primary", use_container_width=True, disabled=(len(rows) == 0))
@@ -758,13 +784,10 @@ if confirm or archive_review:
         st.stop()
     final_rows = edited.to_dict("records") if rows else []
     if is_physical_ai:
-        final_rows = merge_confirmed_fields(source_rows, final_rows)
-        errors = review_errors(final_rows, [r.get("label_id") for r in source_rows], expected_label_count, count_verified)
+        final_rows = [dict(r,verificata=True) for r in rows]
+        errors = review_errors(final_rows, [r.get("label_id") for r in rows], expected_label_count, count_verified)
         if errors:
-            st.error("Conferma bloccata: " + "; ".join(errors))
-            st.stop()
-        if not header_verified:
-            st.error("Conferma bloccata: verifica struttura, data e dati intervento sul documento originale.")
+            for error in errors: st.error(error)
             st.stop()
     if is_physical_ai and archive_enabled:
         try:
@@ -782,7 +805,7 @@ if confirm or archive_review:
             saved = SupabaseReviewRepository(sb()).save_confirmed(
                 request_id=previous["id"],actor=user(),extraction=extraction,confirmed=final_rows,
                 documents=documents,physical_count=int(expected_label_count),
-                count_verified=bool(count_verified),explicitly_confirmed=True)
+                count_verified=bool(count_verified),explicitly_confirmed=True,duplicates_reviewed=bool(duplicates_reviewed))
             if archive_review:
                 st.success(f"Revisione {saved['id']} archiviata con foto originali. Nessuno scarico di magazzino eseguito.")
                 st.stop()
@@ -920,7 +943,12 @@ if confirm or archive_review:
     }
 
     if is_physical_ai:
-        header["physical_label_count"] = len(source_rows)
+        header["request_id"] = st.session_state.setdefault("scarico_discharge_request_id",str(uuid4()))
+        header["review_contract_version"] = 2
+        header["physical_label_count"] = initial_label_count(final_rows)
+        header["reported_label_count"] = int(expected_label_count)
+        header["count_difference"] = int(expected_label_count)-initial_label_count(final_rows)
+        header["correction_log"] = without_images(st.session_state.get("scarico_correction_log",[]))
         header["count_verified"] = bool(count_verified)
         header["included_label_ids"] = [i for r in rpc_rows for i in r["label_ids"]]
         originals = {r.get("label_id"): r for r in st.session_state.get("scarico_ai_original_rows", source_rows)}
@@ -930,16 +958,17 @@ if confirm or archive_review:
             "page": originals.get(r.get("label_id"), {}).get("page"),
             "bbox": originals.get(r.get("label_id"), {}).get("bbox"),
             "rotation": originals.get(r.get("label_id"), {}).get("rotation"),
+            "quantita": r.get("quantita"),
             "codice": clean(r.get("codice")), "lotto": clean(r.get("lotto")),
             "scadenza": clean(r.get("scadenza")),
             "scadenza_originale": originals.get(r.get("label_id"), {}).get("scadenza_originale"),
             "verificata": bool(r.get("verificata")),
             "evidenze_estratte": without_images(originals.get(r.get("label_id"), {})),
             "dati_confermati": without_images(r),
-            "esclusa": bool(r.get("escludi_riga")) or is_other_manufacturer(r.get("produttore")),
+            "esclusa": bool(r.get("escludi_riga")) or (is_other_manufacturer(r.get("produttore")) and not r.get("jnj_verificato_manualmente")),
         } for r in final_rows]
     try:
-        result = sb().rpc("crea_intervento_scarico_ai_verificato" if is_physical_ai else "crea_intervento_scarico_ai_flessibile", {
+        result = sb().rpc("crea_intervento_scarico_ai_verificato_v2" if is_physical_ai else "crea_intervento_scarico_ai_flessibile", {
             "p_header": header,
             "p_rows": rpc_rows,
             "p_utente": user(),
@@ -950,7 +979,7 @@ if confirm or archive_review:
 
         # Se lo scarico proviene da un magazzino associato a un Kit, genera automaticamente i reintegri.
         try:
-            kits = sb().table("kit_logistici").select("id,codice").eq("codice_magazzino", mag).execute().data or []
+            kits = [] if result.get("replayed") else (sb().table("kit_logistici").select("id,codice").eq("codice_magazzino", mag).execute().data or [])
             if len(kits) == 1 and intervention_id:
                 kit_id = int(kits[0]["id"])
                 saved_rows = sb().table("righe_intervento").select("id,codice,lotto,quantita,origine").eq("intervento_id", intervention_id).execute().data or []
@@ -988,7 +1017,7 @@ if confirm or archive_review:
         temporary_inputs=st.session_state.pop("scarico_input_tempdir",None)
         if temporary_inputs is not None:
             temporary_inputs.cleanup()
-        for k in ["scarico_pending_files", "scarico_documents", "scarico_ai_rows", "scarico_ai_original_rows", "scarico_audit_request", "scarico_ai_meta", "scarico_file_path", "scarico_file_name", "scarico_file_type", "scarico_source", "scarico_missing_prices", "scarico_stock_errors", "scarico_verified"]:
+        for k in ["scarico_discharge_request_id", "scarico_correction_log", "scarico_pending_files", "scarico_documents", "scarico_ai_rows", "scarico_ai_original_rows", "scarico_audit_request", "scarico_ai_meta", "scarico_file_path", "scarico_file_name", "scarico_file_type", "scarico_source", "scarico_missing_prices", "scarico_stock_errors", "scarico_verified"]:
             st.session_state.pop(k, None)
         for k in list(st.session_state.keys()):
             if str(k).startswith("manual_price_") or str(k).startswith("free_goods_"):
@@ -1001,7 +1030,7 @@ if confirm or archive_review:
         if "GIACENZA_INSUFFICIENTE" in msg:
             st.error("Giacenza modificata o insufficiente al momento della conferma. La transazione è stata annullata: nessun intervento, riga o movimento è stato salvato.")
         else:
-            st.error(f"Scarico non completato. La transazione è stata annullata: {e}")
+            st.error(f"Esito scarico da verificare: {e}. In caso di timeout riprova la stessa richiesta: il server evita un secondo scarico.")
 
 
 

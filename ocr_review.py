@@ -3,6 +3,7 @@
 Scores describe available evidence, NOT calibrated probabilities of correctness.
 No function in this module writes stock, files, or database records.
 """
+from review_editor import text_value, technical_gtin
 import calendar
 import re
 from datetime import date, datetime
@@ -51,7 +52,7 @@ def assess_label(item, *, catalog=None, today=None, soon_days=90):
             barcodes.append(decoded)
     for name in FIELDS:
         value = item.get(name, item.get(ALIASES.get(name)))
-        value = str(value).strip() if value is not None else None
+        value = text_value(value) or None
         value = value or None
         reads = [r.get(name) for r in item.get('ocr_reads') or [] if r.get(name)]
         decoded = sorted({str(b[name]) for b in barcodes if b.get(name)}) if name in ('lot','expiry','gtin') else []
@@ -93,6 +94,8 @@ def assess_label(item, *, catalog=None, today=None, soon_days=90):
         if name=='gtin' and value:
             if gs1_parse('(01)'+value).get('error'):
                 status, score = 'invalid', 0.0
+        if name=='code' and value and item.get('ref_source')=='articoli_gtin':
+            method, status, score = 'catalogue', 'mapped', .9
         if name in item.get('manual_fields',[]) and value and status not in {'invalid','unknown_catalogue'}:
             method, status, score = 'manual', 'reviewed', 1.0
         if status in {'missing','conflict','invalid','unverified','unknown_catalogue'}:
@@ -109,7 +112,7 @@ def assess_label(item, *, catalog=None, today=None, soon_days=90):
             fields['gtin']['status']='unknown_catalogue'
         elif fields['code']['value'] and exact_code(ref)!=exact_code(fields['code']['value']):
             issues.append('REF discordante da articoli_gtin: verificare, nessuna sostituzione automatica')
-            fields['code']['status']='conflict'
+            fields['code']['status']='catalogue_warning'
         elif fields['code']['value']:
             fields['code']['catalogue_ref']=ref
     expiry = fields['expiry']['value']
@@ -122,7 +125,9 @@ def assess_label(item, *, catalog=None, today=None, soon_days=90):
     box = item.get('bbox') or []
     if len(box)==4 and (min(box[:2])<=0 or max(box[2:])>=1000):
         issues.append('Etichetta sul bordo: verificare completezza o acquisire una nuova foto')
-    return {'fields':fields,'issues':list(dict.fromkeys(issues)),
+    technical = [issue for issue in issues if any(token in issue for token in ('GTIN','GS1','gtin:', 'articoli_gtin'))]
+    issues = [issue for issue in issues if issue not in technical]
+    return {'fields':fields,'technical_warnings':technical,'issues':list(dict.fromkeys(issues)),
             'needs_review':bool(issues),'expiry_status':expiry_status,
             'score_semantics':'evidence_strength_not_probability'}
 
@@ -131,7 +136,24 @@ def canonical_item(row):
     item = dict(row)
     for name, alias in ALIASES.items():
         item[name] = row.get(name, row.get(alias))
+    for name in ('code','lot','expiry','description'):
+        item[name]=text_value(item.get(name)) or None
+    item['gtin']=technical_gtin(item.get('gtin'))
     return item
+
+
+def cross_photo_candidates(rows):
+    """Identity equality is ambiguous: two physical stickers may share REF and lot."""
+    groups = {}
+    for original in rows:
+        row = canonical_item(original)
+        if row.get('escludi_riga') or row.get('document_index') is None:
+            continue
+        key = (exact_code(row.get('code')), str(row.get('lot') or '').strip())
+        if all(key):
+            groups.setdefault(key, []).append(row)
+    return [ [r['label_id'] for r in group] for group in groups.values()
+             if len({r['document_index'] for r in group}) > 1 ]
 
 
 def build_review(extraction, *, catalog=None, today=None, soon_days=90):
@@ -139,8 +161,19 @@ def build_review(extraction, *, catalog=None, today=None, soon_days=90):
     labels = []
     for original in extraction.get('items') or []:
         item = canonical_item(original)
+        # A decoded technical GTIN can supply the REF; never overwrite an OCR
+        # reading or a field the operator deliberately edited/cleared.
+        from catalog_import import valid_gtin
+        gtin=item.get('gtin')
+        if (not item.get('code') and isinstance(catalog,dict) and gtin and valid_gtin(gtin)
+                and catalog.get(gtin) and 'code' not in item.get('manual_fields',[])):
+            item['ref_ocr_original']=item.get('code')
+            item['code']=catalog[gtin]
+            if 'codice' in item:item['codice']=item['code']
+            item['ref_source']='articoli_gtin'
         labels.append({**item, 'assessment':assess_label(item,catalog=catalog,today=today,soon_days=soon_days)})
     return {**extraction, 'items':labels,'review_required':True,
+            'cross_photo_candidates':cross_photo_candidates(labels),
             'physical_label_count':len(labels),'soon_days':soon_days,
             'catalogue_checked':catalog is not None,
             'missing_gtins':[{'label_id':r.get('label_id'),'gtin':r.get('gtin'),
@@ -159,52 +192,36 @@ def aggregate_review(rows):
         if not label_id or label_id in ids:
             raise ValueError('Identità fisica assente o ripetuta')
         ids.add(label_id)
-        if not row.get('code') or not str(row.get('lot') or '').strip():
-            raise ValueError('Codice e lotto obbligatori per aggregare etichette di impianto')
-        if len(str(row['lot']).strip())>20 or any(ord(c)<32 for c in str(row['lot'])):
-            raise ValueError('Formato lotto non valido')
+        from review_editor import quantity_value, row_errors, row_name
+        problems=row_errors(row)
+        if problems:raise ValueError('; '.join(problems))
         expiry, precision = normalize_expiry(row.get('expiry'))
-        if not expiry or precision!='day':
-            raise ValueError('Scadenza completa da confermare')
+        quantity=quantity_value(row.get('quantita',row.get('quantity',1)))
         key = (str(row['code']).strip(),str(row['lot']).strip())
         if key in groups:
             if groups[key]['expiry']!=expiry:
-                raise ValueError('Scadenze discordanti per lo stesso REF/lotto: verifica necessaria')
-            groups[key]['quantity']+=1
+                raise ValueError(f'{row_name(row)}: Scadenze discordanti, correggere la riga')
+            groups[key]['quantity']+=quantity
             groups[key]['label_ids'].append(label_id)
         else:
             groups[key] = dict(code=key[0],lot=key[1],expiry=expiry,
-                               description=row.get('description'),quantity=1,label_ids=[label_id])
+                               description=row.get('description'),quantity=quantity,label_ids=[label_id])
     return list(groups.values())
 
 
-def validate_confirmation(extraction, confirmed, *, physical_count, count_verified, actor):
-    """Run again in the trusted server; UI/HTTP booleans alone are insufficient."""
-    if (not isinstance(actor,str) or not actor.strip() or count_verified is not True
-            or type(physical_count) is not int or physical_count<=0 or physical_count!=len(confirmed)):
-        raise ValueError('Utente e conteggio fisico verificato obbligatori')
+def validate_confirmation(extraction, confirmed, *, physical_count, count_verified, actor, duplicates_reviewed=False):
+    """Global operator confirmation; GTIN and count discrepancy never block."""
+    from label_pipeline import review_errors
+    if not text_value(actor):
+        raise ValueError('Utente della revisione mancante')
     if any(d.get('status')=='failed' for d in extraction.get('documents',[]) if isinstance(d,dict)):
         raise ValueError('Documento non analizzato: ripetere la lettura prima della conferma')
     expected = {i.get('label_id') for i in extraction.get('items') or []}
     actual = [r.get('label_id') for r in confirmed]
-    # Added manual physical labels must be explicitly represented in extraction.
     if None in expected or set(actual)!=expected or len(set(actual))!=len(actual):
-        raise ValueError('Etichette mancanti, aggiunte senza evidenza o duplicate')
-    for row in confirmed:
-        if row.get('verificata',row.get('reviewed',False)) is not True:
-            raise ValueError('Verifica individuale richiesta')
-        if row.get('escludi_riga'):
-            continue
-        item = canonical_item(row)
-        if isinstance(row.get('quantita',row.get('quantity',1)),bool) or row.get('quantita',row.get('quantity',1)) != 1:
-            raise ValueError('Una etichetta fisica rappresenta un solo pezzo')
-        if not item.get('code') or not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9. /-]*',str(item['code'])) or re.fullmatch(r'\d{14}',str(item['code'])):
-            raise ValueError('REF non valido')
-        gtin = item.get('gtin')
-        if gtin:
-            from label_pipeline import gs1_parse
-            if gs1_parse('(01)'+str(gtin)).get('error'):
-                raise ValueError('GTIN non valido')
+        raise ValueError('Etichette mancanti, aggiunte senza revisione o duplicate')
+    problems=review_errors(confirmed,list(expected),physical_count,count_verified)
+    if problems:raise ValueError('; '.join(problems))
     return aggregate_review(confirmed)
 
 
@@ -213,7 +230,7 @@ def merge_confirmed_fields(originals, edits):
     source = {r['label_id']:r for r in originals}
     if len(source)!=len(originals):
         raise ValueError('Identità fisiche originali ripetute')
-    allowed = set(FIELDS) | set(ALIASES.values()) | {'label_id','quantita','quantity',
+    allowed = (set(FIELDS)-{'gtin'}) | set(ALIASES.values()) | {'label_id','quantita','quantity',
         'verificata','reviewed','escludi_riga','senza_lotto','jnj_verificato_manualmente',
         'conto_deposito_struttura','produttore'}
     merged = []

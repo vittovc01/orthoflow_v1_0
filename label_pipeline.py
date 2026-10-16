@@ -286,38 +286,16 @@ def aggregate_labels(rows):
 
 
 def review_errors(rows, expected_ids, expected_count, count_verified):
+    from review_editor import row_errors
     errors = []
-    if not count_verified or expected_count != len(expected_ids):
-        errors.append('Conteggio fisico non verificato o discordante')
+    if not count_verified:
+        errors.append('Conferma di aver controllato REF, lotto, scadenza e quantità di tutte le righe')
     ids = [r.get('label_id') for r in rows]
-    if set(ids) != set(expected_ids) or len(ids) != len(set(ids)):
-        errors.append('Etichette mancanti, aggiunte o duplicate nella lista')
+    if set(ids)!=set(expected_ids) or None in ids or len(ids)!=len(set(ids)):
+        errors.append('Identità delle righe non coerenti: riapri la revisione')
     for row in rows:
-        if not row.get('verificata'):
-            errors.append(str(row.get('label_id')) + ': verifica singola etichetta richiesta')
-        if row.get('escludi_riga'):
-            continue
-        code = str(row.get('codice') or '').strip()
-        if not code or not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9. /-]*', code) or re.fullmatch(r'\d{14}', code) or '?' in code:
-            errors.append('REF incompleto o non valido: ' + code)
-        if row.get('is_sterile') is True and re.fullmatch(r'(?:\d{2}\.\d{3}\.\d{3}|\d{3}\.\d{3})5?', code):
-            errors.append('REF sterile senza suffisso verificato: ' + code)
-        gtin = str(row.get('gtin') or '').strip()
-        if gtin and gs1_parse('(01)'+gtin).get('error'):
-            errors.append('GTIN non valido: ' + gtin)
-        if not row.get('lotto') and not row.get('senza_lotto'):
-            errors.append('Lotto obbligatorio: ' + code)
-        if not row.get('senza_lotto'):
-            try:
-                date.fromisoformat(str(row.get('scadenza') or ''))
-            except ValueError:
-                errors.append('Scadenza non verificata: ' + code)
-        try:
-            qty = float(row.get('quantita'))
-            if not math.isfinite(qty) or qty != 1:
-                raise ValueError()
-        except (TypeError, ValueError):
-            errors.append('Una etichetta fisica deve rappresentare un pezzo: ' + code)
+        errors.extend(row_errors(row))
+    # Label count and technical GTIN are advisory. Only invalid row fields block.
     return errors
 
 

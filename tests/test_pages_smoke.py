@@ -122,38 +122,42 @@ def test_physical_label_review_blocks_unverified_count_without_writes(backend):
     at.switch_page('pages/05_Scarico_Sala_AI.py').run()
     assert not at.exception
     assert any(m.label=='Etichette individuate' and m.value=='1' for m in at.metric)
-    next(c for c in at.checkbox if c.label.startswith('Ho verificato codice')).check()
     next(b for b in at.button if b.label=='📤 Crea intervento e scarica materiali').click()
     at.run()
     assert not at.exception
-    assert any('Conteggio fisico non verificato' in e.value for e in at.error)
-    assert any('verifica singola etichetta richiesta' in e.value for e in at.error)
+    assert any('Conferma di aver verificato i materiali' in e.value for e in at.error)
+    assert next(n for n in at.number_input if n.label.startswith('Numero di etichette')).value==1
+    assert len([c for c in at.checkbox if c.label.startswith('Ho ')])==1
 
 
-def test_reviewed_labels_cannot_save_unverified_procedure_header(backend):
-    at = app()
-    at.session_state['user'] = 'ci-user'
-    at.session_state['ruolo'] = 'Admin'
-    at.session_state['permessi'] = ['DIREZIONE']
+def test_single_confirmation_accepts_missing_gtin_and_advisory_count(backend,monkeypatch):
+    calls=[]
+    def rpc(name,args):
+        calls.append((name,args))
+        return SimpleNamespace(execute=lambda:SimpleNamespace(data={'intervento_id':123,'righe':1,'totale':0}))
+    monkeypatch.setitem(backend.__dict__,'rpc',rpc)
+    at=app()
+    at.session_state['user']='ci-user';at.session_state['ruolo']='Admin';at.session_state['permessi']=['DIREZIONE']
     at.run()
-    at.session_state['scarico_source'] = 'AI'
     from label_pipeline import PIPELINE_VERSION
+    at.session_state['scarico_source']='AI'
     at.session_state['scarico_ai_meta']={'pipeline_version':PIPELINE_VERSION}
-    at.session_state['scarico_editor_revision'] = 1
-    at.session_state['scarico_ai_rows'] = [{
-        'label_id': 'document:p1:l1', 'codice': '413.040S', 'lotto': 'LOT',
-        'scadenza': '2035-04-01', 'quantita': 1, 'produttore': 'Synthes',
-        'confidence': .99, 'warning': '', 'verificata': True,
-        'page': 1, 'bbox': [100,100,300,200], 'rotation': 0,
-    }]
+    at.session_state['scarico_ai_rows']=[{'label_id':'one','codice':'TEST-A','lotto':'LOT-A',
+        'scadenza':'2035-01-01','quantita':2,'gtin':float('nan'),'verificata':False}]
     at.switch_page('pages/05_Scarico_Sala_AI.py').run()
-    next(n for n in at.number_input if n.label.startswith('Numero di etichette')).set_value(1)
-    next(c for c in at.checkbox if c.label.startswith('Ho confrontato tutti')).check()
-    next(c for c in at.checkbox if c.label.startswith('Ho verificato codice')).check()
+    assert not at.exception
+    assert not any('GTIN' in t.label for t in at.text_input)
+    assert len([c for c in at.checkbox if c.label.startswith('Ho ')])==1
+    next(n for n in at.number_input if n.label.startswith('Numero di etichette')).set_value(3)
+    next(c for c in at.checkbox if c.label.startswith('Ho controllato REF')).check()
     next(b for b in at.button if b.label=='📤 Crea intervento e scarica materiali').click()
     at.run()
     assert not at.exception
-    assert any('verifica struttura, data e dati intervento' in e.value for e in at.error)
+    name,args=next((name,args) for name,args in calls if name=='crea_intervento_scarico_ai_verificato_v2')
+    assert args['p_rows'][0]['quantita']==2
+    assert args['p_header']['reported_label_count']==3 and args['p_header']['count_difference']==2
+    assert args['p_header']['label_manifest'][0]['dati_confermati']['gtin'] is None
+    assert not any('nan' in e.value for e in at.error)
 
 
 def test_manual_material_can_correct_or_add_missing_physical_label(backend, tmp_path):
@@ -174,7 +178,6 @@ def test_manual_material_can_correct_or_add_missing_physical_label(backend, tmp_
     at.session_state['scarico_documents']=[{'name':'labels.jpg','path':str(document)}]
     at.switch_page('pages/05_Scarico_Sala_AI.py').run()
     next(t for t in at.text_input if t.label=='REF / codice').set_value('3095-040')
-    next(c for c in at.checkbox if c.label.startswith('Ho confrontato questi')).check()
     next(b for b in at.button if b.label=='Applica materiale alla lista').click()
     at.run()
     assert not at.exception
@@ -184,14 +187,23 @@ def test_manual_material_can_correct_or_add_missing_physical_label(backend, tmp_
     at.run()
     for label,value in [('REF / codice','1506-70-005'),('Lotto stampato','LOT2'),('Scadenza stampata (AAAA-MM-GG)','2036-01-01')]:
         next(t for t in at.text_input if t.label==label).set_value(value)
-    next(c for c in at.checkbox if c.label.startswith('Ho confrontato questi')).check()
     next(b for b in at.button if b.label=='Applica materiale alla lista').click()
     at.run()
     assert not at.exception
     rows=at.session_state['scarico_ai_rows']
     assert len(rows)==2
-    assert rows[1]['source_document'] and rows[1]['crop_data_url'] is None
-    assert rows[1]['page']==1 and rows[1]['quantita']==1
+    assert rows[1]['manual_entry'] and rows[1]['crop_data_url'] is None
+    assert rows[1]['gtin'] is None and rows[1]['quantita']==1
+    assert any(l['field']=='codice' and l['method']=='manuale' and l['user']=='ci-user' for l in at.session_state['scarico_correction_log'])
+    assert next(n for n in at.number_input if n.label.startswith('Numero di etichette')).value==2
+    next(s for s in at.selectbox if s.label=='Materiale da correggere').set_value(0)
+    at.run()
+    next(b for b in at.button if b.label=='Elimina questa riga').click()
+    at.run()
+    assert not at.exception
+    assert len(at.session_state['scarico_ai_rows'])==1
+    assert next(n for n in at.number_input if n.label.startswith('Numero di etichette')).value==1
+    assert any(l['operation']=='delete' for l in at.session_state['scarico_correction_log'])
     assert not review_errors(rows,[r['label_id'] for r in rows],2,True)
 
 
@@ -208,3 +220,83 @@ def test_old_preprivacy_session_cannot_render_stale_header_crops(backend):
     assert not at.exception
     assert any('filtro privacy' in w.value for w in at.warning)
     assert not at.expander
+
+
+def test_table_edits_additions_and_deletions_update_count_and_audit(backend):
+    at=app()
+    at.session_state['user']='agent';at.session_state['ruolo']='Admin';at.session_state['permessi']=['DIREZIONE']
+    at.run()
+    from label_pipeline import PIPELINE_VERSION
+    at.session_state['scarico_source']='AI'
+    at.session_state['scarico_ai_meta']={'pipeline_version':PIPELINE_VERSION}
+    at.session_state['scarico_ai_rows']=[{'label_id':'one','codice':'TEST-A','lotto':'LOT-A',
+        'scadenza':'2035-01-01','quantita':1,'gtin':None}]
+    at.switch_page('pages/05_Scarico_Sala_AI.py').run()
+    def editor_key():
+        return f"scarico_ai_editor__{at.session_state['scarico_editor_revision'] if 'scarico_editor_revision' in at.session_state else 0}"
+    key=editor_key()
+    at.session_state[key]={'edited_rows':{0:{'codice':'TEST-B','quantita':2}},'added_rows':[],'deleted_rows':[]}
+    at.run()
+    assert not at.exception
+    assert at.session_state['scarico_ai_rows'][0]['codice']=='TEST-B'
+    assert at.session_state['scarico_ai_rows'][0]['quantita']==2
+    at.session_state[editor_key()]={'edited_rows':{},'added_rows':[{'codice':'TEST-C','lotto':'LOT-C','scadenza':'2036-01-01','quantita':1}],'deleted_rows':[]}
+    at.run()
+    assert not at.exception
+    assert len(at.session_state['scarico_ai_rows'])==2
+    assert next(n for n in at.number_input if n.label.startswith('Numero di etichette')).value==2
+    at.session_state[editor_key()]={'edited_rows':{},'added_rows':[],'deleted_rows':[0]}
+    at.run()
+    assert not at.exception
+    assert len(at.session_state['scarico_ai_rows'])==1
+    assert at.session_state['scarico_ai_rows'][0]['codice']=='TEST-C'
+    assert next(n for n in at.number_input if n.label.startswith('Numero di etichette')).value==1
+    operations={entry['operation'] for entry in at.session_state['scarico_correction_log']}
+    assert operations=={'add','update','delete'}
+
+
+def test_invalid_row_is_red_and_blocks_with_ref_and_lot(backend):
+    at=app();at.session_state['user']='agent';at.session_state['ruolo']='Admin';at.session_state['permessi']=['DIREZIONE']
+    at.run()
+    from label_pipeline import PIPELINE_VERSION
+    at.session_state['scarico_source']='AI'
+    at.session_state['scarico_ai_meta']={'pipeline_version':PIPELINE_VERSION}
+    at.session_state['scarico_ai_rows']=[
+        {'label_id':'good','codice':'TEST-GOOD','lotto':'LOT-GOOD','scadenza':'2035-01-01','quantita':1},
+        {'label_id':'bad','codice':'TEST-BAD','lotto':'LOT-BAD','scadenza':float('nan'),'quantita':1}]
+    at.switch_page('pages/05_Scarico_Sala_AI.py').run()
+    table=next(d for d in at.dataframe if 'esito' in d.value.columns)
+    assert table.value['esito'][0]=='' and table.value['esito'][1].startswith('🔴')
+    next(c for c in at.checkbox if c.label.startswith('Ho controllato REF')).check()
+    next(b for b in at.button if b.label=='📤 Crea intervento e scarica materiali').click();at.run()
+    assert not at.exception
+    errors=[e.value for e in at.error]
+    assert errors and all('TEST-BAD, lotto LOT-BAD: scadenza mancante' in e for e in errors)
+    assert not any('nan' in e for e in errors)
+
+
+def test_timeout_retry_reuses_discharge_request_uuid(backend,monkeypatch):
+    calls=[]
+    def rpc(name,args):
+        if name!='crea_intervento_scarico_ai_verificato_v2':
+            return SimpleNamespace(execute=lambda:SimpleNamespace(data=[]))
+        calls.append(args)
+        def execute():
+            if len(calls)==1:raise TimeoutError('response lost')
+            return SimpleNamespace(data={'intervento_id':123,'righe':1,'totale':0,'replayed':True})
+        return SimpleNamespace(execute=execute)
+    monkeypatch.setitem(backend.__dict__,'rpc',rpc)
+    at=app();at.session_state['user']='agent';at.session_state['ruolo']='Admin';at.session_state['permessi']=['DIREZIONE'];at.run()
+    from label_pipeline import PIPELINE_VERSION
+    at.session_state['scarico_source']='AI';at.session_state['scarico_ai_meta']={'pipeline_version':PIPELINE_VERSION}
+    at.session_state['scarico_ai_rows']=[{'label_id':'one','codice':'TEST-A','lotto':'TEST-LOT','scadenza':'2035-01-01','quantita':1}]
+    at.switch_page('pages/05_Scarico_Sala_AI.py').run()
+    next(c for c in at.checkbox if c.label.startswith('Ho controllato REF')).check()
+    next(b for b in at.button if b.label=='📤 Crea intervento e scarica materiali').click();at.run()
+    assert not at.exception and len(calls)==1
+    request_id=at.session_state['scarico_discharge_request_id']
+    assert any('Esito scarico da verificare' in e.value for e in at.error)
+    next(b for b in at.button if b.label=='📤 Crea intervento e scarica materiali').click();at.run()
+    assert not at.exception and len(calls)==2
+    assert calls[0]==calls[1]
+    assert calls[1]['p_header']['request_id']==request_id

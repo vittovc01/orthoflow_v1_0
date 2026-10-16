@@ -3,12 +3,13 @@ from pathlib import Path
 import sys
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
 from clinic_matching import clinic_default_index
+from review_editor import canonical_values
 from datetime import date
 from types import SimpleNamespace
 import pandas as pd
 s=Path('pages/_05_Scarico_Sala_AI_impl.py').read_text(); tree=ast.parse(s)
 clean=lambda v:'' if v is None or (isinstance(v,float) and pd.isna(v)) else str(v).strip()
-ns={'clinic_default_index':clinic_default_index,'clean':clean,'ncode':lambda v:re.sub('[^A-Z0-9]','',str(v or '').upper())}; f=next(n for n in tree.body if isinstance(n,ast.FunctionDef) and n.name=='is_other_manufacturer')
+ns={'canonical_values':canonical_values,'clinic_default_index':clinic_default_index,'clean':clean,'ncode':lambda v:re.sub('[^A-Z0-9]','',str(v or '').upper())}; f=next(n for n in tree.body if isinstance(n,ast.FunctionDef) and n.name=='is_other_manufacturer')
 exec(compile(ast.Module(body=[f],type_ignores=[]),'filter','exec'),ns)
 assert all(not ns['is_other_manufacturer'](v) for v in ['Johnson & Johnson','J&J MedTech','DePuy Synthes','NON LETTO','',None])
 assert all(ns['is_other_manufacturer'](v) for v in ['Stryker','Zimmer Biomet','Medtronic','B. Braun','Smith & Nephew'])
@@ -26,7 +27,7 @@ class ST:
    def __exit__(self,*a):outer.active=False
   return Form()
  def data_editor(self,df,**kw):
-  assert self.active and kw['key'].endswith('_7')
+  assert not self.active and kw['key'].endswith('_7')
   edited=df.copy();edited.loc[edited.index[0],'conto_deposito_struttura']=True
   return edited
  def multiselect(self,*a,**kw):return []
@@ -52,4 +53,4 @@ for _ in range(2):
  assert len(ns['edited'])==1 and bool(ns['edited'].iloc[0]['conto_deposito_struttura'])
 exec(compile(ast.Module(body=tree.body[end].body[:next(i+1 for i,n in enumerate(tree.body[end].body) if isinstance(n,ast.Assign) and any(isinstance(t,ast.Name) and t.id=='final_rows' for t in n.targets))],type_ignores=[]),'submit','exec'),ns)
 assert ns['final_rows'][0]['conto_deposito_struttura']==True and len(ns['final_rows'])==1
-print('PASS: stable source across reruns, editor in form, Smart Track submitted, other brands excluded, unknown brands preserved')
+print('PASS: stable source across reruns, editor outside submit form, Smart Track submitted, other brands excluded, unknown brands preserved')

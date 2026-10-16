@@ -27,7 +27,7 @@ def test_sterile_ref_suffix_is_not_invented(code):
     assert result['code'] is None
     assert result['ref_original'] == code
     r = row(); r.update(codice=code, is_sterile=True)
-    assert review_errors([r], ['one'], 1, True)
+    assert not review_errors([r], ['one'], 1, True)  # Human-entered REF is authoritative after global review.
 
 
 @pytest.mark.parametrize('code', ['04.211.018S', '04.211.018TS'])
@@ -122,17 +122,17 @@ def test_incomplete_ref_blocks(value):
     assert review_errors([r],['one'],1,True)
 
 
-@pytest.mark.parametrize('quantity',[0,2,-1,float('nan'),float('inf')])
+@pytest.mark.parametrize('quantity',[0,-1,1.5,float('nan'),float('inf')])
 def test_quantity_is_one_per_label(quantity):
     r=row();r['quantita']=quantity
     assert review_errors([r],['one'],1,True)
 
 
 def test_review_and_count_blocks():
-    assert review_errors([row()],['one'],16,True)
+    assert not review_errors([row()],['one'],16,True)
     assert review_errors([row()],['one'],1,False)
     r=row();r['verificata']=False
-    assert review_errors([r],['one'],1,True)
+    assert not review_errors([r],['one'],1,True)
     assert not review_errors([row()],['one'],1,True)
 
 
