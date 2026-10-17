@@ -107,3 +107,13 @@ def test_production_entry_point_uses_whole_page_reader():
     import inspect
     import ai_ocr
     assert 'from whole_page_labels import analyze_labels' in inspect.getsource(ai_ocr.analyze_document)
+
+
+def test_existing_session_upgrades_cached_analyzer(monkeypatch):
+    import ai_ocr
+    import whole_page_runtime
+    stale = lambda *a, **k: 'old-crop-only-reader'
+    monkeypatch.setattr(ai_ocr, 'analyze_document', stale)
+    whole_page_runtime._signatures.clear()
+    whole_page_runtime.refresh_ocr_modules()
+    assert ai_ocr.analyze_document is not stale

@@ -9,7 +9,7 @@ from datetime import date, datetime
 from pathlib import Path
 from functools import lru_cache
 from uuid import uuid4
-from privacy_runtime import refresh_ocr_modules
+from whole_page_runtime import refresh_ocr_modules
 refresh_ocr_modules()
 from ocr_review import build_review, aggregate_review, merge_confirmed_fields
 from review_editor import (apply_review_edits, row_errors, row_name, expected_label_count as initial_label_count,
