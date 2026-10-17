@@ -44,6 +44,23 @@ def test_ambiguous_positions_do_not_establish_consensus():
     assert all(r['code'] is None for r in merged)
 
 
+def test_different_partial_outlines_do_not_double_count_a_physical_label():
+    first = [label([0,400,400,600]),label([600,100,800,800])]
+    second = [label([100,450,300,550]),label([650,250,750,650])]
+    assert len(merge_reads(first,second)) == 2
+    assert all(r['code'] == '4515-70-005' for r in merge_reads(first,second))
+
+
+def test_normalized_rows_without_local_crop_evidence_remain_reviewable():
+    from ai_ocr import normalize_ai_items
+    from ocr_review import build_review
+    row = label([10,10,300,200])
+    row['label_id'] = 'whole-page-row'
+    normalized = normalize_ai_items({'items':[row]})
+    assert normalized[0]['local_ref_evidence'] is None
+    assert len(build_review({'items':normalized})['items']) == 1
+
+
 @pytest.mark.parametrize('box', [[-1,0,100,100],[0,0,0,100],[0,0,100,1001],[0,0,float('nan'),100]])
 def test_invalid_geometry_fails_explicitly(box):
     with pytest.raises(ValueError):

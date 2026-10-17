@@ -62,7 +62,7 @@ def assess_label(item, *, catalog=None, today=None, soon_days=90):
             method, status, score = 'ocr', 'unverified', .45
             if len(reads)>=2 and all(str(r).strip()==value for r in reads):
                 method, status, score = 'ocr_consensus', 'agreement', .75
-            if name=='code' and item.get('local_ref_evidence',{}).get('candidates')==[value]:
+            if name=='code' and (item.get('local_ref_evidence') or {}).get('candidates')==[value]:
                 method, status, score = 'ocr_consensus_local', 'agreement', .85
         if len(decoded)>1 or (decoded and reads and any(str(r).strip()!=decoded[0] for r in reads)):
             status, score = 'conflict', 0.0

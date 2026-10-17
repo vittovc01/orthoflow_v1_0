@@ -52,6 +52,15 @@ def iou(a, b):
     return intersection / (sum(areas)-intersection) if intersection else 0
 
 
+def spatial_score(a, b):
+    # Full-page models may outline different portions of the same partly
+    # covered/vertical sticker. Its physical centre remains a useful anchor.
+    distance = math.hypot((a[0]+a[2]-b[0]-b[2])/2, (a[1]+a[3]-b[1]-b[3])/2)
+    diagonal = (math.hypot(a[2]-a[0],a[3]-a[1]) + math.hypot(b[2]-b[0],b[3]-b[1]))/2
+    proximity = .5 * max(0, 1-distance/max(1,diagonal))
+    return max(iou(a,b), proximity)
+
+
 def observations(result):
     """Reject malformed geometry explicitly, without silently deleting products."""
     rows = result.get('labels')
@@ -74,7 +83,7 @@ def observations(result):
 
 def merge_reads(first, second):
     """One-to-one spatial consensus; product identity NEVER deduplicates labels."""
-    edges = sorted(((iou(a['bbox'], b['bbox']), i, j) for i, a in enumerate(first)
+    edges = sorted(((spatial_score(a['bbox'], b['bbox']), i, j) for i, a in enumerate(first)
                     for j, b in enumerate(second)), reverse=True)
     matched, used = {}, set()
     for score, i, j in edges:
@@ -89,8 +98,13 @@ def merge_reads(first, second):
             b = second[matched[i]]
             row = compare_reads(a, b)
             # Competing spatial matches cannot establish a reliable identity.
-            ambiguous = (sum(iou(a['bbox'], x['bbox']) >= .35 for x in second) != 1 or
-                         sum(iou(b['bbox'], x['bbox']) >= .35 for x in first) != 1)
+            chosen = spatial_score(a['bbox'], b['bbox'])
+            ambiguous = (any(iou(a['bbox'], x['bbox']) > .85 for k,x in enumerate(first) if k != i) or
+                         any(iou(b['bbox'], x['bbox']) > .85 for k,x in enumerate(second) if k != matched[i]) or
+                         any(spatial_score(a['bbox'], x['bbox']) >= chosen-.05
+                             for k,x in enumerate(second) if k != matched[i]) or
+                         any(spatial_score(b['bbox'], x['bbox']) >= chosen-.05
+                             for k,x in enumerate(first) if k != i))
             if ambiguous:
                 for field in ('code','lot','expiry'):
                     row[field] = None
@@ -133,6 +147,7 @@ def analyze_labels(path, client, model, item_schema, parse):
         if reads == [None, None]:
             raise WholePageReadError(number, ['entrambe le letture fallite', *failures])
         rows = merge_reads(reads[0] or [], reads[1] or [])
+        warnings.append(f'Pagina {number}: prima lettura {len(reads[0] or [])}, seconda lettura {len(reads[1] or [])}, etichette da verificare {len(rows)}')
         if not rows:
             warnings.append(f'Pagina {number}: nessuna etichetta letta; aggiungere le righe mancanti o riprovare')
         if reads[0] is None or reads[1] is None or len(reads[0]) != len(reads[1]):
