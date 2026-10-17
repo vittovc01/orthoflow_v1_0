@@ -565,10 +565,11 @@ if is_physical_ai:
                     st.session_state["scarico_ai_meta"]=meta
                     st.session_state["scarico_editor_revision"]=int(st.session_state.get("scarico_editor_revision",0))+1
                     st.rerun()
-    with st.expander("Etichette individuate — intestazione oscurata"):
-        for page in meta.get("annotated_pages", []) or []:
-            if page.get("page_data_url"):
-                st.image(page["page_data_url"], caption=f"Pagina {page.get('page')}")
+    if meta.get("annotated_pages"):
+        with st.expander("Riscontri fotografici delle etichette"):
+            for page in meta.get("annotated_pages", []) or []:
+                if page.get("page_data_url"):
+                    st.image(page["page_data_url"], caption=f"Pagina {page.get('page')}")
     cols = st.columns(3)
     cols[0].metric("Etichette individuate", len(source_rows))
     cols[1].metric("Articoli distinti (REF / lotto)", len({(r.get("codice"), r.get("lotto")) for r in source_rows if r.get("codice") and (r.get("lotto") or r.get("senza_lotto"))}))
