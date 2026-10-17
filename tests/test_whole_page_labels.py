@@ -141,6 +141,19 @@ def test_provider_diagnostics_do_not_echo_secrets():
     assert failure_reason(error) == 'RuntimeError'
 
 
+def test_full_page_reader_keeps_sterile_ref_suffix_guard(tmp_path, monkeypatch):
+    path = tmp_path/'source.png'
+    Image.new('RGB',(20,20)).save(path)
+    row = label([10,10,900,900], code='413.016')
+    row['is_sterile'] = True
+    monkeypatch.setattr('region_privacy.safe_product_regions', lambda *a:([],[]))
+    client = SimpleNamespace(responses=SimpleNamespace(create=lambda **k: response([row])))
+    result = analyze_labels(path, client, 'model', {}, lambda x:x)
+    assert result['items'][0]['code'] is None
+    assert result['items'][0]['ref_original'] == '413.016'
+    assert 'suffisso' in result['items'][0]['warning']
+
+
 def test_failed_full_page_analysis_exposes_safe_reason(tmp_path):
     from ocr_service import analyze_documents
     from ocr_repository import OriginalDocument

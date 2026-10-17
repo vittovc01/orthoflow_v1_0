@@ -8,7 +8,7 @@ import math
 from pathlib import Path
 
 from label_pipeline import (PIPELINE_VERSION, render_pages, image_url, compare_reads,
-                            crop_region, decode_barcodes, reconcile)
+                            crop_region, decode_barcodes, reconcile, verify_ref_evidence)
 
 
 PROMPT = """Leggi visivamente TUTTA la foto del foglio, prima di considerare i ritagli.
@@ -173,6 +173,9 @@ def analyze_labels(path, client, model, item_schema, parse):
                 except Exception:
                     pass
                 row['crop_data_url'] = image_url(crop)
+            # Keep literal identity checks from the previous reader, without
+            # requiring a crop or rebuilding a missing sterile REF suffix.
+            row = verify_ref_evidence(row, {'status':'whole_page','reads':[], 'candidates':[]})
             from ocr_review import assess_label
             row['assessment'] = assess_label(row)
             items.append(row)
