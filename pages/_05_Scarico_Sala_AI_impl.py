@@ -419,7 +419,8 @@ def save_one_document(intervention_id, procedure_date, customer_code, customer_n
 
 
 st.title("📸 Scarico Sala AI")
-st.caption(f"Versione OCR disponibile: {PIPELINE_VERSION} · lettura per singola etichetta")
+st.caption(f"Versione OCR disponibile: {PIPELINE_VERSION} · lettura della foto intera")
+st.info("L’AI legge la foto intera, senza ritagli preliminari: anche l’eventuale intestazione viene inviata al servizio AI. I dati dell’intestazione non vengono trascritti. L’archivio OCR conserva solo dati prodotto e ritagli verificati, mai la foto intera.")
 st.caption("Le etichette del produttore con REF e LOT rappresentano i materiali; gli adesivi interni di inventario non aumentano il conteggio.")
 st.caption("Foto/PDF → verifica → intervento e scarico MAG1. Intervento, righe e movimenti vengono salvati in un'unica transazione: o riesce tutto oppure non viene scritto nulla.")
 status = ai_status()
@@ -497,7 +498,7 @@ source_rows = [canonical_values(r) for r in (st.session_state.get("scarico_ai_ro
 if meta and st.session_state.get("scarico_source") == "AI":
     st.caption(f"Versione usata per questi risultati: {meta.get('pipeline_version') or 'precedente'}")
     if meta.get("pipeline_version") != PIPELINE_VERSION:
-        st.warning("Questi risultati provengono da una versione OCR precedente: rianalizza i documenti con il filtro privacy e la lettura aggiornati.")
+        st.warning("Questi risultati provengono da una versione OCR precedente: rianalizza i documenti con la lettura della foto intera aggiornata.")
         if st.button("Rianalizza i documenti con la versione aggiornata", key="scarico_reanalyze_version"):
             documents = st.session_state.get("scarico_documents") or []
             if documents and all(Path(d.get("path", "")).is_file() for d in documents):
@@ -583,6 +584,8 @@ if is_physical_ai:
             left, right = st.columns([2, 3])
             if r.get("crop_data_url"):
                 left.image(r["crop_data_url"], use_container_width=True)
+            else:
+                left.caption("Letta nella foto intera: confronta con l’originale caricato. L’assenza del ritaglio non elimina l’etichetta.")
             right.write({k:r.get(k) for k in ("codice", "lotto", "scadenza", "scadenza_originale", "descrizione", "produttore")})
             if r.get("local_ref_evidence"):
                 right.write({"REF letto inizialmente": r.get("ref_original"), "Controllo OCR locale": r["local_ref_evidence"]})

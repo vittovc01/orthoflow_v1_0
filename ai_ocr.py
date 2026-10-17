@@ -93,7 +93,7 @@ def analyze_document(path: str, mode: str="scarico_sala") -> Dict[str,Any]:
     if p.suffix.lower() not in SUPPORTED_DOCUMENT_EXT: raise ValueError("Formato non supportato. Usa PDF, JPG, JPEG, PNG o WEBP.")
     client=OpenAI(api_key=_secret("OPENAI_API_KEY"), timeout=60, max_retries=1); schema=DDT_SCHEMA if mode=="ddt" else SCARICO_SALA_SCHEMA
     if mode == "scarico_sala":
-        from label_pipeline import analyze_labels
+        from whole_page_labels import analyze_labels
         return analyze_labels(path, client, status["label_model"],
             {"type":"object","properties":ITEM_PROPERTIES,"required":ITEM_REQUIRED,"additionalProperties":False},
             _parse_response)

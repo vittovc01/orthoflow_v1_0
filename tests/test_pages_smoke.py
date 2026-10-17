@@ -230,7 +230,7 @@ def test_old_preprivacy_session_cannot_render_stale_header_crops(backend):
     at.session_state['scarico_ai_meta']={'pipeline_version':'old-unredacted-version'}
     at.switch_page('pages/05_Scarico_Sala_AI.py').run()
     assert not at.exception
-    assert any('filtro privacy' in w.value for w in at.warning)
+    assert any('lettura della foto intera' in w.value for w in at.warning)
     assert not at.expander
     at.run()
     assert not at.exception and not at.expander
