@@ -1,5 +1,37 @@
 # Lettura della foto intera, v15
 
+## Profilo v17
+
+La lettura operativa usa `SCARICO_FULL_PAGE_MODEL` (default `gpt-6-astra`),
+Responses API, `reasoning.effort=low` e dettaglio immagine `original`.
+Il precedente `SCARICO_LABEL_MODEL` appartiene al lettore locale/per-ritaglio e
+non seleziona il nuovo profilo. Il ruolo DDT mantiene `OPENAI_VISION_MODEL`.
+Un 404 su Astra usa esplicitamente `gpt-5.4` con gli stessi parametri immagine;
+il modello effettivo è riportato nei risultati. Altri errori non attivano downgrade.
+Il lettore non torna silenziosamente a GPT-4.1. Il collaudo conserva i modelli
+precedenti come opzioni di confronto e usa il nuovo profilo come default.
+
+Il caso misurato con GPT-4.1 ha prodotto letture da 8 e 9 osservazioni, con valori
+discordanti; il confronto v16 ne ha proposte 12. Questi risultati NON costituiscono
+un collaudo superato. Il passaggio v17 deve essere validato con chiamate reali.
+
+L'immagine mantiene tutta la pagina. Solo immagini eccedenti 28.000 patch o
+65.535 pixel su un lato vengono ridimensionate uniformemente, senza ritagliare
+prodotti o oscurare l'intestazione. I normali caricamenti mantengono le dimensioni.
+Client con timeout di 180 secondi per le sole etichette; DDT invariato a 60 secondi.
+Questo profilo privilegia la qualità e può aumentare tempi e costo API rispetto
+al precedente GPT-4.1. Nessuna modifica a strumenti, cache, Pro mode o contratti
+di output/registrazione.
+
+Fonti ufficiali verificate il 17 ottobre 2026:
+- https://developers.openai.com/api/docs/guides/images-vision
+- https://developers.openai.com/api/docs/models/gpt-6-astra
+- https://developers.openai.com/api/docs/models/gpt-5.4
+- https://developers.openai.com/api/docs/guides/latest-model
+
+La sezione seguente descrive il passaggio iniziale v15; la v16 aggiunge confronto
+di occorrenze e posizioni, la v17 il profilo immagine/modello sopra descritto.
+
 Il rilevatore locale della v14 limitava i pixel disponibili all'AI prima della
 trascrizione. Un adesivo perso, inclinato o tagliato non poteva essere recuperato
 dal modello. La v15 cambia l'ingresso della lettura, non soltanto il prompt.

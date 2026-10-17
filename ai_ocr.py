@@ -26,7 +26,7 @@ def ai_status():
     missing=[]
     if not _secret("OPENAI_API_KEY"): missing.append("OPENAI_API_KEY")
     if not _flag("ENABLE_AI_OCR","false"): missing.append("ENABLE_AI_OCR=true")
-    return {"enabled":not missing,"missing":missing,"model":_secret("OPENAI_VISION_MODEL","gpt-5-mini"),"label_model":_secret("SCARICO_LABEL_MODEL","gpt-4.1")}
+    return {"enabled":not missing,"missing":missing,"model":_secret("OPENAI_VISION_MODEL","gpt-5-mini"),"label_model":_secret("SCARICO_FULL_PAGE_MODEL","gpt-6-astra")}
 
 def ai_enabled(): return bool(ai_status()["enabled"])
 
@@ -91,7 +91,7 @@ def analyze_document(path: str, mode: str="scarico_sala") -> Dict[str,Any]:
     p=Path(path)
     if not p.exists(): raise FileNotFoundError(f"Documento non trovato: {path}")
     if p.suffix.lower() not in SUPPORTED_DOCUMENT_EXT: raise ValueError("Formato non supportato. Usa PDF, JPG, JPEG, PNG o WEBP.")
-    client=OpenAI(api_key=_secret("OPENAI_API_KEY"), timeout=60, max_retries=1); schema=DDT_SCHEMA if mode=="ddt" else SCARICO_SALA_SCHEMA
+    client=OpenAI(api_key=_secret("OPENAI_API_KEY"), timeout=180 if mode=="scarico_sala" else 60, max_retries=1); schema=DDT_SCHEMA if mode=="ddt" else SCARICO_SALA_SCHEMA
     if mode == "scarico_sala":
         from whole_page_labels import analyze_labels
         return analyze_labels(path, client, status["label_model"],

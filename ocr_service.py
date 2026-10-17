@@ -39,7 +39,7 @@ def analyze_documents(documents, *, analyzer, catalog=None, soon_days=90):
                 result['detection_warnings'].append(f'Documento {index+1}: analisi non completata ({reason}); riprovare o acquisire una nuova foto')
                 result['documents'].append({'index':index,'name':document.name,'status':'failed'})
                 continue
-            result['documents'].append({'index':index,'name':document.name,'status':'analyzed'})
+            result['documents'].append({'index':index,'name':document.name,'status':'analyzed','model':incoming.get('ocr_model')})
             for key in ('items','annotated_pages','detection_warnings','unconfirmed_regions'):
                 entries = incoming.get(key) or []
                 if key in ('items','annotated_pages','unconfirmed_regions'):

@@ -47,6 +47,23 @@ def failure_reason(exc):
     return reason
 
 
+def vision_options(model):
+    if model in {'gpt-6-astra','gpt-5.4'}:
+        return 'original', {'reasoning':{'effort':'low'}}
+    return 'high', {}
+
+
+def prepare_page(page, patch_budget=28000):
+    """Keep the whole page; bound original-detail requests below API limits."""
+    patches = lambda image: math.ceil(image.width/32)*math.ceil(image.height/32)
+    scale = min(1,65535/max(page.size),math.sqrt(patch_budget/patches(page)))
+    if scale < 1:
+        page = page.resize(tuple(max(1,math.floor(v*scale*.99)) for v in page.size))
+    while patches(page) > patch_budget:
+        page = page.resize(tuple(max(1,math.floor(v*.99)) for v in page.size))
+    return page
+
+
 def iou(a, b):
     intersection = max(0, min(a[2], b[2])-max(a[0], b[0])) * max(0, min(a[3], b[3])-max(a[1], b[1]))
     areas = [(r[2]-r[0])*(r[3]-r[1]) for r in (a, b)]
@@ -147,16 +164,29 @@ def analyze_labels(path, client, model, item_schema, parse):
         'warning':{'type':['string','null']}},'required':['labels','warning'],'additionalProperties':False}
     digest = hashlib.sha256(Path(path).read_bytes()).hexdigest()[:20]
     items, warnings = [], []
+    active_model = model
     for number, page in enumerate(render_pages(path), 1):
+        read_page = prepare_page(page)
         reads = []
         failures = []
         for attempt in range(2):
             try:
-                response = parse(client.responses.create(model=model, store=False,
-                    input=[{'role':'user','content':[
-                        {'type':'input_text','text':PROMPT + ('\nSeconda lettura indipendente: riconta tutti gli adesivi da zero.' if attempt else '')},
-                        {'type':'input_image','image_url':image_url(page),'detail':'high'}]}],
-                    text={'format':{'type':'json_schema','name':'whole_page_product_labels','schema':schema,'strict':True}}))
+                def request():
+                    detail, options = vision_options(active_model)
+                    return client.responses.create(model=active_model, store=False,
+                        input=[{'role':'user','content':[
+                            {'type':'input_text','text':PROMPT + ('\nSeconda lettura indipendente: riconta tutti gli adesivi da zero.' if attempt else '')},
+                            {'type':'input_image','image_url':image_url(read_page),'detail':detail}]}],
+                        text={'format':{'type':'json_schema','name':'whole_page_product_labels','schema':schema,'strict':True}}, **options)
+                try:
+                    raw_response = request()
+                except Exception as exc:
+                    if active_model != 'gpt-6-astra' or getattr(exc,'status_code',None) != 404:
+                        raise
+                    active_model = 'gpt-5.4'
+                    warnings.append('Modello gpt-6-astra non disponibile per questo account: lettura eseguita con gpt-5.4 a risoluzione originale')
+                    raw_response = request()
+                response = parse(raw_response)
                 reads.append(observations(response))
                 if response.get('warning'):
                     warnings.append(f'Pagina {number}: {response["warning"]}')
@@ -182,7 +212,7 @@ def analyze_labels(path, client, model, item_schema, parse):
             warnings.append(f'Pagina {number}: riscontri fotografici non disponibili; lettura della foto intera conservata')
         for index, row in enumerate(rows, 1):
             row.update(label_id=f'{digest}:p{number}:l{index}', page=number, source_document=digest,
-                       geometry_source='whole_page_read', crop_data_url=None)
+                       geometry_source='whole_page_read', crop_data_url=None, ocr_model=active_model)
             # Only near-identical independently validated product rectangles can
             # supply archived pixels. Never crop an arbitrary AI proposal.
             matches = [r for r in safe if iou(r['bbox'], row['bbox']) >= .85]
@@ -201,6 +231,7 @@ def analyze_labels(path, client, model, item_schema, parse):
             items.append(row)
     return {'document_type':'scarico_sala','items':items,'back_orders':[],
             'pipeline_version':PIPELINE_VERSION,'physical_label_count':len(items),
+            'ocr_model':active_model,
             'detection_warnings':warnings,'unconfirmed_regions':[], 'annotated_pages':[],
             'count_verified':False,'clinic_name':None,'clinical_record':None,
             'procedure_date':None,'surgeon':None,'confidence':0}

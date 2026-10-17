@@ -500,6 +500,9 @@ with upload_tab:
 meta = st.session_state.get("scarico_ai_meta", {}) or {}
 source_rows = [canonical_values(r) for r in (st.session_state.get("scarico_ai_rows", []) or [])]
 if meta and st.session_state.get("scarico_source") == "AI":
+    used_models = sorted({d['model'] for d in meta.get('documents',[]) if d.get('model')})
+    if used_models:
+        st.caption('Modello usato per questi risultati: ' + ', '.join(used_models))
     failed_analysis = bool(meta.get('documents')) and all(d.get('status') == 'failed' for d in meta['documents'])
     st.caption(f"Versione usata per questi risultati: {meta.get('pipeline_version') or ('analisi non completata' if failed_analysis else 'precedente')}")
     if meta.get("pipeline_version") != PIPELINE_VERSION:
