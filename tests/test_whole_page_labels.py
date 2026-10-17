@@ -5,7 +5,7 @@ from types import SimpleNamespace
 import pytest
 from PIL import Image
 
-from whole_page_labels import analyze_labels, merge_reads, observations
+from whole_page_labels import analyze_labels, merge_reads, observations, WholePageReadError, failure_reason
 
 
 def label(box, code='4515-70-005', lot='140664P', expiry='2036-02-29'):
@@ -42,6 +42,34 @@ def test_ambiguous_positions_do_not_establish_consensus():
     rows = [label([10,10,300,200]), label([10,10,310,210])]
     merged = merge_reads(rows, rows)
     assert all(r['code'] is None for r in merged)
+
+
+def test_different_partial_outlines_do_not_double_count_a_physical_label():
+    first = [label([0,400,400,600]),label([600,100,800,800])]
+    second = [label([100,450,300,550]),label([650,250,750,650])]
+    assert len(merge_reads(first,second)) == 2
+    assert all(r['code'] == '4515-70-005' for r in merge_reads(first,second))
+
+
+def test_agreed_product_multiset_preserves_physical_multiplicity_despite_bad_boxes():
+    first = [label([10,10,200,200]),label([10,700,200,900]),
+             label([500,10,700,200],lot='OTHER')]
+    second = [label([700,700,900,900]),label([700,400,900,600]),
+              label([10,400,200,600],lot='OTHER')]
+    merged = merge_reads(first, second)
+    assert len(merged) == 3
+    assert sum(r['quantity'] for r in merged if r['lot'] == '140664P') == 2
+    assert all(len(r['ocr_reads']) == 2 for r in merged)
+
+
+def test_normalized_rows_without_local_crop_evidence_remain_reviewable():
+    from ai_ocr import normalize_ai_items
+    from ocr_review import build_review
+    row = label([10,10,300,200])
+    row['label_id'] = 'whole-page-row'
+    normalized = normalize_ai_items({'items':[row]})
+    assert normalized[0]['local_ref_evidence'] is None
+    assert len(build_review({'items':normalized})['items']) == 1
 
 
 @pytest.mark.parametrize('box', [[-1,0,100,100],[0,0,0,100],[0,0,100,1001],[0,0,float('nan'),100]])
@@ -117,3 +145,35 @@ def test_existing_session_upgrades_cached_analyzer(monkeypatch):
     whole_page_runtime._signatures.clear()
     whole_page_runtime.refresh_ocr_modules()
     assert ai_ocr.analyze_document is not stale
+
+
+def test_provider_diagnostics_do_not_echo_secrets():
+    error = RuntimeError('secret credential or clinical payload')
+    assert failure_reason(error) == 'RuntimeError'
+
+
+def test_full_page_reader_keeps_sterile_ref_suffix_guard(tmp_path, monkeypatch):
+    path = tmp_path/'source.png'
+    Image.new('RGB',(20,20)).save(path)
+    row = label([10,10,900,900], code='413.016')
+    row['is_sterile'] = True
+    monkeypatch.setattr('region_privacy.safe_product_regions', lambda *a:([],[]))
+    client = SimpleNamespace(responses=SimpleNamespace(create=lambda **k: response([row])))
+    result = analyze_labels(path, client, 'model', {}, lambda x:x)
+    assert result['items'][0]['code'] is None
+    assert result['items'][0]['ref_original'] == '413.016'
+    assert 'suffisso' in result['items'][0]['warning']
+
+
+def test_failed_full_page_analysis_exposes_safe_reason(tmp_path):
+    from ocr_service import analyze_documents
+    from ocr_repository import OriginalDocument
+    image = BytesIO()
+    Image.new('RGB',(20,20)).save(image,format='PNG')
+    def fail(*args, **kwargs):
+        from whole_page_labels import WholePageReadError
+        raise WholePageReadError(1, ['BadRequestError HTTP 400'])
+    result = analyze_documents([OriginalDocument('products.png',image.getvalue())], analyzer=fail)
+    assert result['documents'][0]['status'] == 'failed'
+    assert 'BadRequestError HTTP 400' in result['detection_warnings'][0]
+    assert not result['items']

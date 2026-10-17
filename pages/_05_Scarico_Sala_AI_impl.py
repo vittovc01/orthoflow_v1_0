@@ -357,6 +357,10 @@ def run_ai(path, documents=None):
             try: extraction_catalog=load_gtin_catalog(sb())
             except Exception: extraction_catalog=None
             meta = analyze_documents(originals, analyzer=analyze_document,catalog=extraction_catalog)
+            if meta.get('documents') and all(d.get('status') == 'failed' for d in meta['documents']):
+                for warning in meta.get('detection_warnings', []):
+                    st.error(warning)
+                return
             combined_rows = normalize_ai_items(meta)
         meta["physical_label_count"] = len(combined_rows)
         meta["items"] = combined_rows
@@ -496,9 +500,14 @@ with upload_tab:
 meta = st.session_state.get("scarico_ai_meta", {}) or {}
 source_rows = [canonical_values(r) for r in (st.session_state.get("scarico_ai_rows", []) or [])]
 if meta and st.session_state.get("scarico_source") == "AI":
-    st.caption(f"Versione usata per questi risultati: {meta.get('pipeline_version') or 'precedente'}")
+    failed_analysis = bool(meta.get('documents')) and all(d.get('status') == 'failed' for d in meta['documents'])
+    st.caption(f"Versione usata per questi risultati: {meta.get('pipeline_version') or ('analisi non completata' if failed_analysis else 'precedente')}")
     if meta.get("pipeline_version") != PIPELINE_VERSION:
-        st.warning("Questi risultati provengono da una versione OCR precedente: rianalizza i documenti con la lettura della foto intera aggiornata.")
+        if failed_analysis:
+            for warning in meta.get('detection_warnings', []):
+                st.error(warning)
+        else:
+            st.warning("Questi risultati provengono da una versione OCR precedente: rianalizza i documenti con la lettura della foto intera aggiornata.")
         if st.button("Rianalizza i documenti con la versione aggiornata", key="scarico_reanalyze_version"):
             documents = st.session_state.get("scarico_documents") or []
             if documents and all(Path(d.get("path", "")).is_file() for d in documents):
@@ -556,10 +565,11 @@ if is_physical_ai:
                     st.session_state["scarico_ai_meta"]=meta
                     st.session_state["scarico_editor_revision"]=int(st.session_state.get("scarico_editor_revision",0))+1
                     st.rerun()
-    with st.expander("Etichette individuate — intestazione oscurata"):
-        for page in meta.get("annotated_pages", []) or []:
-            if page.get("page_data_url"):
-                st.image(page["page_data_url"], caption=f"Pagina {page.get('page')}")
+    if meta.get("annotated_pages"):
+        with st.expander("Riscontri fotografici delle etichette"):
+            for page in meta.get("annotated_pages", []) or []:
+                if page.get("page_data_url"):
+                    st.image(page["page_data_url"], caption=f"Pagina {page.get('page')}")
     cols = st.columns(3)
     cols[0].metric("Etichette individuate", len(source_rows))
     cols[1].metric("Articoli distinti (REF / lotto)", len({(r.get("codice"), r.get("lotto")) for r in source_rows if r.get("codice") and (r.get("lotto") or r.get("senza_lotto"))}))

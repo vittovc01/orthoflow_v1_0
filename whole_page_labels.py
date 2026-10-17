@@ -5,10 +5,11 @@ are not copied into extraction results or the product-only OCR archive.
 """
 import hashlib
 import math
+from collections import Counter
 from pathlib import Path
 
 from label_pipeline import (PIPELINE_VERSION, render_pages, image_url, compare_reads,
-                            crop_region, decode_barcodes, reconcile)
+                            crop_region, decode_barcodes, reconcile, verify_ref_evidence)
 
 
 PROMPT = """Leggi visivamente TUTTA la foto del foglio, prima di considerare i ritagli.
@@ -28,10 +29,37 @@ source_text deve contenere soltanto REF, lotto e scadenza del prodotto.
 """
 
 
+class WholePageReadError(RuntimeError):
+    def __init__(self, page, failures):
+        self.public_reason = f'Pagina {page}: ' + '; '.join(failures)
+        super().__init__(self.public_reason)
+
+
+def failure_reason(exc):
+    reason = type(exc).__name__
+    status = getattr(exc, 'status_code', None)
+    if isinstance(status, int):
+        reason += f' HTTP {status}'
+    # Schema diagnostics contain only our schema, never image/provider payloads,
+    # credentials or clinical text. Other provider messages are not exposed.
+    if getattr(exc, 'code', None) == 'invalid_json_schema':
+        reason += ': ' + str(getattr(exc, 'message', 'Schema non valido'))[:700]
+    return reason
+
+
 def iou(a, b):
     intersection = max(0, min(a[2], b[2])-max(a[0], b[0])) * max(0, min(a[3], b[3])-max(a[1], b[1]))
     areas = [(r[2]-r[0])*(r[3]-r[1]) for r in (a, b)]
     return intersection / (sum(areas)-intersection) if intersection else 0
+
+
+def spatial_score(a, b):
+    # Full-page models may outline different portions of the same partly
+    # covered/vertical sticker. Its physical centre remains a useful anchor.
+    distance = math.hypot((a[0]+a[2]-b[0]-b[2])/2, (a[1]+a[3]-b[1]-b[3])/2)
+    diagonal = (math.hypot(a[2]-a[0],a[3]-a[1]) + math.hypot(b[2]-b[0],b[3]-b[1]))/2
+    proximity = .5 * max(0, 1-distance/max(1,diagonal))
+    return max(iou(a,b), proximity)
 
 
 def observations(result):
@@ -56,7 +84,26 @@ def observations(result):
 
 def merge_reads(first, second):
     """One-to-one spatial consensus; product identity NEVER deduplicates labels."""
-    edges = sorted(((iou(a['bbox'], b['bbox']), i, j) for i, a in enumerate(first)
+    def identity(row):
+        return tuple(str(row.get(k) or '').strip() for k in ('code','lot','expiry'))
+    # When both complete transcriptions agree on the entire product multiset,
+    # bounding-box disagreement must not increase the physical quantity. Match
+    # occurrences one to one, retaining every occurrence in each pass (including
+    # two, three, ... identical stickers); this is not deduplication by identity.
+    keys_a, keys_b = [identity(r) for r in first], [identity(r) for r in second]
+    duplicate_positions = any(iou(rows[i]['bbox'], rows[j]['bbox']) > .85
+        for rows in (first,second) for i in range(len(rows)) for j in range(i))
+    if (first and all(all(key) for key in keys_a+keys_b) and
+            Counter(keys_a) == Counter(keys_b) and not duplicate_positions):
+        available = set(range(len(second)))
+        result = []
+        for a,key in zip(first,keys_a):
+            j = max((j for j in available if keys_b[j] == key),
+                    key=lambda j:spatial_score(a['bbox'],second[j]['bbox']))
+            available.remove(j)
+            result.append(compare_reads(a,second[j]))
+        return result
+    edges = sorted(((spatial_score(a['bbox'], b['bbox']), i, j) for i, a in enumerate(first)
                     for j, b in enumerate(second)), reverse=True)
     matched, used = {}, set()
     for score, i, j in edges:
@@ -71,8 +118,13 @@ def merge_reads(first, second):
             b = second[matched[i]]
             row = compare_reads(a, b)
             # Competing spatial matches cannot establish a reliable identity.
-            ambiguous = (sum(iou(a['bbox'], x['bbox']) >= .35 for x in second) != 1 or
-                         sum(iou(b['bbox'], x['bbox']) >= .35 for x in first) != 1)
+            chosen = spatial_score(a['bbox'], b['bbox'])
+            ambiguous = (any(iou(a['bbox'], x['bbox']) > .85 for k,x in enumerate(first) if k != i) or
+                         any(iou(b['bbox'], x['bbox']) > .85 for k,x in enumerate(second) if k != matched[i]) or
+                         any(spatial_score(a['bbox'], x['bbox']) >= chosen-.05
+                             for k,x in enumerate(second) if k != matched[i]) or
+                         any(spatial_score(b['bbox'], x['bbox']) >= chosen-.05
+                             for k,x in enumerate(first) if k != i))
             if ambiguous:
                 for field in ('code','lot','expiry'):
                     row[field] = None
@@ -97,6 +149,7 @@ def analyze_labels(path, client, model, item_schema, parse):
     items, warnings = [], []
     for number, page in enumerate(render_pages(path), 1):
         reads = []
+        failures = []
         for attempt in range(2):
             try:
                 response = parse(client.responses.create(model=model, store=False,
@@ -109,10 +162,12 @@ def analyze_labels(path, client, model, item_schema, parse):
                     warnings.append(f'Pagina {number}: {response["warning"]}')
             except Exception as exc:
                 reads.append(None)
+                failures.append(failure_reason(exc))
                 warnings.append(f'Pagina {number}: lettura {attempt+1} non completata ({type(exc).__name__}); verificare il conteggio sul foglio')
         if reads == [None, None]:
-            raise RuntimeError(f'Pagina {number}: entrambe le letture fallite; riprovare, nessuno scarico creato')
+            raise WholePageReadError(number, ['entrambe le letture fallite', *failures])
         rows = merge_reads(reads[0] or [], reads[1] or [])
+        warnings.append(f'Pagina {number}: prima lettura {len(reads[0] or [])}, seconda lettura {len(reads[1] or [])}, etichette da verificare {len(rows)}')
         if not rows:
             warnings.append(f'Pagina {number}: nessuna etichetta letta; aggiungere le righe mancanti o riprovare')
         if reads[0] is None or reads[1] is None or len(reads[0]) != len(reads[1]):
@@ -138,6 +193,9 @@ def analyze_labels(path, client, model, item_schema, parse):
                 except Exception:
                     pass
                 row['crop_data_url'] = image_url(crop)
+            # Keep literal identity checks from the previous reader, without
+            # requiring a crop or rebuilding a missing sterile REF suffix.
+            row = verify_ref_evidence(row, {'status':'whole_page','reads':[], 'candidates':[]})
             from ocr_review import assess_label
             row['assessment'] = assess_label(row)
             items.append(row)
