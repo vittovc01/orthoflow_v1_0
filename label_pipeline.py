@@ -13,7 +13,7 @@ from pathlib import Path
 
 from PIL import Image, ImageOps, ImageFilter
 
-PIPELINE_VERSION = 'physical-label-v14-oriented-product-anchors'
+PIPELINE_VERSION = 'physical-label-v15-whole-page-reading'
 
 
 def local_ref_evidence(image):

@@ -1,5 +1,9 @@
 # Riconoscimento indipendente dall'orientamento del modulo
 
+Documento storico della v14. Dalla v15 la lettura primaria usa la pagina intera:
+vedere `whole-page-reading.md`. Le garanzie di esclusione dell'intestazione dalle
+chiamate esterne descritte qui si riferiscono esclusivamente alla vecchia v14.
+
 La pipeline v14 applica il filtro privacy nell'orientamento di lettura dei prodotti,
 ricavato localmente dai DataMatrix validi (oppure dagli ancoraggi fisici). Le coordinate
 sono riportate alla pagina originale: nessun dato clinico va ai servizi OCR esterni.
