@@ -5,6 +5,7 @@ are not copied into extraction results or the product-only OCR archive.
 """
 import hashlib
 import math
+from collections import Counter
 from pathlib import Path
 
 from label_pipeline import (PIPELINE_VERSION, render_pages, image_url, compare_reads,
@@ -83,6 +84,25 @@ def observations(result):
 
 def merge_reads(first, second):
     """One-to-one spatial consensus; product identity NEVER deduplicates labels."""
+    def identity(row):
+        return tuple(str(row.get(k) or '').strip() for k in ('code','lot','expiry'))
+    # When both complete transcriptions agree on the entire product multiset,
+    # bounding-box disagreement must not increase the physical quantity. Match
+    # occurrences one to one, retaining every occurrence in each pass (including
+    # two, three, ... identical stickers); this is not deduplication by identity.
+    keys_a, keys_b = [identity(r) for r in first], [identity(r) for r in second]
+    duplicate_positions = any(iou(rows[i]['bbox'], rows[j]['bbox']) > .85
+        for rows in (first,second) for i in range(len(rows)) for j in range(i))
+    if (first and all(all(key) for key in keys_a+keys_b) and
+            Counter(keys_a) == Counter(keys_b) and not duplicate_positions):
+        available = set(range(len(second)))
+        result = []
+        for a,key in zip(first,keys_a):
+            j = max((j for j in available if keys_b[j] == key),
+                    key=lambda j:spatial_score(a['bbox'],second[j]['bbox']))
+            available.remove(j)
+            result.append(compare_reads(a,second[j]))
+        return result
     edges = sorted(((spatial_score(a['bbox'], b['bbox']), i, j) for i, a in enumerate(first)
                     for j, b in enumerate(second)), reverse=True)
     matched, used = {}, set()

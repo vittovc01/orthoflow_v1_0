@@ -51,6 +51,17 @@ def test_different_partial_outlines_do_not_double_count_a_physical_label():
     assert all(r['code'] == '4515-70-005' for r in merge_reads(first,second))
 
 
+def test_agreed_product_multiset_preserves_physical_multiplicity_despite_bad_boxes():
+    first = [label([10,10,200,200]),label([10,700,200,900]),
+             label([500,10,700,200],lot='OTHER')]
+    second = [label([700,700,900,900]),label([700,400,900,600]),
+              label([10,400,200,600],lot='OTHER')]
+    merged = merge_reads(first, second)
+    assert len(merged) == 3
+    assert sum(r['quantity'] for r in merged if r['lot'] == '140664P') == 2
+    assert all(len(r['ocr_reads']) == 2 for r in merged)
+
+
 def test_normalized_rows_without_local_crop_evidence_remain_reviewable():
     from ai_ocr import normalize_ai_items
     from ocr_review import build_review
