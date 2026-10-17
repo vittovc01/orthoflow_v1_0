@@ -30,7 +30,7 @@ if not status['enabled']:
     st.stop()
 
 model = st.selectbox('Modello per il collaudo', list(dict.fromkeys([
-    status['model'], 'gpt-4.1', 'gpt-5-mini'
+    status['label_model'], 'gpt-6-astra', 'gpt-5.4', status['model'], 'gpt-4.1', 'gpt-5-mini'
 ])))
 upload = st.file_uploader('Foto originale da verificare', type=['jpg','jpeg','png','webp','pdf'])
 if st.button('Analizza senza scaricare', disabled=upload is None):
@@ -42,13 +42,13 @@ if st.button('Analizza senza scaricare', disabled=upload is None):
         with tempfile.NamedTemporaryFile(suffix=Path(upload.name).suffix.lower(), delete=False) as f:
             f.write(upload.getvalue())
             path = f.name
-        client = OpenAI(api_key=_secret('OPENAI_API_KEY'), timeout=60, max_retries=1)
+        client = OpenAI(api_key=_secret('OPENAI_API_KEY'), timeout=180, max_retries=1)
         with st.spinner('Due letture indipendenti della foto intera…'):
             result = analyze_labels(path, client, model,
                 {'type':'object','properties':ITEM_PROPERTIES,'required':ITEM_REQUIRED,
                  'additionalProperties':False}, _parse_response)
         st.session_state['ocr_acceptance_result'] = result
-        st.session_state['ocr_acceptance_model'] = model
+        st.session_state['ocr_acceptance_model'] = result.get('ocr_model',model)
     except Exception as exc:
         st.session_state.pop('ocr_acceptance_result', None)
         reason = exc.public_reason if isinstance(exc, WholePageReadError) else type(exc).__name__

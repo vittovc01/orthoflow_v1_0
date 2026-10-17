@@ -9,6 +9,7 @@ Apri **Manage app → Settings → Secrets** e aggiungi:
 ```toml
 OPENAI_API_KEY = "sk-..."
 OPENAI_VISION_MODEL = "gpt-5-mini"
+SCARICO_FULL_PAGE_MODEL = "gpt-6-astra"
 ENABLE_AI_OCR = true
 ```
 
