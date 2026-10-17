@@ -28,6 +28,24 @@ source_text deve contenere soltanto REF, lotto e scadenza del prodotto.
 """
 
 
+class WholePageReadError(RuntimeError):
+    def __init__(self, page, failures):
+        self.public_reason = f'Pagina {page}: ' + '; '.join(failures)
+        super().__init__(self.public_reason)
+
+
+def failure_reason(exc):
+    reason = type(exc).__name__
+    status = getattr(exc, 'status_code', None)
+    if isinstance(status, int):
+        reason += f' HTTP {status}'
+    # Schema diagnostics contain only our schema, never image/provider payloads,
+    # credentials or clinical text. Other provider messages are not exposed.
+    if getattr(exc, 'code', None) == 'invalid_json_schema':
+        reason += ': ' + str(getattr(exc, 'message', 'Schema non valido'))[:700]
+    return reason
+
+
 def iou(a, b):
     intersection = max(0, min(a[2], b[2])-max(a[0], b[0])) * max(0, min(a[3], b[3])-max(a[1], b[1]))
     areas = [(r[2]-r[0])*(r[3]-r[1]) for r in (a, b)]
@@ -97,6 +115,7 @@ def analyze_labels(path, client, model, item_schema, parse):
     items, warnings = [], []
     for number, page in enumerate(render_pages(path), 1):
         reads = []
+        failures = []
         for attempt in range(2):
             try:
                 response = parse(client.responses.create(model=model, store=False,
@@ -109,9 +128,10 @@ def analyze_labels(path, client, model, item_schema, parse):
                     warnings.append(f'Pagina {number}: {response["warning"]}')
             except Exception as exc:
                 reads.append(None)
+                failures.append(failure_reason(exc))
                 warnings.append(f'Pagina {number}: lettura {attempt+1} non completata ({type(exc).__name__}); verificare il conteggio sul foglio')
         if reads == [None, None]:
-            raise RuntimeError(f'Pagina {number}: entrambe le letture fallite; riprovare, nessuno scarico creato')
+            raise WholePageReadError(number, ['entrambe le letture fallite', *failures])
         rows = merge_reads(reads[0] or [], reads[1] or [])
         if not rows:
             warnings.append(f'Pagina {number}: nessuna etichetta letta; aggiungere le righe mancanti o riprovare')

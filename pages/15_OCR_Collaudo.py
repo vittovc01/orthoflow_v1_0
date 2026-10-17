@@ -15,11 +15,15 @@ if not st.session_state.get('user') or not (
 
 from openai import OpenAI
 from ai_ocr import ai_status, _secret, ITEM_PROPERTIES, ITEM_REQUIRED, _parse_response
-from label_pipeline import analyze_labels, PIPELINE_VERSION
+from whole_page_runtime import refresh_ocr_modules
+refresh_ocr_modules()
+from whole_page_labels import analyze_labels, WholePageReadError
+from label_pipeline import PIPELINE_VERSION
 
 st.title('🔬 Collaudo OCR')
 st.caption(PIPELINE_VERSION)
 st.info('Solo riconoscimento: questa pagina non crea interventi e non scarica materiali.')
+st.info('La lettura invia la foto intera al servizio AI, inclusa l’eventuale intestazione. Per collaudi usare foto senza dati paziente.')
 status = ai_status()
 if not status['enabled']:
     st.error('OCR non configurato: ' + ', '.join(status['missing']))
@@ -39,7 +43,7 @@ if st.button('Analizza senza scaricare', disabled=upload is None):
             f.write(upload.getvalue())
             path = f.name
         client = OpenAI(api_key=_secret('OPENAI_API_KEY'), timeout=60, max_retries=1)
-        with st.spinner('Individuazione e lettura indipendente delle singole etichette…'):
+        with st.spinner('Due letture indipendenti della foto intera…'):
             result = analyze_labels(path, client, model,
                 {'type':'object','properties':ITEM_PROPERTIES,'required':ITEM_REQUIRED,
                  'additionalProperties':False}, _parse_response)
@@ -47,7 +51,8 @@ if st.button('Analizza senza scaricare', disabled=upload is None):
         st.session_state['ocr_acceptance_model'] = model
     except Exception as exc:
         st.session_state.pop('ocr_acceptance_result', None)
-        st.error('Collaudo interrotto (' + type(exc).__name__ + '). Nessun movimento di magazzino effettuato.')
+        reason = exc.public_reason if isinstance(exc, WholePageReadError) else type(exc).__name__
+        st.error('Collaudo interrotto (' + reason + '). Nessun movimento di magazzino effettuato.')
     finally:
         if path:
             os.unlink(path)
@@ -66,7 +71,8 @@ if result:
     st.dataframe([{k:r.get(k) for k in keys} for r in result['items']], hide_index=True)
     for row in result['items']:
         with st.expander(str(row['label_id']) + ' · ' + str(row.get('code') or 'REF da verificare')):
-            st.image(row['crop_data_url'])
+            if row.get('crop_data_url'):
+                st.image(row['crop_data_url'])
             st.json({k:v for k,v in row.items() if k != 'crop_data_url'})
     st.download_button('Scarica evidenze del collaudo', json.dumps(result,ensure_ascii=False,indent=2),
                        file_name='ocr-acceptance.json', mime='application/json')

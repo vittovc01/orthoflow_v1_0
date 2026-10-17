@@ -34,7 +34,9 @@ def analyze_documents(documents, *, analyzer, catalog=None, soon_days=90):
                 incoming = analyzer(str(path),mode='scarico_sala')
                 seen_documents[fingerprint] = index
             except Exception as exc:
-                result['detection_warnings'].append(f'Documento {index+1}: analisi non completata ({type(exc).__name__}); riprovare o acquisire una nuova foto')
+                from whole_page_labels import WholePageReadError
+                reason = exc.public_reason if isinstance(exc, WholePageReadError) else type(exc).__name__
+                result['detection_warnings'].append(f'Documento {index+1}: analisi non completata ({reason}); riprovare o acquisire una nuova foto')
                 result['documents'].append({'index':index,'name':document.name,'status':'failed'})
                 continue
             result['documents'].append({'index':index,'name':document.name,'status':'analyzed'})

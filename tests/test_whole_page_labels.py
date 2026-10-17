@@ -5,7 +5,7 @@ from types import SimpleNamespace
 import pytest
 from PIL import Image
 
-from whole_page_labels import analyze_labels, merge_reads, observations
+from whole_page_labels import analyze_labels, merge_reads, observations, WholePageReadError, failure_reason
 
 
 def label(box, code='4515-70-005', lot='140664P', expiry='2036-02-29'):
@@ -117,3 +117,22 @@ def test_existing_session_upgrades_cached_analyzer(monkeypatch):
     whole_page_runtime._signatures.clear()
     whole_page_runtime.refresh_ocr_modules()
     assert ai_ocr.analyze_document is not stale
+
+
+def test_provider_diagnostics_do_not_echo_secrets():
+    error = RuntimeError('secret credential or clinical payload')
+    assert failure_reason(error) == 'RuntimeError'
+
+
+def test_failed_full_page_analysis_exposes_safe_reason(tmp_path):
+    from ocr_service import analyze_documents
+    from ocr_repository import OriginalDocument
+    image = BytesIO()
+    Image.new('RGB',(20,20)).save(image,format='PNG')
+    def fail(*args, **kwargs):
+        from whole_page_labels import WholePageReadError
+        raise WholePageReadError(1, ['BadRequestError HTTP 400'])
+    result = analyze_documents([OriginalDocument('products.png',image.getvalue())], analyzer=fail)
+    assert result['documents'][0]['status'] == 'failed'
+    assert 'BadRequestError HTTP 400' in result['detection_warnings'][0]
+    assert not result['items']
