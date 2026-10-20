@@ -622,7 +622,19 @@ def render_material_editor():
         st.divider()
         st.subheader("✅ Lista materiali riconosciuti")
         st.caption("Modifica REF, lotto, scadenza, descrizione e quantità direttamente nella lista. Puoi aggiungere o eliminare righe; quelle escluse non vengono scaricate né esportate.")
-        df_rows = pd.DataFrame(rows)
+        editor_rows = rows
+        if is_physical_ai:
+            baseline_identity = (
+                clean(selected_client.get("codice_cliente")),
+                st.session_state.get("scarico_editor_revision", 0),
+                tuple(r.get("label_id") for r in rows),
+            )
+            baseline = st.session_state.get("scarico_editor_baseline")
+            if not baseline or baseline["identity"] != baseline_identity:
+                baseline = {"identity": baseline_identity, "rows": [dict(r) for r in rows]}
+                st.session_state["scarico_editor_baseline"] = baseline
+            editor_rows = baseline["rows"]
+        df_rows = pd.DataFrame(editor_rows)
         if is_physical_ai and "label_id" not in df_rows: df_rows["label_id"] = pd.Series(dtype="object")
         preferred = ["codice", "lotto", "scadenza", "descrizione", "quantita", "escludi_riga", "senza_lotto", "jnj_verificato_manualmente"]
         if "escludi_riga" not in df_rows:
