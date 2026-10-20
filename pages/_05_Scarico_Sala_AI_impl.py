@@ -627,7 +627,7 @@ def render_material_editor():
             baseline_identity = (
                 clean(selected_client.get("codice_cliente")),
                 st.session_state.get("scarico_editor_revision", 0),
-                tuple(r.get("label_id") for r in rows),
+                tuple((r.get("label_id"), bool(r.get("jnj_verificato_manualmente")), bool(r.get("escludi_riga"))) for r in rows),
             )
             baseline = st.session_state.get("scarico_editor_baseline")
             if not baseline or baseline["identity"] != baseline_identity:
