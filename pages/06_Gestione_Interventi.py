@@ -467,8 +467,38 @@ if any(clean(r.get("prezzo_source")) == "RICALCOLO_SENZA_OFFERTA" and r.get("pre
     st.warning("Offerta non disponibile o discordante per alcune righe: inserisci i prezzi mancanti e salva. Il totale è incompleto.")
 st.info("Puoi correggere tutti i dati operativi della riga. Se cambi codice, lotto, quantità o magazzino, P.M. Medical crea automaticamente una rettifica: riporta a magazzino il vecchio materiale e scarica quello corretto. Prezzo e descrizione non muovono la giacenza.")
 
+# Keep the working values across reruns, rebuilding calculated totals after
+# every committed cell edit. Saved rows remain the comparison/audit baseline.
+editor_context = (customer_code, line)
+editor_signature = df.to_json(orient="split", date_format="iso")
+working_key = f"intervention_working_{intervention_id}"
+working = st.session_state.get(working_key)
+if working is None or working["context"] != editor_context or working["signature"] != editor_signature:
+    working = {"context": editor_context, "signature": editor_signature,
+               "revision": (working["revision"] + 1) if working else 0,
+               "frame": df.copy(deep=True).astype(object)}
+editor_key = f"intervento_editor_full_{intervention_id}_{customer_code}_{line}_{working['revision']}"
+delta = st.session_state.get(editor_key, {})
+if isinstance(delta, dict) and delta.get("edited_rows"):
+    working_frame = working["frame"].copy(deep=True)
+    editable_columns = set(working_frame.columns) - {"id", "prezzo_offerta", "fonte", "totale"}
+    if is_malzoni:
+        editable_columns.discard("origine")
+    for position, fields in delta["edited_rows"].items():
+        position = int(position)
+        if 0 <= position < len(working_frame):
+            for column, value in fields.items():
+                if column in editable_columns:
+                    working_frame.at[working_frame.index[position], column] = value
+    working_frame["totale"] = (pd.to_numeric(working_frame["quantita"], errors="coerce")
+                               * pd.to_numeric(working_frame["prezzo"], errors="coerce"))
+    working["frame"] = working_frame
+    working["revision"] += 1
+    editor_key = f"intervento_editor_full_{intervention_id}_{customer_code}_{line}_{working['revision']}"
+st.session_state[working_key] = working
+
 edited = st.data_editor(
-    df,
+    working["frame"],
     hide_index=True,
     use_container_width=True,
     num_rows="fixed",
@@ -491,22 +521,32 @@ edited = st.data_editor(
         "prezzo_offerta": st.column_config.NumberColumn("Prezzo offerta €", format="€ %.2f"),
         "fonte": st.column_config.TextColumn("Fonte"),
         "reintegro": st.column_config.CheckboxColumn("Reintegro"),
-        "totale": st.column_config.NumberColumn("Totale attuale €", format="€ %.2f"),
+        "totale": st.column_config.NumberColumn("Totale riga €", format="€ %.2f"),
     },
-    key=f"intervento_editor_full_{intervention_id}_{customer_code}_{line}",
+    key=editor_key,
 )
 
 preview = edited.copy()
 preview["totale_nuovo"] = pd.to_numeric(preview["quantita"], errors="coerce").fillna(0) * pd.to_numeric(preview["prezzo"], errors="coerce")
 new_total = preview["totale_nuovo"].fillna(0).sum()
-old_total = pd.to_numeric(df["totale"], errors="coerce").fillna(0).sum()
+old_total = sum(float(r.get("totale") or 0) for r in rows)
+missing_prices = pd.to_numeric(preview["prezzo"], errors="coerce").isna().sum()
 m1, m2 = st.columns(2)
-m1.metric("Totale attuale", f"€ {old_total:,.2f}")
-m2.metric("Nuovo totale", f"€ {new_total:,.2f}")
+m1.metric("Totale salvato", f"€ {old_total:,.2f}")
+if pricing_changed and price_preview is not None:
+    pending_total = sum(float(r.get("totale_nuovo") or 0) for r in price_preview)
+    pending_missing = any(r.get("prezzo_nuovo") is None for r in price_preview)
+    m2.metric("Subtotale nuova struttura" if pending_missing else "Totale nuova struttura (da salvare)", f"€ {pending_total:,.2f}")
+    st.caption("Per applicare questi prezzi alla tabella, premi Salva dati intervento. La tabella sotto la testata si riferisce ancora alla struttura salvata.")
+else:
+    m2.metric("Subtotale con modifiche" if missing_prices else "Totale con modifiche", f"€ {new_total:,.2f}")
+    if missing_prices:
+        st.warning(f"Totale incompleto: {missing_prices} righe hanno un prezzo mancante o non valido.")
+st.caption("Dopo aver scritto in una cella, premi Invio o esci dalla cella per aggiornare il totale.")
 
 confirm = st.checkbox("Confermo di aver verificato codice, lotto, scadenza, quantità e prezzo delle righe modificate.", key=f"confirm_full_{intervention_id}_{customer_code}_{line}")
 
-if st.button("💾 Salva tutte le modifiche", type="primary", use_container_width=True, disabled=not confirm):
+if st.button("💾 Salva tutte le modifiche", type="primary", use_container_width=True, disabled=not confirm or pricing_changed):
     original_by_id = {int(r["id"]): r for r in prepared}
     changes = []
     errors = []
