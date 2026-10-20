@@ -10,7 +10,7 @@ from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor
 from ai_failures import failure_kind, provider_notice, request_with_backoff
 
-from label_pipeline import (PIPELINE_VERSION, render_pages, image_url, compare_reads,
+from label_pipeline import (PIPELINE_VERSION, iter_pages as render_pages, image_url, compare_reads,
                             crop_region, decode_barcodes, reconcile, verify_ref_evidence)
 
 
