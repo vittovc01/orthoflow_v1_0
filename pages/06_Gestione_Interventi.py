@@ -318,7 +318,42 @@ with st.form(f"header_{intervention_id}"):
         edit_notes = st.text_area("Note", value=clean(intervention.get("note")), height=88)
     save_header = st.form_submit_button("💾 Salva dati intervento", use_container_width=True)
 
+
+pricing_changed = (
+    clean(edit_customer_code) != saved_customer_code
+    or clean(edit_line).upper() != clean(intervention.get("linea")).upper()
+)
+price_preview = None
+if pricing_changed:
+    st.info("Salvando la nuova struttura o linea, tutti i prezzi saranno ricalcolati con la relativa offerta valida alla data dell’intervento, inclusi quelli manuali precedenti.")
+    try:
+        price_preview = sb().rpc("anteprima_prezzi_cambio_struttura", {
+            "p_intervento_id": intervention_id,
+            "p_codice_cliente": clean(edit_customer_code),
+            "p_linea": clean(edit_line),
+            "p_data": edit_date.isoformat(),
+        }).execute().data
+        if not isinstance(price_preview, list):
+            raise ValueError("Anteprima non disponibile")
+        if price_preview:
+            st.subheader("Prezzi della nuova struttura")
+            st.dataframe(pd.DataFrame(price_preview).rename(columns={
+                "codice":"REF","lotto":"Lotto","prezzo_precedente":"Prezzo precedente",
+                "prezzo_nuovo":"Nuovo prezzo","totale_nuovo":"Nuovo totale","esito":"Esito",
+                "offerta_id":"Offerta",
+            }).drop(columns=["riga_id"]), hide_index=True, use_container_width=True)
+            missing = sum(r.get("prezzo_nuovo") is None for r in price_preview)
+            total = sum(float(r.get("totale_nuovo") or 0) for r in price_preview)
+            st.metric("Totale con la nuova offerta" if not missing else "Subtotale dei prezzi disponibili", f"€ {total:,.2f}")
+            if missing:
+                st.warning(f"{missing} righe senza un prezzo univoco: il vecchio prezzo verrà rimosso. Inserisci il prezzo dopo il salvataggio; il totale resta incompleto.")
+    except Exception:
+        price_preview = None
+        st.error("Ricalcolo prezzi non disponibile: nessuna modifica verrà salvata. Riprova o contatta la direzione.")
+
 if save_header:
+    if pricing_changed and price_preview is None:
+        st.stop()
     try:
         if clean(edit_customer_code) != "9010013":
             structure_rows = (sb().table("righe_intervento").select("id")
@@ -345,7 +380,7 @@ if save_header:
         }).eq("id", intervention_id).execute()
         audit("AGGIORNA_INTERVENTO", "interventi", intervention_id,
               f"Modificati dati testata intervento · cliente {saved_customer_code} → {edit_customer_code} · struttura {edit_client}")
-        st.success("Dati intervento aggiornati.")
+        st.success("Dati intervento e prezzi aggiornati con la nuova offerta." if pricing_changed else "Dati intervento aggiornati.")
         st.rerun()
     except Exception as e:
         st.error(f"Aggiornamento testata non completato: {e}")
@@ -369,8 +404,9 @@ if not rows:
 prepared = []
 for r in rows:
     current_price = r.get("prezzo")
-    offer_price = price_for(customer_code, r.get("codice"), line)
-    remembered_price = remembered_price_for(customer_code, r.get("codice"), line) if offer_price is None and current_price is None else None
+    missing_repriced_offer = clean(r.get("prezzo_source")) == "RICALCOLO_SENZA_OFFERTA"
+    offer_price = None if missing_repriced_offer else price_for(customer_code, r.get("codice"), line)
+    remembered_price = remembered_price_for(customer_code, r.get("codice"), line) if not missing_repriced_offer and offer_price is None and current_price is None else None
     if current_price is None and offer_price is not None:
         editable_price = float(offer_price)
         source = "OFFERTA DA APPLICARE"
@@ -416,6 +452,8 @@ else:
     df = df.drop(columns=["conto_deposito_struttura"])
 
 st.subheader("Controllo completo materiali")
+if any(clean(r.get("prezzo_source")) == "RICALCOLO_SENZA_OFFERTA" and r.get("prezzo") is None for r in rows):
+    st.warning("Offerta non disponibile o discordante per alcune righe: inserisci i prezzi mancanti e salva. Il totale è incompleto.")
 st.info("Puoi correggere tutti i dati operativi della riga. Se cambi codice, lotto, quantità o magazzino, P.M. Medical crea automaticamente una rettifica: riporta a magazzino il vecchio materiale e scarica quello corretto. Prezzo e descrizione non muovono la giacenza.")
 
 edited = st.data_editor(
@@ -444,7 +482,7 @@ edited = st.data_editor(
         "reintegro": st.column_config.CheckboxColumn("Reintegro"),
         "totale": st.column_config.NumberColumn("Totale attuale €", format="€ %.2f"),
     },
-    key=f"intervento_editor_full_{intervention_id}",
+    key=f"intervento_editor_full_{intervention_id}_{customer_code}_{line}",
 )
 
 preview = edited.copy()
@@ -455,7 +493,7 @@ m1, m2 = st.columns(2)
 m1.metric("Totale attuale", f"€ {old_total:,.2f}")
 m2.metric("Nuovo totale", f"€ {new_total:,.2f}")
 
-confirm = st.checkbox("Confermo di aver verificato codice, lotto, scadenza, quantità e prezzo delle righe modificate.", key=f"confirm_full_{intervention_id}")
+confirm = st.checkbox("Confermo di aver verificato codice, lotto, scadenza, quantità e prezzo delle righe modificate.", key=f"confirm_full_{intervention_id}_{customer_code}_{line}")
 
 if st.button("💾 Salva tutte le modifiche", type="primary", use_container_width=True, disabled=not confirm):
     original_by_id = {int(r["id"]): r for r in prepared}
