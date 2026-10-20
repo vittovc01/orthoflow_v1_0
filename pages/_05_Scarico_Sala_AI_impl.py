@@ -802,7 +802,7 @@ with st.form("scarico_ai_confirm"):
 
 if confirm or archive_review:
     if any(d.get("status")=="failed" for d in meta.get("documents",[]) if isinstance(d,dict)):
-        st.error("Uno o più documenti non sono stati analizzati: ripeti la lettura o acquisisci una nuova foto prima della conferma.")
+        st.error("Uno o più documenti non sono stati analizzati. Consulta l’avviso sopra e ripeti la lettura dei documenti già caricati prima della conferma.")
         st.stop()
     if not verified:
         st.error("Conferma di aver verificato i materiali prima di creare l’intervento.")

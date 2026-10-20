@@ -1,5 +1,24 @@
 # Lettura della foto intera, v15
 
+## Gestione API v18
+
+Gli errori 429 distinguono quota/fatturazione dai limiti temporanei usando soltanto
+codici strutturati, senza esporre testo libero del provider. Quota esaurita: nessun
+retry né fallback a un altro modello. Limite temporaneo: al massimo due retry,
+rispettando Retry-After (secondi/data HTTP o millisecondi), massimo 60 secondi totali
+di attesa. Se il servizio chiede un'attesa maggiore si restituisce l'avviso senza
+anticipare la richiesta. I retry automatici SDK sono disattivati per questa sola
+pipeline; DDT invariato. Non vengono inviati gli altri documenti del lotto quando
+il servizio rimane bloccato. Una prima lettura riuscita resta disponibile con avviso
+se la seconda fallisce. Il file resta nel caricatore della sessione Streamlit;
+non viene persistita la pagina clinica per gestire il retry.
+
+L'app non può ripristinare crediti o aumentare limiti di spesa: in quel caso serve
+l'intervento del titolare dell'account API. Nessuna ricarica automatica.
+
+Riferimenti ufficiali: https://developers.openai.com/api/docs/guides/rate-limits
+e https://developers.openai.com/api/docs/guides/error-codes (20 ottobre 2026).
+
 ## Profilo v17
 
 La lettura operativa usa `SCARICO_FULL_PAGE_MODEL` (default `gpt-6-astra`),
