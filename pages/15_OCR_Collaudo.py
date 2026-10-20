@@ -14,10 +14,11 @@ if not st.session_state.get('user') or not (
     st.stop()
 
 from openai import OpenAI
-from ai_ocr import ai_status, _secret, ITEM_PROPERTIES, ITEM_REQUIRED, _parse_response
 from whole_page_runtime import refresh_ocr_modules
 refresh_ocr_modules()
+from ai_ocr import ai_status, _secret, ITEM_PROPERTIES, ITEM_REQUIRED, _parse_response
 from whole_page_labels import analyze_labels, WholePageReadError
+from ai_failures import probe_service
 from label_pipeline import PIPELINE_VERSION
 
 st.title('🔬 Collaudo OCR')
@@ -32,6 +33,15 @@ if not status['enabled']:
 model = st.selectbox('Modello per il collaudo', list(dict.fromkeys([
     status['label_model'], 'gpt-6-astra', 'gpt-5.4', status['model'], 'gpt-4.1', 'gpt-5-mini'
 ])))
+st.caption('Verifica servizio AI: una richiesta di testo minima, senza foto, dati paziente o movimenti di magazzino. Non verifica la qualità OCR né la capacità per una foto completa.')
+if st.button('Verifica servizio AI senza foto'):
+    with st.spinner('Verifico l’accesso al servizio AI…'):
+        client = OpenAI(api_key=_secret('OPENAI_API_KEY'), timeout=30, max_retries=0)
+        diagnostic = probe_service(client, model)
+    if diagnostic['ok']:
+        st.success(diagnostic['message'])
+    else:
+        st.error(diagnostic['message'])
 upload = st.file_uploader('Foto originale da verificare', type=['jpg','jpeg','png','webp','pdf'])
 if st.button('Analizza senza scaricare', disabled=upload is None):
     if len(upload.getvalue()) > 20 * 1024 * 1024:
