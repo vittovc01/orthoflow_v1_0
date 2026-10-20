@@ -381,3 +381,68 @@ def test_archive_enabled_saves_product_review_without_discharge(backend,monkeypa
     assert not at.exception and len(calls)==1
     assert 'documents' not in calls[0]
     assert any('Nessuno scarico' in s.value for s in at.success)
+
+
+@pytest.mark.parametrize("legacy", [False, True])
+def test_intervention_customer_selector_updates_code_and_name_together(backend, monkeypatch, legacy):
+    saved = {
+        "id": 42, "cliente": "Struttura storica" if legacy else "Clinica Alfa",
+        "struttura": "Struttura storica" if legacy else "Clinica Alfa",
+        "codice_cliente": "OLD" if legacy else "0001",
+        "data_intervento": "2026-10-20", "linea": "TRAUMA", "magazzino": "MAG1",
+    }
+    # Duplicate descriptions are deliberately distinguished by customer code.
+    customers = [{"codice_cliente": "0001", "descrizione": "Clinica Alfa"},
+                 {"codice_cliente": "0002", "descrizione": "Clinica Alfa"},
+                 {"codice_cliente": "0003", "descrizione_cliente": "Clinica Zeta"}]
+    updates, pages = [], []
+    class Query:
+        def __init__(self, table):
+            self.name, self.payload, self.bounds = table, None, None
+        def update(self, payload):
+            self.payload = payload
+            return self
+        def insert(self, payload):
+            assert self.name == "audit_log"
+            return self
+        def range(self, lo, hi):
+            self.bounds = (lo, hi)
+            return self
+        def execute(self):
+            if self.payload is not None:
+                assert self.name == "interventi"
+                updates.append(self.payload)
+                saved.update(self.payload)
+                return SimpleNamespace(data=[])
+            if self.name == "interventi":
+                return SimpleNamespace(data=[dict(saved)])
+            if self.name == "clienti":
+                pages.append(self.bounds)
+                # Simulate a server page cap smaller than requested.
+                offset = self.bounds[0]
+                return SimpleNamespace(data=customers[offset:offset+2])
+            return SimpleNamespace(data=[])
+        def __getattr__(self, name):
+            assert name not in {"delete", "upsert", "rpc"}
+            return lambda *a, **kw: self
+    monkeypatch.setattr(backend, "table", lambda name: Query(name))
+    at = app()
+    at.session_state["user"]="ci-user";at.session_state["ruolo"]="Admin";at.session_state["permessi"]=["DIREZIONE"]
+    at.run()
+    at.switch_page("pages/06_Gestione_Interventi.py").run()
+    assert not at.exception
+    chooser = next(s for s in at.selectbox if s.label == "Cliente / struttura")
+    assert len(chooser.options) == 4
+    assert chooser.value == (None if legacy else "0001")
+    assert (0,499) in pages and (2,501) in pages and (3,502) in pages
+    assert not any(t.label in {"Codice cliente", "Cliente / struttura"} for t in at.text_input)
+    chooser.set_value("0002")
+    at.run()
+    assert not at.exception and not updates
+    assert any("Codice struttura associato: 0002" in c.value for c in at.caption)
+    next(b for b in at.button if b.label == "💾 Salva dati intervento").click()
+    at.run()
+    assert not at.exception and len(updates) == 1
+    assert updates[0]["codice_cliente"] == "0002"
+    assert updates[0]["cliente"] == updates[0]["struttura"] == "Clinica Alfa"
+    assert next(s for s in at.selectbox if s.label == "Cliente / struttura").value == "0002"
