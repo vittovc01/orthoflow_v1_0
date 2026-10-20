@@ -54,3 +54,10 @@ CREATE TABLE audit_log (
  riferimento text, dettagli text
 );
 
+
+-- Offer schema used by atomic structure repricing tests.
+CREATE TABLE offerte_header(id bigserial PRIMARY KEY,linea text,data_inizio date,data_fine date,stato_record text);
+CREATE TABLE offerte_clienti(id bigserial PRIMARY KEY,offerta_id bigint,codice_cliente text);
+CREATE TABLE offerte_prezzi(id bigserial PRIMARY KEY,offerta_id bigint,codice text,prezzo numeric);
+ALTER TABLE righe_intervento ADD COLUMN prezzo_verificato_da text,
+ ADD COLUMN prezzo_verificato_at timestamptz;
