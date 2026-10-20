@@ -401,11 +401,22 @@ if not rows:
     st.info("L'intervento non contiene righe materiale.")
     st.stop()
 
+# Use the same date-aware offer resolution as the database recalculation.
+# Older deployments can still render unchanged interventions before the SQL upgrade.
+try:
+    current_offer_rows = sb().rpc("anteprima_prezzi_cambio_struttura", {
+        "p_intervento_id": intervention_id, "p_codice_cliente": customer_code,
+        "p_linea": line, "p_data": saved_date.isoformat(),
+    }).execute().data
+    current_offers = {r["riga_id"]: r.get("prezzo_nuovo") for r in current_offer_rows} if isinstance(current_offer_rows, list) else None
+except Exception:
+    current_offers = None
+
 prepared = []
 for r in rows:
     current_price = r.get("prezzo")
     missing_repriced_offer = clean(r.get("prezzo_source")) == "RICALCOLO_SENZA_OFFERTA"
-    offer_price = None if missing_repriced_offer else price_for(customer_code, r.get("codice"), line)
+    offer_price = None if missing_repriced_offer else (current_offers.get(r.get("id")) if current_offers is not None else price_for(customer_code, r.get("codice"), line))
     remembered_price = remembered_price_for(customer_code, r.get("codice"), line) if not missing_repriced_offer and offer_price is None and current_price is None else None
     if current_price is None and offer_price is not None:
         editable_price = float(offer_price)
