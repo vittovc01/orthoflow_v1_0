@@ -258,12 +258,50 @@ calendar_date = saved_date.replace(
     year=calendar_year,
     day=min(saved_date.day, monthrange(calendar_year, saved_date.month)[1]),
 )
+# Read every registered customer, including catalogues beyond the API page limit.
+# Never offer a partial list after a failed page.
+try:
+    registered_customers = []
+    customer_offset = 0
+    while True:
+        batch = (sb().table("clienti").select("*").order("codice_cliente")
+                 .range(customer_offset, customer_offset + 499).execute().data or [])
+        if not batch:
+            break
+        registered_customers.extend(batch)
+        customer_offset += len(batch)
+except Exception:
+    st.error("Anagrafica clienti non disponibile: riprova prima di cambiare struttura.")
+    st.stop()
+
+customers_by_code = {}
+for customer in registered_customers:
+    code = clean(customer.get("codice_cliente"))
+    description = clean(customer.get("descrizione") or customer.get("descrizione_cliente"))
+    if code:
+        customers_by_code[code] = {"codice_cliente": code, "descrizione": description or code}
+customer_codes = sorted(customers_by_code, key=lambda code: (customers_by_code[code]["descrizione"].casefold(), code))
+saved_customer_code = clean(intervention.get("codice_cliente"))
+# Keep legacy/unregistered values visible without silently assigning another client.
+customer_choices = [None] + customer_codes
+selected_customer_code = st.selectbox(
+    "Cliente / struttura", customer_choices,
+    index=customer_choices.index(saved_customer_code) if saved_customer_code in customers_by_code else 0,
+    format_func=lambda code: (
+        f'{customers_by_code[code]["descrizione"]} ({code})' if code is not None else
+        f'Mantieni attuale: {clean(intervention.get("cliente") or intervention.get("struttura"))} ({saved_customer_code or "senza codice"})'
+    ),
+    key=f"intervention_customer_{intervention_id}_{saved_customer_code}",
+)
+selected_customer = customers_by_code.get(selected_customer_code)
+edit_customer_code = selected_customer["codice_cliente"] if selected_customer else saved_customer_code
+edit_client = selected_customer["descrizione"] if selected_customer else clean(intervention.get("cliente") or intervention.get("struttura"))
+st.caption(f"Codice struttura associato: {edit_customer_code or 'non presente'}")
+
 with st.form(f"header_{intervention_id}"):
     h1, h2, h3 = st.columns(3)
     with h1:
         edit_date = st.date_input("Data intervento", value=calendar_date, min_value=date(1900, 1, 1), max_value=date(last_year, 12, 31), format="DD/MM/YYYY", key=f"intervention_date_{intervention_id}_{saved_date.isoformat()}_{calendar_year}")
-        edit_customer_code = st.text_input("Codice cliente", value=clean(intervention.get("codice_cliente")))
-        edit_client = st.text_input("Cliente / struttura", value=clean(intervention.get("cliente") or intervention.get("struttura")))
     with h2:
         edit_record = st.text_input("Cartella clinica", value=clean(intervention.get("cartella_clinica")))
         edit_surgeon = st.text_input("Chirurgo", value=clean(intervention.get("chirurgo")))
@@ -305,7 +343,8 @@ if save_header:
             "magazzino": edit_mag,
             "note": clean(edit_notes),
         }).eq("id", intervention_id).execute()
-        audit("AGGIORNA_INTERVENTO", "interventi", intervention_id, "Modificati dati testata intervento")
+        audit("AGGIORNA_INTERVENTO", "interventi", intervention_id,
+              f"Modificati dati testata intervento · cliente {saved_customer_code} → {edit_customer_code} · struttura {edit_client}")
         st.success("Dati intervento aggiornati.")
         st.rerun()
     except Exception as e:
