@@ -503,7 +503,7 @@ def test_structure_price_preview_and_save_clear_old_editor(backend,monkeypatch,n
     next(s for s in at.selectbox if s.label=="Cliente / struttura").set_value("B")
     at.run()
     assert not at.exception and not updates
-    request=next(args for name,args in requests if name=="anteprima_prezzi_cambio_struttura")
+    request=next(args for name,args in requests if name=="anteprima_prezzi_cambio_struttura" and args["p_codice_cliente"]=="B")
     assert request["p_codice_cliente"]=="B" and request["p_linea"]=="TRAUMA" and request["p_data"]=="2026-10-20"
     if not preview_failure:
         assert any("vecchio prezzo verrà rimosso" in w.value for w in at.warning) == (new_price is None)
