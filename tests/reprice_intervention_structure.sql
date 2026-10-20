@@ -42,6 +42,21 @@ BEGIN
  UPDATE interventi SET codice_cliente='NO-OFFER' WHERE id=i;
  IF EXISTS(SELECT 1 FROM righe_intervento WHERE intervento_id=i AND prezzo IS NOT NULL) THEN RAISE EXCEPTION 'no-offer retains prices'; END IF;
  IF (SELECT count(*) FROM movimenti_magazzino)<>before_stock THEN RAISE EXCEPTION 'stock changed'; END IF;
+ -- Inject a failure on the second row, after the first price update.
+ UPDATE righe_intervento SET prezzo=77 WHERE id=r2;
+ EXECUTE format('ALTER TABLE public.righe_intervento ADD CONSTRAINT ci_reprice_failure CHECK (id<>%s OR prezzo IS NOT NULL) NOT VALID',r2);
+ SELECT count(*) INTO n FROM audit_log WHERE azione='RICALCOLO_PREZZO_STRUTTURA';
+ BEGIN
+  UPDATE interventi SET codice_cliente='TEST-NEW',linea='TRAUMA' WHERE id=i;
+ EXCEPTION WHEN check_violation THEN failed:=true;
+ END;
+ IF NOT failed OR (SELECT codice_cliente FROM interventi WHERE id=i)<>'NO-OFFER'
+   OR (SELECT prezzo FROM righe_intervento WHERE id=r1) IS NOT NULL
+   OR (SELECT prezzo FROM righe_intervento WHERE id=r2)<>77
+   OR (SELECT count(*) FROM audit_log WHERE azione='RICALCOLO_PREZZO_STRUTTURA')<>n
+ THEN RAISE EXCEPTION 'partial write after mid-row error'; END IF;
+ ALTER TABLE public.righe_intervento DROP CONSTRAINT ci_reprice_failure;
+ failed:=false;
  -- A row failure must roll back both header and prices in the same statement.
  INSERT INTO righe_intervento(intervento_id,codice,lotto,quantita,prezzo,totale,valore)
  VALUES(i,'STRUCTURE','LOT6',1,33,33,33);
