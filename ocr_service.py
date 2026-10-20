@@ -6,6 +6,7 @@ The caller must authenticate, throttle requests and keep review state isolated.
 from hashlib import sha256
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from time import perf_counter
 
 from ocr_repository import OriginalDocument
 from ocr_review import build_review
@@ -20,6 +21,7 @@ def analyze_documents(documents, *, analyzer, catalog=None, soon_days=90):
     provider_block = None
     with TemporaryDirectory(prefix='orthoflow-review-') as tmp:
         for index, document in enumerate(documents):
+            started = perf_counter()
             mime, extension = document.validate()
             path = Path(tmp)/f'{index:02}{extension}'
             path.write_bytes(document.content)
@@ -46,7 +48,9 @@ def analyze_documents(documents, *, analyzer, catalog=None, soon_days=90):
                 result['detection_warnings'].append(f'Documento {index+1}: analisi non completata ({reason})')
                 result['documents'].append({'index':index,'name':document.name,'status':'failed','failure_kind':kind})
                 continue
-            result['documents'].append({'index':index,'name':document.name,'status':'analyzed','model':incoming.get('ocr_model')})
+            result['documents'].append({'index':index,'name':document.name,'status':'analyzed',
+                                        'model':incoming.get('ocr_model'),
+                                        'duration_seconds':round(perf_counter()-started, 2)})
             for key in ('items','annotated_pages','detection_warnings','unconfirmed_regions'):
                 entries = incoming.get(key) or []
                 if key in ('items','annotated_pages','unconfirmed_regions'):

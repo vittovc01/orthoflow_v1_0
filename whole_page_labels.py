@@ -7,6 +7,7 @@ import hashlib
 import math
 from collections import Counter
 from pathlib import Path
+from concurrent.futures import ThreadPoolExecutor
 from ai_failures import failure_kind, provider_notice, request_with_backoff
 
 from label_pipeline import (PIPELINE_VERSION, render_pages, image_url, compare_reads,
@@ -160,7 +161,22 @@ def merge_reads(first, second):
     return result
 
 
+def optional_product_regions(page):
+    try:
+        from region_privacy import safe_product_regions
+        return safe_product_regions(page)[0], False
+    except Exception:
+        return [], True
+
+
 def analyze_labels(path, client, model, item_schema, parse):
+    # Only local evidence runs in parallel. API reads remain sequential, with
+    # the same model, pixels, prompts, consensus and rate-limit handling.
+    with ThreadPoolExecutor(max_workers=1, thread_name_prefix='product-evidence') as executor:
+        return _analyze_labels(path, client, model, item_schema, parse, executor)
+
+
+def _analyze_labels(path, client, model, item_schema, parse, executor):
     schema = {'type':'object','properties':{
         'labels':{'type':'array','items':{'type':'object','properties':{
             'bbox':{'type':'array','items':{'type':'integer'},'minItems':4,'maxItems':4},
@@ -172,6 +188,8 @@ def analyze_labels(path, client, model, item_schema, parse):
     active_model = model
     for number, page in enumerate(render_pages(path), 1):
         read_page = prepare_page(page)
+        page_url = image_url(read_page)
+        evidence = None
         reads = []
         failures = []
         for attempt in range(2):
@@ -181,7 +199,7 @@ def analyze_labels(path, client, model, item_schema, parse):
                     return client.responses.create(model=active_model, store=False,
                         input=[{'role':'user','content':[
                             {'type':'input_text','text':PROMPT + ('\nSeconda lettura indipendente: riconta tutti gli adesivi da zero.' if attempt else '')},
-                            {'type':'input_image','image_url':image_url(read_page),'detail':detail}]}],
+                            {'type':'input_image','image_url':page_url,'detail':detail}]}],
                         text={'format':{'type':'json_schema','name':'whole_page_product_labels','schema':schema,'strict':True}}, **options)
                 try:
                     raw_response = request_with_backoff(request)
@@ -193,6 +211,8 @@ def analyze_labels(path, client, model, item_schema, parse):
                     raw_response = request_with_backoff(request)
                 response = parse(raw_response)
                 reads.append(observations(response))
+                if evidence is None:
+                    evidence = executor.submit(optional_product_regions, page)
                 if response.get('warning'):
                     warnings.append(f'Pagina {number}: {response["warning"]}')
             except Exception as exc:
@@ -215,13 +235,9 @@ def analyze_labels(path, client, model, item_schema, parse):
             warnings.append(f'Pagina {number}: nessuna etichetta letta; aggiungere le righe mancanti o riprovare')
         if reads[0] is None or reads[1] is None or len(reads[0]) != len(reads[1]):
             warnings.append(f'Pagina {number}: conteggio non concorde tra le due letture; confrontare tutte le etichette fisiche')
-        # Local crops are optional evidence AFTER both full-page reads. A failed
-        # detector cannot suppress any observation or erase its transcription.
-        try:
-            from region_privacy import safe_product_regions
-            safe, _ = safe_product_regions(page)
-        except Exception:
-            safe = []
+        # Evidence can overlap the second read but never gates the AI input.
+        safe, evidence_failed = evidence.result() if evidence else ([], False)
+        if evidence_failed:
             warnings.append(f'Pagina {number}: riscontri fotografici non disponibili; lettura della foto intera conservata')
         for index, row in enumerate(rows, 1):
             row.update(label_id=f'{digest}:p{number}:l{index}', page=number, source_document=digest,

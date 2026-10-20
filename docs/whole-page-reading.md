@@ -65,8 +65,9 @@ dal modello. La v15 cambia l'ingresso della lettura, non soltanto il prompt.
    Valori discordanti restano vuoti con entrambe le letture disponibili. Le
    osservazioni presenti in una sola lettura rimangono visibili con avviso.
    Associazioni spaziali ambigue non producono consenso sui campi critici.
-4. Solo dopo la lettura prova il rilevatore locale per riscontri fotografici e
-   GS1. Il suo fallimento non elimina righe e non impedisce la lettura primaria.
+4. Dopo la prima lettura riuscita avvia il rilevatore locale per riscontri
+   fotografici e GS1, sovrapponendolo alla seconda lettura API sequenziale.
+   Il suo fallimento non elimina righe e non impedisce la lettura primaria.
    Un ritaglio viene conservato solo se validato localmente come prodotto e
    quasi coincidente con una singola osservazione. Nessun ritaglio AI arbitrario
    entra nell'archivio. In assenza di riscontri, si archiviano i dati prodotto

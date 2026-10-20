@@ -131,6 +131,47 @@ def test_physical_label_review_blocks_unverified_count_without_writes(backend):
     assert len([c for c in at.checkbox if c.label.startswith('Ho ')])==1
 
 
+def test_material_list_exports_and_catalogue_snapshot_without_technical_noise(backend, monkeypatch):
+    import csv
+    from io import StringIO
+    import review_exports
+    downloads = {}
+    original_csv, original_xlsx = review_exports.review_csv, review_exports.review_xlsx
+    def capture_csv(rows):
+        downloads['Scarica lista CSV'] = original_csv(rows)
+        return downloads['Scarica lista CSV']
+    def capture_xlsx(rows):
+        downloads['Scarica lista Excel'] = original_xlsx(rows)
+        return downloads['Scarica lista Excel']
+    monkeypatch.setattr(review_exports, 'review_csv', capture_csv)
+    monkeypatch.setattr(review_exports, 'review_xlsx', capture_xlsx)
+    at = app()
+    at.session_state['user']='ci-user';at.session_state['ruolo']='Admin';at.session_state['permessi']=['DIREZIONE']
+    at.run()
+    from label_pipeline import PIPELINE_VERSION
+    at.session_state['scarico_source']='AI'
+    at.session_state['scarico_ai_meta']={'pipeline_version':PIPELINE_VERSION}
+    at.session_state['scarico_ai_rows']=[dict(label_id='one',codice='04.200.030S',lotto='00123',
+        scadenza='2035-01-01',descrizione='Vite',quantita=1,gtin=None)]
+    at.switch_page('pages/05_Scarico_Sala_AI.py').run()
+    assert not at.exception
+    assert not any('GTIN' in c.value or 'catalogo' in c.value for c in at.caption)
+    assert not any(e.label.startswith(('Da confermare','⚠️ Da verificare')) for e in at.expander)
+    assert len(at.dataframe) == 1, 'show only the editable material list by default'
+    assert list(at.dataframe[0].value.columns)[2:7] == ['codice','lotto','scadenza','descrizione','quantita']
+    assert {'Scarica lista Excel','Scarica lista CSV'} <= downloads.keys()
+    reads = backend.reads.count('articoli_gtin')
+    editor_key = 'scarico_ai_editor__0'
+    at.session_state[editor_key]={'edited_rows':{0:{'lotto':'00999','quantita':2}},'added_rows':[],'deleted_rows':[]}
+    at.run()
+    assert not at.exception
+    records = list(csv.DictReader(StringIO(downloads['Scarica lista CSV'].decode('utf-8-sig')),delimiter=';'))
+    assert records[0]['Lotto']=='00999' and records[0]['Quantità']=='2'
+    assert backend.reads.count('articoli_gtin') == reads == 1
+    assert any(l['field']=='lotto' for l in at.session_state['scarico_correction_log'])
+    assert len([c for c in at.checkbox if c.label.startswith('Ho controllato')]) == 1
+
+
 @pytest.mark.parametrize('legacy_wrapper',[False,True])
 def test_single_confirmation_accepts_missing_gtin_and_advisory_count(backend,monkeypatch,legacy_wrapper):
     calls=[]
