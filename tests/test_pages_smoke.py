@@ -521,3 +521,39 @@ def test_structure_price_preview_and_save_clear_old_editor(backend,monkeypatch,n
             assert any("totale è incompleto" in w.value for w in at.warning)
         else:
             assert table.iloc[0]["prezzo"]==new_price and table.iloc[0]["totale"]==25
+
+
+def test_smart_track_flags_reach_final_discharge_after_multiple_toggles(backend,monkeypatch):
+    calls=[]
+    class Query:
+        def __init__(self,name):self.name=name
+        def execute(self):
+            return SimpleNamespace(data=[{"codice_cliente":"9010013","descrizione":"Malzoni"}] if self.name=="clienti" else [])
+        def __getattr__(self,name):
+            assert name not in {"insert","update","delete","upsert"}
+            return lambda *a,**kw:self
+    def rpc(name,args):
+        calls.append((name,args))
+        return SimpleNamespace(execute=lambda:SimpleNamespace(data={"intervento_id":123,"righe":2,"totale":0}))
+    monkeypatch.setattr(backend,"table",lambda name:Query(name))
+    monkeypatch.setitem(backend.__dict__,"rpc",rpc)
+    at=app();at.session_state["user"]="ci-user";at.session_state["ruolo"]="Admin";at.session_state["permessi"]=["DIREZIONE"]
+    at.run()
+    from label_pipeline import PIPELINE_VERSION
+    at.session_state["scarico_source"]="AI";at.session_state["scarico_ai_meta"]={"pipeline_version":PIPELINE_VERSION}
+    at.session_state["scarico_ai_rows"]=[dict(label_id=f"label-{i}",codice="TEST-A",lotto=f"LOT{i}",
+        scadenza="2035-01-01",quantita=1,produttore="Synthes") for i in range(2)]
+    at.switch_page("pages/05_Scarico_Sala_AI.py").run()
+    assert not at.exception
+    for values in [(True,False),(True,True),(False,True)]:
+        at.session_state["scarico_ai_editor_9010013_0"]={"edited_rows":{
+            i:{"conto_deposito_struttura":v} for i,v in enumerate(values)},"added_rows":[],"deleted_rows":[]}
+        at.run()
+        assert not at.exception and not calls
+        assert [r["conto_deposito_struttura"] for r in at.session_state["scarico_ai_rows"]]==list(values)
+        assert at.session_state["scarico_editor_revision"]==0 if "scarico_editor_revision" in at.session_state else True
+    next(c for c in at.checkbox if c.label.startswith("Ho controllato REF")).check()
+    next(b for b in at.button if b.label=="📤 Crea intervento e scarica materiali").click();at.run()
+    assert not at.exception
+    args=next(args for name,args in calls if name=="crea_intervento_scarico_ai_verificato_v2")
+    assert [r["conto_deposito_struttura"] for r in args["p_rows"]]==[False,True]
