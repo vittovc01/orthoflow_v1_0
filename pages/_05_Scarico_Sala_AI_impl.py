@@ -616,78 +616,103 @@ if excluded_rows:
     st.warning(f"{len(excluded_rows)} righe di altri produttori escluse dallo scarico, dal fatturato e dagli ordini P.M. Medical.")
     with st.expander("Materiale di altre aziende escluso"):
         st.dataframe(pd.DataFrame(excluded_rows), use_container_width=True, hide_index=True)
-if rows or is_physical_ai:
-    st.divider()
-    st.subheader("✅ Lista materiali riconosciuti")
-    st.caption("Modifica REF, lotto, scadenza, descrizione e quantità direttamente nella lista. Puoi aggiungere o eliminare righe; quelle escluse non vengono scaricate né esportate.")
-    df_rows = pd.DataFrame(rows)
-    if is_physical_ai and "label_id" not in df_rows: df_rows["label_id"] = pd.Series(dtype="object")
-    preferred = ["codice", "lotto", "scadenza", "descrizione", "quantita", "escludi_riga", "senza_lotto", "jnj_verificato_manualmente"]
-    if "escludi_riga" not in df_rows:
-        df_rows["escludi_riga"] = False
-    df_rows["senza_lotto"] = df_rows.get("senza_lotto", pd.Series(False, index=df_rows.index)).fillna(False).astype(bool)
-    for col in preferred:
-        if col not in df_rows.columns:
-            df_rows[col] = ""
-    if is_malzoni:
-        if "conto_deposito_struttura" not in df_rows.columns:
-            df_rows["conto_deposito_struttura"] = False
-        df_rows["conto_deposito_struttura"] = df_rows["conto_deposito_struttura"].fillna(False).astype(bool)
-        preferred.insert(1, "conto_deposito_struttura")
-        st.info("Malzoni: spunta il materiale della struttura Smart Track. Prezzi, fatturato e ordini restano inclusi; queste righe non scaricano la vostra giacenza.")
-    if is_physical_ai:
-        preferred = ["label_id", "esito"] + [c for c in preferred if c!="senza_lotto"]
-        df_rows["esito"] = ["🔴 "+"; ".join(row_errors(r)) if row_errors(r) else "" for r in rows]
-    editor_frame=df_rows[preferred]
-    if is_physical_ai:
-        editor_frame=editor_frame.style.apply(lambda r: ["background-color: #ffe0e0; color: #a40000" if r.get("esito") else "" for _ in r],axis=1)
-    edited = st.data_editor(
-        editor_frame, num_rows="dynamic", use_container_width=True,
-        disabled=["label_id", "confidence", "warning", "esito"] if is_physical_ai else [],
-        height=min(1600, max(220, 35 * (len(df_rows) + 3))), row_height=35,
-        column_config={
-            "label_id": None,
-            "lotto": st.column_config.TextColumn("Lotto"),
-            "scadenza": st.column_config.TextColumn("Scadenza (AAAA-MM-GG)"),
-            "descrizione": st.column_config.TextColumn("Descrizione", width="large"),
-            "quantita": st.column_config.NumberColumn("Quantità", min_value=1, step=1),
-            "esito": st.column_config.TextColumn("Campi da correggere"),
-            "jnj_verificato_manualmente": None,
-            "escludi_riga": st.column_config.CheckboxColumn(
-                "Escludi riga", default=False,
-                help="La riga non verrà salvata e non genererà fatturato, ordini o movimenti di magazzino."),
-            "codice": st.column_config.TextColumn("Codice Johnson/REF"),
-            "senza_lotto": st.column_config.CheckboxColumn("Non sterile / senza lotto", default=False,
-                help="Spunta solo materiale non sterile che non prevede lotto. La disponibilità viene cercata nelle giacenze senza lotto."),
-            "conto_deposito_struttura": st.column_config.CheckboxColumn(
-            "Conto deposito struttura", default=False,
-            help="Materiale Malzoni / Smart Track: incluso nel fatturato, senza scarico del nostro magazzino.")},
-        key=f"scarico_ai_editor_{clean(selected_client.get('codice_cliente'))}_{st.session_state.get('scarico_editor_revision', 0)}")
-    if is_physical_ai:
-        updated_rows,corrections=apply_review_edits(rows,edited.to_dict("records"),actor=user())
-        if corrections:
-            preserved=[r for r in source_rows if r.get("label_id") not in {x.get("label_id") for x in rows}]
-            st.session_state["scarico_ai_rows"]=updated_rows+preserved
-            st.session_state.setdefault("scarico_correction_log",[]).extend(corrections)
-            st.session_state["scarico_editor_revision"]=int(st.session_state.get("scarico_editor_revision",0))+1
-            st.rerun()
-        for item in updated_rows:
-            for error in row_errors(item): st.error(error)
-    # Export exactly the current edited list, retaining codes/lots as text.
-    export_list = updated_rows if is_physical_ai else edited.to_dict("records")
-    excel_col, csv_col = st.columns(2)
-    excel_col.download_button("Scarica lista Excel", data=review_xlsx(export_list),
-        file_name="scarico-materiali.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", on_click="ignore")
-    csv_col.download_button("Scarica lista CSV", data=review_csv(export_list),
-        file_name="scarico-materiali.csv", mime="text/csv", on_click="ignore")
-    # The original OCR extraction remains immutable; edits live in session state.
+@st.fragment
+def render_material_editor():
+    if rows or is_physical_ai:
+        st.divider()
+        st.subheader("✅ Lista materiali riconosciuti")
+        st.caption("Modifica REF, lotto, scadenza, descrizione e quantità direttamente nella lista. Puoi aggiungere o eliminare righe; quelle escluse non vengono scaricate né esportate.")
+        editor_rows = rows
+        if is_physical_ai:
+            baseline_identity = (
+                clean(selected_client.get("codice_cliente")),
+                st.session_state.get("scarico_editor_revision", 0),
+                tuple((r.get("label_id"), bool(r.get("jnj_verificato_manualmente")), bool(r.get("escludi_riga"))) for r in rows),
+            )
+            baseline = st.session_state.get("scarico_editor_baseline")
+            if not baseline or baseline["identity"] != baseline_identity:
+                baseline = {"identity": baseline_identity, "rows": [dict(r) for r in rows]}
+                st.session_state["scarico_editor_baseline"] = baseline
+            editor_rows = baseline["rows"]
+        df_rows = pd.DataFrame(editor_rows)
+        if is_physical_ai and "label_id" not in df_rows: df_rows["label_id"] = pd.Series(dtype="object")
+        preferred = ["codice", "lotto", "scadenza", "descrizione", "quantita", "escludi_riga", "senza_lotto", "jnj_verificato_manualmente"]
+        if "escludi_riga" not in df_rows:
+            df_rows["escludi_riga"] = False
+        df_rows["senza_lotto"] = df_rows.get("senza_lotto", pd.Series(False, index=df_rows.index)).fillna(False).astype(bool)
+        for col in preferred:
+            if col not in df_rows.columns:
+                df_rows[col] = ""
+        if is_malzoni:
+            if "conto_deposito_struttura" not in df_rows.columns:
+                df_rows["conto_deposito_struttura"] = False
+            df_rows["conto_deposito_struttura"] = df_rows["conto_deposito_struttura"].fillna(False).astype(bool)
+            preferred.insert(1, "conto_deposito_struttura")
+            st.info("Malzoni: spunta il materiale della struttura Smart Track. Prezzi, fatturato e ordini restano inclusi; queste righe non scaricano la vostra giacenza.")
+        if is_physical_ai:
+            preferred = ["label_id", "esito"] + [c for c in preferred if c!="senza_lotto"]
+            df_rows["esito"] = ["🔴 "+"; ".join(row_errors(r)) if row_errors(r) else "" for r in rows]
+        editor_frame=df_rows[preferred]
+        if is_physical_ai:
+            editor_frame=editor_frame.style.apply(lambda r: ["background-color: #ffe0e0; color: #a40000" if r.get("esito") else "" for _ in r],axis=1)
+        edited = st.data_editor(
+            editor_frame, num_rows="dynamic", use_container_width=True,
+            disabled=["label_id", "confidence", "warning", "esito"] if is_physical_ai else [],
+            height=min(1600, max(220, 35 * (len(df_rows) + 3))), row_height=35,
+            column_config={
+                "label_id": None,
+                "lotto": st.column_config.TextColumn("Lotto"),
+                "scadenza": st.column_config.TextColumn("Scadenza (AAAA-MM-GG)"),
+                "descrizione": st.column_config.TextColumn("Descrizione", width="large"),
+                "quantita": st.column_config.NumberColumn("Quantità", min_value=1, step=1),
+                "esito": st.column_config.TextColumn("Campi da correggere"),
+                "jnj_verificato_manualmente": None,
+                "escludi_riga": st.column_config.CheckboxColumn(
+                    "Escludi riga", default=False,
+                    help="La riga non verrà salvata e non genererà fatturato, ordini o movimenti di magazzino."),
+                "codice": st.column_config.TextColumn("Codice Johnson/REF"),
+                "senza_lotto": st.column_config.CheckboxColumn("Non sterile / senza lotto", default=False,
+                    help="Spunta solo materiale non sterile che non prevede lotto. La disponibilità viene cercata nelle giacenze senza lotto."),
+                "conto_deposito_struttura": st.column_config.CheckboxColumn(
+                "Conto deposito struttura", default=False,
+                help="Materiale Malzoni / Smart Track: incluso nel fatturato, senza scarico del nostro magazzino.")},
+            key=f"scarico_ai_editor_{clean(selected_client.get('codice_cliente'))}_{st.session_state.get('scarico_editor_revision', 0)}")
+        if is_physical_ai:
+            # The displayed baseline stays stable during fragment-only checkbox edits.
+            # Compare against the latest committed session rows to audit each delta once.
+            current_by_id = {r.get("label_id"): r for r in st.session_state.get("scarico_ai_rows", [])}
+            current_rows = [current_by_id.get(r.get("label_id"), r) for r in rows]
+            updated_rows,corrections=apply_review_edits(current_rows,edited.to_dict("records"),actor=user())
+            if corrections:
+                preserved=[r for r in source_rows if r.get("label_id") not in {x.get("label_id") for x in rows}]
+                st.session_state["scarico_ai_rows"]=updated_rows+preserved
+                st.session_state.setdefault("scarico_correction_log",[]).extend(corrections)
+                # Ownership does not change identity, counts, quantities or prices.
+                # Keep the widget mounted; Streamlit refreshes this fragment only.
+                if any(c["field"] != "conto_deposito_struttura" for c in corrections):
+                    st.session_state["scarico_editor_revision"]=int(st.session_state.get("scarico_editor_revision",0))+1
+                    st.rerun()
+            for item in updated_rows:
+                for error in row_errors(item): st.error(error)
+        # Export exactly the current edited list, retaining codes/lots as text.
+        export_list = updated_rows if is_physical_ai else edited.to_dict("records")
+        excel_col, csv_col = st.columns(2)
+        excel_col.download_button("Scarica lista Excel", data=review_xlsx(export_list),
+            file_name="scarico-materiali.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", on_click="ignore")
+        csv_col.download_button("Scarica lista CSV", data=review_csv(export_list),
+            file_name="scarico-materiali.csv", mime="text/csv", on_click="ignore")
+        # The original OCR extraction remains immutable; edits live in session state.
+    
+        warnings = [row_name(r)+": "+re.sub(r"(?i)\bnan\b","non letto",clean(r.get("warning"))) for r in edited.to_dict("records") if clean(r.get("warning"))]
+        if warnings:
+            with st.expander("⚠️ Avvisi AI"):
+                for w in warnings:
+                    st.write("•", w)
+    
+    return edited if rows or is_physical_ai else pd.DataFrame()
 
-    warnings = [row_name(r)+": "+re.sub(r"(?i)\bnan\b","non letto",clean(r.get("warning"))) for r in edited.to_dict("records") if clean(r.get("warning"))]
-    if warnings:
-        with st.expander("⚠️ Avvisi AI"):
-            for w in warnings:
-                st.write("•", w)
 
+edited = render_material_editor()
 
 if is_physical_ai:
     with st.expander("Dettagli del riconoscimento", expanded=False):

@@ -3,7 +3,7 @@ from pathlib import Path
 import sys
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
 from clinic_matching import clinic_default_index
-from review_editor import canonical_values
+from review_editor import canonical_values, apply_review_edits, row_errors
 from review_exports import review_csv, review_xlsx
 from datetime import date
 from types import SimpleNamespace
@@ -23,6 +23,7 @@ class ST:
  def __init__(self,rows):
   self.session_state={'scarico_ai_rows':rows,'scarico_editor_revision':7};self.active=False
   self.column_config=SimpleNamespace(CheckboxColumn=lambda *a,**kw:None, TextColumn=lambda *a,**kw:None, NumberColumn=lambda *a,**kw:None)
+ def fragment(self,fn):return fn
  def form(self,*a):
   outer=self
   class Form(Context):
@@ -60,3 +61,38 @@ for _ in range(2):
 exec(compile(ast.Module(body=tree.body[end].body[:next(i+1 for i,n in enumerate(tree.body[end].body) if isinstance(n,ast.Assign) and any(isinstance(t,ast.Name) and t.id=='final_rows' for t in n.targets))],type_ignores=[]),'submit','exec'),ns)
 assert ns['final_rows'][0]['conto_deposito_struttura']==True and len(ns['final_rows'])==1
 print('PASS: stable source across reruns, editor outside submit form, Smart Track submitted, other brands excluded, unknown brands preserved')
+
+
+# Replay only the isolated material fragment: repeated ownership toggles must
+# persist/audit without asking Streamlit for any full-app rerun.
+class FragmentST(ST):
+ def __init__(self,source):
+  super().__init__(copy.deepcopy(source));self.flags=[False,False]
+ def data_editor(self,df,**kw):
+  frame=df.data.copy() if hasattr(df,"data") else df.copy()
+  for position,value in enumerate(self.flags):
+   frame.loc[frame.index[position],"conto_deposito_struttura"]=value
+  return frame
+ def rerun(self,*a,**kw):
+  raise AssertionError("ownership checkbox triggered full-page rerun")
+physical=[canonical_values(dict(label_id=f"label-{i}",codice="1504-00-126",
+ lotto=f"LOT{i}",scadenza="2035-01-01",quantita=1,produttore="Synthes")) for i in range(2)]
+physical_base=copy.deepcopy(physical)
+fragment_st=FragmentST(physical)
+ns.update(st=fragment_st,rows=physical,source_rows=physical,is_physical_ai=True,is_malzoni=True,
+          selected_client={"codice_cliente":"9010013"},user=lambda:"ci-user",
+          apply_review_edits=apply_review_edits,row_errors=row_errors)
+fragment=next(n for n in tree.body if isinstance(n,ast.FunctionDef) and n.name=="render_material_editor")
+exec(compile(ast.Module(body=[fragment],type_ignores=[]),"fragment","exec"),ns)
+for flags,log_count in [([True,False],1),([True,True],2),([True,True],2),([False,True],3)]:
+ fragment_st.flags=flags
+ result=ns["render_material_editor"]()
+ assert result["conto_deposito_struttura"].tolist()==flags
+ assert [r["conto_deposito_struttura"] for r in fragment_st.session_state["scarico_ai_rows"]]==flags
+ assert len(fragment_st.session_state["scarico_correction_log"])==log_count
+ assert fragment_st.session_state["scarico_editor_revision"]==7
+assert physical==physical_base
+logs=fragment_st.session_state["scarico_correction_log"]
+assert all(l["field"]=="conto_deposito_struttura" and l["user"]=="ci-user" for l in logs)
+assert logs[-1]["original"] is True and logs[-1]["corrected"] is False
+print("PASS: checkbox fragment keeps its baseline, persists toggles and audits once without a full-page rerun")
