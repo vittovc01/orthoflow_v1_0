@@ -62,3 +62,27 @@ def test_exhausted_temporary_limit_has_bounded_attempts():
     with pytest.raises(ProviderError):
         request_with_backoff(request, sleep=delays.append)
     assert len(calls) == 3 and 5 <= delays[0] <= 5.5 and 10 <= delays[1] <= 10.5
+
+
+def test_service_probe_uses_only_fixed_text_and_never_returns_provider_data():
+    from ai_failures import probe_service
+    calls = []
+    def create(**kwargs):
+        calls.append(kwargs)
+        return {'private': 'not for output'}
+    client = SimpleNamespace(responses=SimpleNamespace(create=create))
+    result = probe_service(client, 'gpt-6-astra')
+    assert result['ok'] and 'private' not in str(result)
+    assert calls == [dict(model='gpt-6-astra', store=False, input='Reply OK.',
+                           max_output_tokens=128, reasoning={'effort': 'low'})]
+
+
+def test_service_probe_reports_quota_without_retry_or_disclosure():
+    from ai_failures import probe_service
+    calls = []
+    def create(**kwargs):
+        calls.append(1)
+        raise ProviderError('insufficient_quota')
+    result = probe_service(SimpleNamespace(responses=SimpleNamespace(create=create)), 'gpt-6-astra')
+    assert not result['ok'] and result['kind'] == 'quota' and len(calls) == 1
+    assert 'secret' not in str(result)

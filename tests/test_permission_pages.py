@@ -28,7 +28,8 @@ def test_ocr_acceptance_requires_director_and_does_not_write(monkeypatch,user,ro
     assert not at.exception
     if allowed:
         assert at.title and any('non scarica' in x.value for x in at.info)
-        assert at.button[0].disabled
+        assert next(b for b in at.button if b.label == 'Analizza senza scaricare').disabled
+        assert not next(b for b in at.button if b.label == 'Verifica servizio AI senza foto').disabled
     else:
         assert any('non autorizzato' in x.value.lower() for x in at.error)
         assert not at.title

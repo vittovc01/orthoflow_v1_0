@@ -69,3 +69,17 @@ def request_with_backoff(request, sleep=None):
                 raise
             sleep(delay)
             waited += delay
+
+
+def probe_service(client, model):
+    """Single text-only request. No retries, documents or provider response text."""
+    try:
+        options = {'reasoning': {'effort': 'low'}} if model in {'gpt-6-astra', 'gpt-5.4'} else {}
+        client.responses.create(model=model, store=False, input='Reply OK.',
+                                max_output_tokens=128, **options)
+        return {'ok': True, 'message': 'Servizio AI raggiungibile (' + model + '). '
+                'Prova testuale riuscita; la lettura della foto completa resta da verificare.'}
+    except Exception as exc:
+        kind = failure_kind(exc)
+        message = provider_notice(kind) if kind else 'Servizio AI non disponibile: ' + type(exc).__name__
+        return {'ok': False, 'kind': kind, 'message': message}
