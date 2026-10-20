@@ -4,6 +4,7 @@ import sys
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
 from clinic_matching import clinic_default_index
 from review_editor import canonical_values
+from review_exports import review_csv, review_xlsx
 from datetime import date
 from types import SimpleNamespace
 import pandas as pd
@@ -16,10 +17,12 @@ assert all(ns['is_other_manufacturer'](v) for v in ['Stryker','Zimmer Biomet','M
 class Context:
  def __enter__(self):return self
  def __exit__(self,*a):pass
+ def download_button(self,*a,**kw):
+  assert kw['data'] and kw['on_click']=='ignore'
 class ST:
  def __init__(self,rows):
   self.session_state={'scarico_ai_rows':rows,'scarico_editor_revision':7};self.active=False
-  self.column_config=SimpleNamespace(CheckboxColumn=lambda *a,**kw:None, TextColumn=lambda *a,**kw:None)
+  self.column_config=SimpleNamespace(CheckboxColumn=lambda *a,**kw:None, TextColumn=lambda *a,**kw:None, NumberColumn=lambda *a,**kw:None)
  def form(self,*a):
   outer=self
   class Form(Context):
@@ -47,6 +50,7 @@ rows=[{'codice':'1504-00-126','lotto':'A','quantita':1,'produttore':'Synthes'},{
 ns.update({'pd':pd,'st':ST(rows),'date':date,'client_options':lambda:[{'codice_cliente':'9010013','descrizione':'MALZONI','label':'MALZONI'}],'warehouse_labels':lambda:['MAG1 - MAG1'],'agent_options':lambda:['AGENT'],'secret':lambda name,default=None:default})
 # This isolated AST fragment omits the page imports and native-method binding.
 ns['form_submit_button']=ns['st'].form_submit_button
+ns.update(review_csv=review_csv, review_xlsx=review_xlsx)
 start=next(i for i,n in enumerate(tree.body) if isinstance(n,ast.Assign) and any(isinstance(t,ast.Name) and t.id=='meta' for t in n.targets))
 end=next(i for i,n in enumerate(tree.body) if isinstance(n,ast.If) and isinstance(n.test,ast.BoolOp) and any(isinstance(v,ast.Name) and v.id=='confirm' for v in n.test.values))
 for _ in range(2):

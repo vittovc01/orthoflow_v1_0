@@ -38,6 +38,35 @@ def test_second_pass_recovers_missing_label():
     assert len(merged) == 2 and 'seconda lettura' in merged[1]['warning']
 
 
+def test_local_evidence_overlaps_second_read_without_parallel_api_calls(tmp_path, monkeypatch):
+    from threading import Event
+    path = tmp_path/'source.png'
+    Image.new('RGB',(20,20)).save(path)
+    second_started, local_started = Event(), Event()
+    calls, encodings = [], []
+    from whole_page_labels import image_url as encode
+    def encode_once(image):
+        encodings.append(1)
+        return encode(image)
+    monkeypatch.setattr('whole_page_labels.image_url', encode_once)
+    def local(page):
+        local_started.set()
+        assert second_started.wait(2), 'evidence must overlap the next AI read'
+        return [], []
+    def create(**kwargs):
+        calls.append(kwargs)
+        if len(calls) == 2:
+            second_started.set()
+            assert local_started.wait(2), 'local evidence must already be running'
+        return response([label([10,10,900,900])])
+    monkeypatch.setattr('region_privacy.safe_product_regions', local)
+    result = analyze_labels(path, SimpleNamespace(responses=SimpleNamespace(create=create)),
+                            'gpt-6-astra', {}, lambda x:x)
+    assert len(calls) == 2 and len(encodings) == 1 and len(result['items']) == 1
+    assert result['items'][0]['code'] == '4515-70-005'
+    assert calls[0]['input'][0]['content'][1] == calls[1]['input'][0]['content'][1]
+
+
 def test_ambiguous_positions_do_not_establish_consensus():
     rows = [label([10,10,300,200]), label([10,10,310,210])]
     merged = merge_reads(rows, rows)
@@ -95,7 +124,7 @@ def test_full_page_reaches_both_reads_even_when_local_detector_fails(tmp_path, m
             assert image.size == source.size and image.getpixel((0,0)) == (0,0,255)
         return response(rows)
     def fail(*args, **kwargs):
-        assert len(calls) == 2  # local geometry runs only after transcription
+        assert 1 <= len(calls) <= 2  # evidence may overlap the second read
         raise RuntimeError('detector unavailable')
     monkeypatch.setattr('region_privacy.safe_product_regions', fail)
     result = analyze_labels(path, SimpleNamespace(responses=SimpleNamespace(create=create)),

@@ -9,12 +9,14 @@ from datetime import date, datetime
 from pathlib import Path
 from functools import lru_cache
 from uuid import uuid4
+from time import perf_counter
 from whole_page_runtime import refresh_ocr_modules
 refresh_ocr_modules()
 from ocr_review import build_review, aggregate_review, merge_confirmed_fields
 from review_editor import (apply_review_edits, row_errors, row_name, expected_label_count as initial_label_count,
                            count_warning, catalogue_warning, canonical_values, text_value, quantity_value)
 from ocr_service import analyze_documents
+from review_exports import review_csv, review_xlsx
 from ocr_repository import OriginalDocument, SupabaseReviewRepository, without_images, load_gtin_catalog
 
 from label_pipeline import review_errors, inventory_errors, aggregate_labels, PIPELINE_VERSION, gs1_parse
@@ -350,6 +352,7 @@ def run_ai(path, documents=None):
         st.error("OCR AI non configurato. Verifica OPENAI_API_KEY ed ENABLE_AI_OCR nei Secrets.")
         return
     try:
+        started = perf_counter()
         documents = documents or [{"path": path, "name": Path(path).name,
                                    "type": st.session_state.get("scarico_file_type", "")}]
         originals = [OriginalDocument(d.get("name") or Path(d["path"]).name, Path(d["path"]).read_bytes()) for d in documents]
@@ -362,6 +365,8 @@ def run_ai(path, documents=None):
                     st.error(warning)
                 return
             combined_rows = normalize_ai_items(meta)
+        meta["duration_seconds"] = round(perf_counter()-started, 2)
+        st.session_state["scarico_gtin_catalog"] = extraction_catalog
         meta["physical_label_count"] = len(combined_rows)
         meta["items"] = combined_rows
         st.session_state.pop("scarico_audit_request", None)
@@ -482,13 +487,15 @@ with upload_tab:
             st.session_state["scarico_pending_files"] = {}
             st.session_state["scarico_upload_revision"] = upload_revision + 1
             st.rerun()
-        with st.expander("Anteprima documenti (foto e PDF)", expanded=True):
-            for file_id, entry in pending.items():
-                st.caption(entry["name"])
-                if entry["name"].lower().endswith(".pdf") or entry.get("type") == "application/pdf":
-                    st.pdf(entry["data"], height=600, key=f"scarico_pdf_{file_id}", alt=entry["name"])
-                else:
-                    st.image(entry["data"], caption=entry["name"], use_container_width=True)
+        show_original = not st.session_state.get("scarico_ai_rows") or st.toggle("Mostra documento originale", value=False)
+        if show_original:
+            with st.expander("Anteprima documenti (foto e PDF)", expanded=True):
+                for file_id, entry in pending.items():
+                    st.caption(entry["name"])
+                    if entry["name"].lower().endswith(".pdf") or entry.get("type") == "application/pdf":
+                        st.pdf(entry["data"], height=600, key=f"scarico_pdf_{file_id}", alt=entry["name"])
+                    else:
+                        st.image(entry["data"], caption=entry["name"], use_container_width=True)
         if st.button("🤖 Analizza tutti i file e crea lista codici", type="primary", use_container_width=True, key="analyze_upload"):
             documents = []
             for entry in pending.values():
@@ -544,9 +551,13 @@ if is_physical_ai:
              "escludi_riga": (is_other_manufacturer(r.get("produttore")) and i not in restored_indices) or (bool(r.get("escludi_riga")) and not is_other_manufacturer(r.get("produttore")))}
             for i, r in enumerate(source_rows)]
     excluded_rows = []
-    st.subheader("Verifica delle etichette fisiche")
+    st.subheader("Risultato dell’analisi")
     for detection_warning in meta.get("detection_warnings", []) or []:
-        st.warning(detection_warning)
+        if any(term in detection_warning.lower() for term in ("non concorde", "non completata", "nessuna etichetta", "quota", "limite temporaneo")):
+            st.warning(detection_warning)
+    elapsed = meta.get("duration_seconds") or sum(d.get("duration_seconds", 0) for d in meta.get("documents", []))
+    if elapsed:
+        st.caption(f"Analisi completata in {elapsed:.1f} secondi")
     unconfirmed_regions = meta.get("unconfirmed_regions", []) or []
     if unconfirmed_regions:
         with st.expander("Regioni scartate", expanded=False):
@@ -577,81 +588,17 @@ if is_physical_ai:
     cols[0].metric("Etichette individuate", len(source_rows))
     cols[1].metric("Articoli distinti (REF / lotto)", len({(r.get("codice"), r.get("lotto")) for r in source_rows if r.get("codice") and (r.get("lotto") or r.get("senza_lotto"))}))
     cols[2].metric("Quantità proposta da scaricare", sum(quantity_value(r.get("quantita")) or 0 for r in rows if not r.get("escludi_riga")))
-    catalog = None
-    if source_rows:
+    # Keep the authoritative catalogue snapshot for this review; editing a cell
+    # must not download the entire catalogue again. A new analysis refreshes it.
+    if "scarico_gtin_catalog" not in st.session_state:
         try:
-            catalog = load_gtin_catalog(sb())
-            st.caption("Confronto GTIN → REF con articoli_gtin. GTIN assenti o non censiti restano da verificare; nessun REF viene sostituito automaticamente.")
+            st.session_state["scarico_gtin_catalog"] = load_gtin_catalog(sb())
         except Exception:
-            st.caption("articoli_gtin non disponibile: confronto GTIN → REF non eseguito, verifica manuale richiesta.")
+            st.session_state["scarico_gtin_catalog"] = None
+    catalog = st.session_state["scarico_gtin_catalog"]
     review = build_review({"items":source_rows}, catalog=catalog)
     assessed_rows = review["items"]
     st.session_state["scarico_missing_gtins"]=review["missing_gtins"]
-    for item in source_rows:
-        notice=catalogue_warning(item,catalog)
-        if notice: st.caption("⚠️ "+notice)
-    with st.expander("Dettaglio tecnico del riconoscimento", expanded=False):
-        st.write({"GTIN non letti o non censiti":review["missing_gtins"]})
-    for r in assessed_rows:
-        with st.expander(f"{'⚠️ Da verificare' if r.get('assessment',{}).get('needs_review') else 'Da confermare'} · {r.get('label_id')} · {clean(r.get('codice'))} · {clean(r.get('lotto'))}"):
-            left, right = st.columns([2, 3])
-            if r.get("crop_data_url"):
-                left.image(r["crop_data_url"], use_container_width=True)
-            else:
-                left.caption("Letta nella foto intera: confronta con l’originale caricato. L’assenza del ritaglio non elimina l’etichetta.")
-            right.write({k:r.get(k) for k in ("codice", "lotto", "scadenza", "scadenza_originale", "descrizione", "produttore")})
-            if r.get("local_ref_evidence"):
-                right.write({"REF letto inizialmente": r.get("ref_original"), "Controllo OCR locale": r["local_ref_evidence"]})
-            if r.get("ocr_reads"):
-                right.write({"Letture indipendenti": [{k:v for k,v in read.items() if k in {"code","lot","expiry","quantity"}} for read in r["ocr_reads"]]})
-            assessment = r.get("assessment", {})
-            right.dataframe(pd.DataFrame([{"Campo":name,"Esito":f["status"],"Metodo":f["method"],
-                "Forza evidenza":f["score"]} for name,f in assessment.get("fields",{}).items() if name in {"code","lot","expiry"}]),
-                hide_index=True, use_container_width=True)
-            right.caption("Forza dell’evidenza: indicatore tecnico, non probabilità di correttezza. Tutti i campi richiedono revisione.")
-            for issue in row_errors(r):
-                right.error(issue)
-            right.caption(f"Pagina {r.get('page')} · posizione {r.get('bbox')} · rotazione {r.get('rotation')}°")
-            if r.get("warning"):
-                right.warning(row_name(r)+": "+re.sub(r"(?i)\bnan\b","non letto",clean(r["warning"])))
-    try:
-        preview_rows = aggregate_review(rows)
-        if preview_rows:
-            st.caption("Anteprima aggregata: le quantità delle righe con lo stesso REF e lotto vengono sommate.")
-            st.dataframe(pd.DataFrame(preview_rows)[["code","lot","expiry","description","quantity"]], hide_index=True, use_container_width=True)
-    except ValueError as exc:
-        st.info(f"Anteprima aggregata disponibile dopo la verifica dei campi: {exc}")
-    st.info("Confronta ogni ritaglio con la pagina originale. Se manca un'etichetta, aggiungila dal modulo qui sotto confrontandola con il documento originale. Verifica il conteggio completo prima della conferma.")
-if is_physical_ai:
-    st.subheader("Aggiungi o correggi un materiale")
-    choices = list(range(len(source_rows))) + [-1]
-    target = st.selectbox("Materiale da correggere", choices,
-        format_func=lambda i: "➕ Nuova etichetta non riconosciuta" if i == -1 else row_name(source_rows[i]),
-        key="scarico_manual_target")
-    selected = source_rows[target] if target >= 0 else {}
-    with st.form(f"scarico_manual_material_{target}_{st.session_state.get('scarico_editor_revision', 0)}"):
-        manual_code = st.text_input("REF / codice", value=clean(selected.get("codice")))
-        manual_lot = st.text_input("Lotto stampato", value=clean(selected.get("lotto")))
-        manual_expiry = st.text_input("Scadenza stampata (AAAA-MM-GG)", value=clean(selected.get("scadenza")))
-        manual_quantity = st.number_input("Quantità", min_value=1, value=quantity_value(selected.get("quantita")) or 1, step=1)
-        manual_description = st.text_input("Descrizione materiale", value=clean(selected.get("descrizione")))
-        apply_manual = form_submit_button("Applica materiale alla lista")
-        delete_manual = form_submit_button("Elimina questa riga", disabled=target == -1)
-    if apply_manual or delete_manual:
-        changes=[]
-        for index,item in enumerate(source_rows):
-            if index==target and delete_manual: continue
-            changes.append(dict(item))
-        update=dict(selected,codice=manual_code,lotto=manual_lot,scadenza=manual_expiry,
-                    quantita=int(manual_quantity),descrizione=manual_description)
-        if apply_manual:
-            if target==-1: changes.append(update)
-            else: changes[target]=update
-        updated_rows,corrections=apply_review_edits(source_rows,changes,actor=user())
-        st.session_state["scarico_ai_rows"]=updated_rows
-        st.session_state.setdefault("scarico_correction_log",[]).extend(corrections)
-        st.session_state["scarico_editor_revision"]=int(st.session_state.get("scarico_editor_revision",0))+1
-        st.rerun()
 clients = client_options()
 ai_clinic = clean(meta.get("clinic_name"))
 if clients:
@@ -672,10 +619,10 @@ if excluded_rows:
 if rows or is_physical_ai:
     st.divider()
     st.subheader("✅ Lista materiali riconosciuti")
-    st.caption("Tocca una cella per correggere codice, lotto, scadenza o quantità. Puoi eliminare o aggiungere righe direttamente nella tabella. Le correzioni vengono mantenute nella sessione e registrate con autore e data. Puoi anche usare il modulo Aggiungi o correggi un materiale sopra la lista.")
+    st.caption("Modifica REF, lotto, scadenza, descrizione e quantità direttamente nella lista. Puoi aggiungere o eliminare righe; quelle escluse non vengono scaricate né esportate.")
     df_rows = pd.DataFrame(rows)
     if is_physical_ai and "label_id" not in df_rows: df_rows["label_id"] = pd.Series(dtype="object")
-    preferred = ["codice", "senza_lotto", "jnj_verificato_manualmente", "escludi_riga", "descrizione", "lotto", "scadenza", "quantita", "produttore", "confidence", "warning"]
+    preferred = ["codice", "lotto", "scadenza", "descrizione", "quantita", "escludi_riga", "senza_lotto", "jnj_verificato_manualmente"]
     if "escludi_riga" not in df_rows:
         df_rows["escludi_riga"] = False
     df_rows["senza_lotto"] = df_rows.get("senza_lotto", pd.Series(False, index=df_rows.index)).fillna(False).astype(bool)
@@ -700,14 +647,16 @@ if rows or is_physical_ai:
         height=min(1600, max(220, 35 * (len(df_rows) + 3))), row_height=35,
         column_config={
             "label_id": None,
+            "lotto": st.column_config.TextColumn("Lotto"),
+            "scadenza": st.column_config.TextColumn("Scadenza (AAAA-MM-GG)"),
+            "descrizione": st.column_config.TextColumn("Descrizione", width="large"),
+            "quantita": st.column_config.NumberColumn("Quantità", min_value=1, step=1),
             "esito": st.column_config.TextColumn("Campi da correggere"),
             "jnj_verificato_manualmente": None,
             "escludi_riga": st.column_config.CheckboxColumn(
                 "Escludi riga", default=False,
                 help="La riga non verrà salvata e non genererà fatturato, ordini o movimenti di magazzino."),
             "codice": st.column_config.TextColumn("Codice Johnson/REF"),
-            "lotto": st.column_config.TextColumn("Lotto"),
-
             "senza_lotto": st.column_config.CheckboxColumn("Non sterile / senza lotto", default=False,
                 help="Spunta solo materiale non sterile che non prevede lotto. La disponibilità viene cercata nelle giacenze senza lotto."),
             "conto_deposito_struttura": st.column_config.CheckboxColumn(
@@ -724,6 +673,13 @@ if rows or is_physical_ai:
             st.rerun()
         for item in updated_rows:
             for error in row_errors(item): st.error(error)
+    # Export exactly the current edited list, retaining codes/lots as text.
+    export_list = updated_rows if is_physical_ai else edited.to_dict("records")
+    excel_col, csv_col = st.columns(2)
+    excel_col.download_button("Scarica lista Excel", data=review_xlsx(export_list),
+        file_name="scarico-materiali.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", on_click="ignore")
+    csv_col.download_button("Scarica lista CSV", data=review_csv(export_list),
+        file_name="scarico-materiali.csv", mime="text/csv", on_click="ignore")
     # The original OCR extraction remains immutable; edits live in session state.
 
     warnings = [row_name(r)+": "+re.sub(r"(?i)\bnan\b","non letto",clean(r.get("warning"))) for r in edited.to_dict("records") if clean(r.get("warning"))]
@@ -732,6 +688,72 @@ if rows or is_physical_ai:
             for w in warnings:
                 st.write("•", w)
 
+
+if is_physical_ai:
+    with st.expander("Dettagli del riconoscimento", expanded=False):
+        show_technical = st.checkbox("Mostra riscontri e controlli tecnici", value=False)
+        if show_technical:
+            for warning in meta.get("detection_warnings", []) or []:
+                st.write(warning)
+            st.write({"GTIN non letti o non censiti": review["missing_gtins"]})
+            for item in source_rows:
+                notice = catalogue_warning(item, catalog)
+                if notice:
+                    st.caption(notice)
+            for r in assessed_rows:
+                with st.container(border=True):
+                    st.markdown("**" + row_name(r) + "**")
+                    left, right = st.columns([2, 3])
+                    if r.get("crop_data_url"):
+                        left.image(r["crop_data_url"], use_container_width=True)
+                    else:
+                        left.caption("Letta nella foto intera: confronta con l’originale caricato. L’assenza del ritaglio non elimina l’etichetta.")
+                    right.write({k:r.get(k) for k in ("codice", "lotto", "scadenza", "scadenza_originale", "descrizione", "produttore")})
+                    if r.get("local_ref_evidence"):
+                        right.write({"REF letto inizialmente": r.get("ref_original"), "Controllo OCR locale": r["local_ref_evidence"]})
+                    if r.get("ocr_reads"):
+                        right.write({"Letture indipendenti": [{k:v for k,v in read.items() if k in {"code","lot","expiry","quantity"}} for read in r["ocr_reads"]]})
+                    assessment = r.get("assessment", {})
+                    right.dataframe(pd.DataFrame([{"Campo":name,"Esito":f["status"],"Metodo":f["method"],
+                        "Forza evidenza":f["score"]} for name,f in assessment.get("fields",{}).items() if name in {"code","lot","expiry"}]),
+                        hide_index=True, use_container_width=True)
+                    right.caption("Forza dell’evidenza: indicatore tecnico, non probabilità di correttezza. Tutti i campi richiedono revisione.")
+                    for issue in row_errors(r):
+                        right.error(issue)
+                    right.caption(f"Pagina {r.get('page')} · posizione {r.get('bbox')} · rotazione {r.get('rotation')}°")
+                    if r.get("warning"):
+                        right.warning(row_name(r)+": "+re.sub(r"(?i)\bnan\b","non letto",clean(r["warning"])))
+
+if is_physical_ai:
+    with st.expander("Aggiungi o correggi un materiale", expanded=False):
+        choices = list(range(len(source_rows))) + [-1]
+        target = st.selectbox("Materiale da correggere", choices,
+            format_func=lambda i: "➕ Nuova etichetta non riconosciuta" if i == -1 else row_name(source_rows[i]),
+            key="scarico_manual_target")
+        selected = source_rows[target] if target >= 0 else {}
+        with st.form(f"scarico_manual_material_{target}_{st.session_state.get('scarico_editor_revision', 0)}"):
+            manual_code = st.text_input("REF / codice", value=clean(selected.get("codice")))
+            manual_lot = st.text_input("Lotto stampato", value=clean(selected.get("lotto")))
+            manual_expiry = st.text_input("Scadenza stampata (AAAA-MM-GG)", value=clean(selected.get("scadenza")))
+            manual_quantity = st.number_input("Quantità", min_value=1, value=quantity_value(selected.get("quantita")) or 1, step=1)
+            manual_description = st.text_input("Descrizione materiale", value=clean(selected.get("descrizione")))
+            apply_manual = form_submit_button("Applica materiale alla lista")
+            delete_manual = form_submit_button("Elimina questa riga", disabled=target == -1)
+        if apply_manual or delete_manual:
+            changes=[]
+            for index,item in enumerate(source_rows):
+                if index==target and delete_manual: continue
+                changes.append(dict(item))
+            update=dict(selected,codice=manual_code,lotto=manual_lot,scadenza=manual_expiry,
+                        quantita=int(manual_quantity),descrizione=manual_description)
+            if apply_manual:
+                if target==-1: changes.append(update)
+                else: changes[target]=update
+            updated_rows,corrections=apply_review_edits(source_rows,changes,actor=user())
+            st.session_state["scarico_ai_rows"]=updated_rows
+            st.session_state.setdefault("scarico_correction_log",[]).extend(corrections)
+            st.session_state["scarico_editor_revision"]=int(st.session_state.get("scarico_editor_revision",0))+1
+            st.rerun()
 
 if is_physical_ai and st.session_state.get("scarico_correction_log"):
     with st.expander("Registro delle correzioni", expanded=False):
@@ -797,7 +819,8 @@ with st.form("scarico_ai_confirm"):
     archive_enabled = str(secret("OCR_REVIEW_ARCHIVE_ENABLED", "true")).lower() in {"true", "1", "yes"}
     if archive_enabled:
         st.caption("Archivio OCR attivo: conserva revisione, correzioni e soli ritagli delle etichette. Il documento completo non viene archiviato.")
-    archive_review = form_submit_button("Conferma e archivia revisione OCR (senza scarico)", disabled=(not is_physical_ai or not archive_enabled or len(rows)==0))
+    with st.expander("Solo archiviazione, senza scarico", expanded=False):
+        archive_review = form_submit_button("Conferma e archivia revisione OCR (senza scarico)", disabled=(not is_physical_ai or not archive_enabled or len(rows)==0))
     confirm = form_submit_button("📤 Crea intervento e scarica materiali", type="primary", use_container_width=True, disabled=(len(rows) == 0))
 
 if confirm or archive_review:
