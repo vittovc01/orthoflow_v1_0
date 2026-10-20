@@ -426,6 +426,7 @@ def test_intervention_customer_selector_updates_code_and_name_together(backend, 
             assert name not in {"delete", "upsert", "rpc"}
             return lambda *a, **kw: self
     monkeypatch.setattr(backend, "table", lambda name: Query(name))
+    monkeypatch.setitem(backend.__dict__, "rpc", lambda *a, **kw: SimpleNamespace(execute=lambda: SimpleNamespace(data=[])))
     at = app()
     at.session_state["user"]="ci-user";at.session_state["ruolo"]="Admin";at.session_state["permessi"]=["DIREZIONE"]
     at.run()
@@ -446,3 +447,77 @@ def test_intervention_customer_selector_updates_code_and_name_together(backend, 
     assert updates[0]["codice_cliente"] == "0002"
     assert updates[0]["cliente"] == updates[0]["struttura"] == "Clinica Alfa"
     assert next(s for s in at.selectbox if s.label == "Cliente / struttura").value == "0002"
+
+
+@pytest.mark.parametrize("new_price,preview_failure", [(12.5,False),(None,False),(12.5,True)])
+def test_structure_price_preview_and_save_clear_old_editor(backend,monkeypatch,new_price,preview_failure):
+    saved={"id":77,"codice_cliente":"A","cliente":"Alfa","struttura":"Alfa",
+           "data_intervento":"2026-10-20","linea":"TRAUMA","magazzino":"MAG1"}
+    material={"id":10,"intervento_id":77,"codice":"1504-00-126","lotto":"LOT",
+              "quantita":2,"prezzo":90,"totale":180,"valore":180,
+              "prezzo_source":"MANUALE","origine":"CONTO DEPOSITO","scadenza":"2035-01-01"}
+    updates,requests=[],[]
+    class Query:
+        def __init__(self,name):self.name=name;self.payload=None;self.bounds=None;self.filters={}
+        def eq(self,k,v):self.filters[k]=v;return self
+        def update(self,payload):self.payload=payload;return self
+        def range(self,lo,hi):self.bounds=(lo,hi);return self
+        def insert(self,payload):
+            assert self.name=="audit_log"
+            return self
+        def execute(self):
+            if self.payload is not None:
+                assert self.name=="interventi"
+                updates.append(self.payload);saved.update(self.payload)
+                material.update(prezzo=new_price,totale=None if new_price is None else 2*new_price,
+                                valore=None if new_price is None else 2*new_price,
+                                prezzo_source="RICALCOLO_SENZA_OFFERTA" if new_price is None else "OFFERTA")
+                return SimpleNamespace(data=[])
+            if self.name=="interventi":return SimpleNamespace(data=[dict(saved)])
+            if self.name=="clienti":
+                return SimpleNamespace(data=[] if self.bounds[0] else [
+                    {"codice_cliente":"A","descrizione":"Alfa"},{"codice_cliente":"B","descrizione":"Beta"}])
+            if self.name=="righe_intervento":
+                return SimpleNamespace(data=[dict(material)] if not self.filters.get("origine") else [])
+            return SimpleNamespace(data=[])
+        def __getattr__(self,name):
+            assert name not in {"delete","upsert"}
+            return lambda *a,**kw:self
+    def rpc(name,args):
+        requests.append((name,args))
+        def execute():
+            if name!="anteprima_prezzi_cambio_struttura":return SimpleNamespace(data=[])
+            if preview_failure:raise TimeoutError("temporary error")
+            return SimpleNamespace(data=[{"riga_id":10,"codice":material["codice"],"lotto":"LOT",
+                "prezzo_precedente":90,"prezzo_nuovo":new_price,
+                "totale_nuovo":None if new_price is None else 2*new_price,"offerta_id":1,
+                "esito":"PREZZO DA INSERIRE" if new_price is None else "OFFERTA"}])
+        return SimpleNamespace(execute=execute)
+    monkeypatch.setattr(backend,"table",lambda name:Query(name))
+    monkeypatch.setitem(backend.__dict__,"rpc",rpc)
+    at=app();at.session_state["user"]="ci-user";at.session_state["ruolo"]="Admin";at.session_state["permessi"]=["DIREZIONE"]
+    at.run();at.switch_page("pages/06_Gestione_Interventi.py").run()
+    assert not at.exception
+    # An old unsaved material-price edit must not survive a customer switch.
+    at.session_state["intervento_editor_full_77_A_TRAUMA"]={"edited_rows":{0:{"prezzo":999}},"added_rows":[],"deleted_rows":[]}
+    next(s for s in at.selectbox if s.label=="Cliente / struttura").set_value("B")
+    at.run()
+    assert not at.exception and not updates
+    request=next(args for name,args in requests if name=="anteprima_prezzi_cambio_struttura" and args["p_codice_cliente"]=="B")
+    assert request["p_codice_cliente"]=="B" and request["p_linea"]=="TRAUMA" and request["p_data"]=="2026-10-20"
+    if not preview_failure:
+        assert any("vecchio prezzo verrà rimosso" in w.value for w in at.warning) == (new_price is None)
+    next(b for b in at.button if b.label=="💾 Salva dati intervento").click();at.run()
+    assert not at.exception
+    if preview_failure:
+        assert not updates
+        assert any("nessuna modifica verrà salvata" in e.value for e in at.error)
+    else:
+        assert len(updates)==1 and saved["codice_cliente"]=="B"
+        table=next(d.value for d in at.dataframe if "prezzo_source" not in d.value.columns and "prezzo" in d.value.columns)
+        if new_price is None:
+            import pandas as pd
+            assert pd.isna(table.iloc[0]["prezzo"])
+            assert any("totale è incompleto" in w.value for w in at.warning)
+        else:
+            assert table.iloc[0]["prezzo"]==new_price and table.iloc[0]["totale"]==25
