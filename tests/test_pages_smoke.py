@@ -499,10 +499,32 @@ def test_structure_price_preview_and_save_clear_old_editor(backend,monkeypatch,n
     at.run();at.switch_page("pages/06_Gestione_Interventi.py").run()
     assert not at.exception
     # An old unsaved material-price edit must not survive a customer switch.
-    at.session_state["intervento_editor_full_77_A_TRAUMA"]={"edited_rows":{0:{"prezzo":999}},"added_rows":[],"deleted_rows":[]}
+    def edit_cell(fields):
+        revision=at.session_state["intervention_working_77"]["revision"]
+        key=f"intervento_editor_full_77_A_TRAUMA_{revision}"
+        at.session_state[key]={"edited_rows":{0:fields},"added_rows":[],"deleted_rows":[]}
+        at.run()
+        assert not at.exception and not updates
+        return next(d.value for d in at.dataframe if "prezzo" in d.value.columns)
+    frame=edit_cell({"prezzo":100})
+    assert frame.iloc[0]["totale"]==200
+    assert next(m for m in at.metric if m.label=="Totale con modifiche").value=="€ 200.00"
+    assert next(m for m in at.metric if m.label=="Totale salvato").value=="€ 180.00"
+    frame=edit_cell({"quantita":3})
+    assert frame.iloc[0]["prezzo"]==100 and frame.iloc[0]["totale"]==300
+    frame=edit_cell({"prezzo":0})
+    assert frame.iloc[0]["totale"]==0
+    frame=edit_cell({"prezzo":None})
+    import pandas as pd
+    assert pd.isna(frame.iloc[0]["totale"])
+    assert any("Totale incompleto" in w.value for w in at.warning)
+    edit_cell({"prezzo":999})
     next(s for s in at.selectbox if s.label=="Cliente / struttura").set_value("B")
     at.run()
     assert not at.exception and not updates
+    if not preview_failure:
+        pending_label="Subtotale nuova struttura" if new_price is None else "Totale nuova struttura (da salvare)"
+        assert any(m.label==pending_label for m in at.metric)
     request=next(args for name,args in requests if name=="anteprima_prezzi_cambio_struttura" and args["p_codice_cliente"]=="B")
     assert request["p_codice_cliente"]=="B" and request["p_linea"]=="TRAUMA" and request["p_data"]=="2026-10-20"
     if not preview_failure:
