@@ -13,7 +13,7 @@ from pathlib import Path
 
 from PIL import Image, ImageOps, ImageFilter
 
-PIPELINE_VERSION = 'physical-label-v17-original-vision'
+PIPELINE_VERSION = 'physical-label-v18-api-recovery'
 
 
 def local_ref_evidence(image):

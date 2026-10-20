@@ -7,6 +7,7 @@ import hashlib
 import math
 from collections import Counter
 from pathlib import Path
+from ai_failures import failure_kind, provider_notice, request_with_backoff
 
 from label_pipeline import (PIPELINE_VERSION, render_pages, image_url, compare_reads,
                             crop_region, decode_barcodes, reconcile, verify_ref_evidence)
@@ -30,12 +31,16 @@ source_text deve contenere soltanto REF, lotto e scadenza del prodotto.
 
 
 class WholePageReadError(RuntimeError):
-    def __init__(self, page, failures):
+    def __init__(self, page, failures, kind=None):
+        self.kind = kind
         self.public_reason = f'Pagina {page}: ' + '; '.join(failures)
         super().__init__(self.public_reason)
 
 
 def failure_reason(exc):
+    kind = failure_kind(exc)
+    if kind:
+        return provider_notice(kind)
     reason = type(exc).__name__
     status = getattr(exc, 'status_code', None)
     if isinstance(status, int):
@@ -179,13 +184,13 @@ def analyze_labels(path, client, model, item_schema, parse):
                             {'type':'input_image','image_url':image_url(read_page),'detail':detail}]}],
                         text={'format':{'type':'json_schema','name':'whole_page_product_labels','schema':schema,'strict':True}}, **options)
                 try:
-                    raw_response = request()
+                    raw_response = request_with_backoff(request)
                 except Exception as exc:
                     if active_model != 'gpt-6-astra' or getattr(exc,'status_code',None) != 404:
                         raise
                     active_model = 'gpt-5.4'
                     warnings.append('Modello gpt-6-astra non disponibile per questo account: lettura eseguita con gpt-5.4 a risoluzione originale')
-                    raw_response = request()
+                    raw_response = request_with_backoff(request)
                 response = parse(raw_response)
                 reads.append(observations(response))
                 if response.get('warning'):
@@ -193,7 +198,15 @@ def analyze_labels(path, client, model, item_schema, parse):
             except Exception as exc:
                 reads.append(None)
                 failures.append(failure_reason(exc))
+                kind = failure_kind(exc)
+                if kind:
+                    if not any(r is not None for r in reads):
+                        raise WholePageReadError(number, [provider_notice(kind)], kind=kind) from None
+                    warnings.append(provider_notice(kind))
+                    break
                 warnings.append(f'Pagina {number}: lettura {attempt+1} non completata ({type(exc).__name__}); verificare il conteggio sul foglio')
+        while len(reads) < 2:
+            reads.append(None)
         if reads == [None, None]:
             raise WholePageReadError(number, ['entrambe le letture fallite', *failures])
         rows = merge_reads(reads[0] or [], reads[1] or [])

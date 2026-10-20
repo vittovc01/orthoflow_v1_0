@@ -42,7 +42,7 @@ if st.button('Analizza senza scaricare', disabled=upload is None):
         with tempfile.NamedTemporaryFile(suffix=Path(upload.name).suffix.lower(), delete=False) as f:
             f.write(upload.getvalue())
             path = f.name
-        client = OpenAI(api_key=_secret('OPENAI_API_KEY'), timeout=180, max_retries=1)
+        client = OpenAI(api_key=_secret('OPENAI_API_KEY'), timeout=180, max_retries=0)
         with st.spinner('Due letture indipendenti della foto intera…'):
             result = analyze_labels(path, client, model,
                 {'type':'object','properties':ITEM_PROPERTIES,'required':ITEM_REQUIRED,

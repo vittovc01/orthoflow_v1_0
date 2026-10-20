@@ -196,6 +196,40 @@ def test_provider_diagnostics_do_not_echo_secrets():
     assert failure_reason(error) == 'RuntimeError'
 
 
+def test_quota_stops_before_second_read_and_fallback(tmp_path):
+    from whole_page_labels import WholePageReadError
+    from tests.test_ai_failures import ProviderError
+    path = tmp_path/'source.png'
+    Image.new('RGB',(20,20)).save(path)
+    calls = []
+    def create(**kwargs):
+        calls.append(kwargs)
+        raise ProviderError('insufficient_quota')
+    with pytest.raises(WholePageReadError) as error:
+        analyze_labels(path, SimpleNamespace(responses=SimpleNamespace(create=create)),
+                       'gpt-6-astra', {}, lambda x:x)
+    assert len(calls) == 1 and error.value.kind == 'quota'
+    assert 'non serve rifare la foto' in error.value.public_reason
+    assert 'secret' not in error.value.public_reason
+
+
+def test_quota_in_second_read_preserves_first_labels(tmp_path, monkeypatch):
+    from tests.test_ai_failures import ProviderError
+    path = tmp_path/'source.png'
+    Image.new('RGB',(20,20)).save(path)
+    calls = []
+    def create(**kwargs):
+        calls.append(1)
+        if len(calls) == 2:
+            raise ProviderError('insufficient_quota')
+        return response([label([10,10,900,900])])
+    monkeypatch.setattr('region_privacy.safe_product_regions', lambda *a:([],[]))
+    result = analyze_labels(path, SimpleNamespace(responses=SimpleNamespace(create=create)),
+                            'gpt-6-astra', {}, lambda x:x)
+    assert len(calls) == 2 and len(result['items']) == 1
+    assert any('Quota' in warning for warning in result['detection_warnings'])
+
+
 def test_full_page_reader_keeps_sterile_ref_suffix_guard(tmp_path, monkeypatch):
     path = tmp_path/'source.png'
     Image.new('RGB',(20,20)).save(path)
@@ -221,3 +255,20 @@ def test_failed_full_page_analysis_exposes_safe_reason(tmp_path):
     assert result['documents'][0]['status'] == 'failed'
     assert 'BadRequestError HTTP 400' in result['detection_warnings'][0]
     assert not result['items']
+
+
+def test_provider_limit_does_not_resubmit_remaining_documents():
+    from ocr_service import analyze_documents
+    from ocr_repository import OriginalDocument
+    image = BytesIO()
+    Image.new('RGB',(20,20)).save(image,format='PNG')
+    calls = []
+    def fail(*args, **kwargs):
+        from whole_page_labels import WholePageReadError
+        calls.append(1)
+        raise WholePageReadError(1, ['Quota API esaurita; non serve rifare la foto'], kind='quota')
+    result = analyze_documents([OriginalDocument('a.png',image.getvalue()),
+                                OriginalDocument('b.png',image.getvalue())], analyzer=fail)
+    assert calls == [1]
+    assert all(d['status'] == 'failed' and d['failure_kind'] == 'quota' for d in result['documents'])
+    assert all('nuova foto' not in w for w in result['detection_warnings'])

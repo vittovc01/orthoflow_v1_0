@@ -17,12 +17,16 @@ def analyze_documents(documents, *, analyzer, catalog=None, soon_days=90):
     result = {'items':[],'annotated_pages':[],'detection_warnings':[],
               'unconfirmed_regions':[],'documents':[],'review_required':True}
     seen_documents = {}
+    provider_block = None
     with TemporaryDirectory(prefix='orthoflow-review-') as tmp:
         for index, document in enumerate(documents):
             mime, extension = document.validate()
             path = Path(tmp)/f'{index:02}{extension}'
             path.write_bytes(document.content)
             try:
+                if provider_block:
+                    from whole_page_labels import WholePageReadError
+                    raise WholePageReadError(1, [provider_block[1]], kind=provider_block[0])
                 from label_pipeline import render_pages
                 pages = render_pages(path)
                 fingerprint = tuple((page.size, sha256(page.tobytes()).hexdigest()) for page in pages)
@@ -36,8 +40,11 @@ def analyze_documents(documents, *, analyzer, catalog=None, soon_days=90):
             except Exception as exc:
                 from whole_page_labels import WholePageReadError
                 reason = exc.public_reason if isinstance(exc, WholePageReadError) else type(exc).__name__
-                result['detection_warnings'].append(f'Documento {index+1}: analisi non completata ({reason}); riprovare o acquisire una nuova foto')
-                result['documents'].append({'index':index,'name':document.name,'status':'failed'})
+                kind = getattr(exc, 'kind', None)
+                if kind in ('quota', 'rate_limit'):
+                    provider_block = (kind, reason)
+                result['detection_warnings'].append(f'Documento {index+1}: analisi non completata ({reason})')
+                result['documents'].append({'index':index,'name':document.name,'status':'failed','failure_kind':kind})
                 continue
             result['documents'].append({'index':index,'name':document.name,'status':'analyzed','model':incoming.get('ocr_model')})
             for key in ('items','annotated_pages','detection_warnings','unconfirmed_regions'):
