@@ -12,6 +12,18 @@ from ocr_repository import OriginalDocument
 from ocr_review import build_review
 
 
+def document_fingerprint(path):
+    # Do not retain a rasterised copy of the whole PDF during the AI analysis.
+    from label_pipeline import iter_pages
+    fingerprint = []
+    for page in iter_pages(path):
+        try:
+            fingerprint.append((page.size, sha256(page.tobytes()).hexdigest()))
+        finally:
+            page.close()
+    return tuple(fingerprint)
+
+
 def analyze_documents(documents, *, analyzer, catalog=None, soon_days=90):
     if not 1<=len(documents)<=20 or sum(len(d.content) for d in documents)>50*1024*1024:
         raise ValueError('Caricare da 1 a 20 documenti, massimo 50 MiB totali')
@@ -29,9 +41,7 @@ def analyze_documents(documents, *, analyzer, catalog=None, soon_days=90):
                 if provider_block:
                     from whole_page_labels import WholePageReadError
                     raise WholePageReadError(1, [provider_block[1]], kind=provider_block[0])
-                from label_pipeline import render_pages
-                pages = render_pages(path)
-                fingerprint = tuple((page.size, sha256(page.tobytes()).hexdigest()) for page in pages)
+                fingerprint = document_fingerprint(path)
                 if fingerprint in seen_documents:
                     result['documents'].append({'index':index,'name':document.name,'status':'duplicate',
                                                 'duplicate_of':seen_documents[fingerprint]})

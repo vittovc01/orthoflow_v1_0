@@ -98,16 +98,48 @@ def image_url(image):
     return 'data:image/png;base64,' + base64.b64encode(buf.getvalue()).decode()
 
 
-def render_pages(path):
+MAX_RENDER_PIXELS = 28_000_000
+
+
+def pdf_render_scale(page):
+    """Bound allocations before rasterising; do not enlarge full-page scans."""
+    area = max(1, page.rect.width * page.rect.height)
+    scale = min(4.0, math.sqrt(MAX_RENDER_PIXELS / area) * .999,
+                65500 / max(page.rect.width, page.rect.height, 1))
+    for image in page.get_image_info():
+        box = image['bbox']
+        coverage = max(0, min(box[2], page.rect.x1)-max(box[0], page.rect.x0)) * max(0, min(box[3], page.rect.y1)-max(box[1], page.rect.y0))
+        if coverage < area * .75 or image['width'] * image['height'] < 1_000_000:
+            continue
+        a,b,c,d,_,_ = image['transform']
+        density = min(image['width']/max(math.hypot(a,b), .001),
+                      image['height']/max(math.hypot(c,d), .001))
+        scale = min(scale, density)
+    return max(scale, 1e-9)
+
+
+def iter_pages(path):
+    """Yield one page at a time; consumers own and close each returned image."""
     path = Path(path)
     if path.suffix.lower() == '.pdf':
         import fitz
         with fitz.open(path) as doc:
             if len(doc) > 12:
                 raise ValueError('Massimo 12 pagine per analisi; dividere il documento.')
-            return [Image.open(BytesIO(p.get_pixmap(matrix=fitz.Matrix(4, 4), alpha=False).tobytes('png'))).convert('RGB') for p in doc]
+            for page in doc:
+                scale = pdf_render_scale(page)
+                pixmap = page.get_pixmap(matrix=fitz.Matrix(scale, scale), alpha=False, colorspace=fitz.csRGB)
+                rendered = Image.frombytes('RGB', (pixmap.width, pixmap.height), pixmap.samples)
+                del pixmap
+                yield rendered
+        return
     with Image.open(path) as image:
-        return [ImageOps.exif_transpose(image).convert('RGB')]
+        yield ImageOps.exif_transpose(image).convert('RGB')
+
+
+def render_pages(path):
+    """Compatibility API for callers requiring indexed pages."""
+    return list(iter_pages(path))
 
 
 def overlap(a, b):
