@@ -590,7 +590,7 @@ if is_physical_ai:
     review = build_review({"items":source_rows}, catalog=catalog)
     assessed_rows = review["items"]
     st.session_state["scarico_missing_gtins"]=review["missing_gtins"]
-if st.session_state.pop("scarico_reset_destination", False):
+if st.session_state.pop("scarico_reset_destination", False) or "scarico_destination_client" not in st.session_state:
     reset_destination(st.session_state)
 clients = client_options()
 if clients:

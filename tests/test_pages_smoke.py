@@ -582,6 +582,7 @@ def test_destination_starts_empty_and_both_fields_are_required(backend):
     at=app()
     at.session_state['user']='ci-user';at.session_state['ruolo']='Admin';at.session_state['permessi']=['DIREZIONE']
     at.run()
+    at.session_state['scarico_price_line']='TRAUMA'  # old live session before this update
     at.session_state['scarico_source']='AI'
     at.session_state['scarico_ai_meta']={'pipeline_version':PIPELINE_VERSION, 'clinic_name':'Struttura A'}
     at.session_state['scarico_ai_rows']=[dict(label_id='one',codice='TEST',lotto='LOT',scadenza='2035-01-01',quantita=1)]

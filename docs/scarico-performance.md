@@ -4,7 +4,8 @@ Every successful fresh extraction clears both destination widgets. The customer
 selector no longer matches an OCR clinic name or selects the first customer; the
 line no longer defaults to TRAUMA. Successful discharge queues another reset
 before the next render (Streamlit forbids mutating an already rendered widget).
-Both fields are required to enable discharge; an independent Python server guard
+An existing session without the new customer widget also clears any legacy
+preselected line at its first render. Both fields are required to enable discharge; an independent Python server guard
 runs before any review archive or stock write. Archive-only review still creates
 no intervention and does not require an intervention destination.
 
