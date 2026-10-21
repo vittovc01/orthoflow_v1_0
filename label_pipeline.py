@@ -85,7 +85,11 @@ def compare_reads(first, second):
     row['ocr_reads'] = [dict(first), dict(second)]
     for field in ('code', 'lot', 'expiry', 'gtin'):
         a, b = first.get(field), second.get(field)
-        if not a or not b or str(a).strip() != str(b).strip():
+        equal = bool(a and b and str(a).strip() == str(b).strip())
+        if field == 'code' and a and b:
+            from ocr_review import exact_code
+            equal = bool(exact_code(a)) and exact_code(a) == exact_code(b)
+        if not equal:
             row[field] = (a or b) if not a or not b else None
             warnings.append('Letture indipendenti discordanti o incomplete: ' + field)
     row['warning'] = ' · '.join(warnings) or None

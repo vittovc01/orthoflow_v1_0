@@ -156,6 +156,39 @@ def cross_photo_candidates(rows):
              if len({r['document_index'] for r in group}) > 1 ]
 
 
+def readable_candidates(row, field):
+    """Proposals only: never infer a REF from GTIN or apply an alternative."""
+    if field not in ('code','lot','expiry'):
+        return []
+    from label_pipeline import gs1_parse
+    candidates = []
+    def add(value, source):
+        value = product_ref(value) if field == 'code' else text_value(value)
+        if not value:
+            return
+        if field == 'expiry':
+            value, precision = normalize_expiry(value)
+            if not value or precision != 'day':
+                return
+        existing = next((c for c in candidates if c['value']==value),None)
+        if existing:
+            if source not in existing['sources']:
+                existing['sources'].append(source)
+        else:
+            candidates.append({'value':value,'sources':[source]})
+    for index,read in enumerate(row.get('ocr_reads') or [],1):
+        add(read.get(field),f'Lettura {index}')
+    add(row.get(field+'_ocr_original'),'Lettura originale')
+    if field != 'code':
+        for barcode in row.get('barcodes') or []:
+            if not barcode.get('raw'):
+                continue
+            decoded = gs1_parse(barcode['raw'])
+            if not decoded.get('error'):
+                add(decoded.get(field),'DataMatrix')
+    return candidates
+
+
 def build_review(extraction, *, catalog=None, today=None, soon_days=90):
     """JSON contract; edits belong in confirmed records, never overwrite extraction."""
     labels = []
