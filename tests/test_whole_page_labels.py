@@ -319,16 +319,16 @@ def test_partial_pass_does_not_erase_available_fields():
     assert row['ocr_reads'][1]['lot'] is None
 
 
-def test_twelve_vertical_labels_with_drifting_boxes_do_not_become_nineteen():
+def test_thirteen_vertical_labels_with_drifting_boxes_do_not_become_nineteen():
     codes = ['04.112.143S','04.211.016S','04.211.010S','04.211.016S',
              '04.200.018S','404.814S','413.014S','04.211.016S',
-             '412.103S','219.910S','04.211.016S','214.544S']
-    complete = [label([i*70,100,i*70+60,300],code=c,lot=f'LOT{i}') for i,c in enumerate(codes)]
-    partial = [label([i*70,600,i*70+60,800],code=c,lot=None,expiry=None) for i,c in enumerate(codes)]
+             '412.103S','219.910S','04.211.016S','214.544S','413.014S']
+    complete = [label([i*65,100,i*65+55,300],code=c,lot=f'LOT{i}') for i,c in enumerate(codes)]
+    partial = [label([i*65,600,i*65+55,800],code=c,lot=None,expiry=None) for i,c in enumerate(codes)]
     partial.append(label([900,600,950,800],code=None,lot=None,expiry=None))
     uncertain=[]
     rows=merge_reads(partial,complete,uncertain)
-    assert len(rows)==12 and sum(r['quantity'] for r in rows)==12
+    assert len(rows)==13 and sum(r['quantity'] for r in rows)==13
     assert len(uncertain)==1 and uncertain[0]['code'] is None
     assert sum(r['code']=='04.211.016S' for r in rows)==4
     assert all(r['lot'] and r['expiry'] for r in rows)

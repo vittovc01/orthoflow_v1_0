@@ -209,8 +209,8 @@ def restore_rotated_observations(rows):
 
 def page_barcode_evidence(page):
     """Optional local GS1 reads; no crops, uploads or unbounded full-page copies."""
-    scale = min(1,2000/max(page.size))
-    bounded = page.resize(tuple(max(1,round(v*scale)) for v in page.size)) if scale < 1 else page
+    scale = min(1.5,2000/max(page.size))
+    bounded = page.resize(tuple(max(1,round(v*scale)) for v in page.size)) if scale != 1 else page
     try:
         return decode_barcodes(bounded, with_positions=True)
     except Exception:
