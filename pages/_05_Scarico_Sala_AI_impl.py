@@ -549,16 +549,18 @@ if is_physical_ai:
     excluded_rows = []
     st.subheader("Risultato dell’analisi")
     for detection_warning in meta.get("detection_warnings", []) or []:
-        if any(term in detection_warning.lower() for term in ("non concorde", "non completata", "nessuna etichetta", "quota", "limite temporaneo")):
+        if any(term in detection_warning.lower() for term in ("non concorde", "non completata", "non abbinate", "nessuna etichetta", "quota", "limite temporaneo")):
             st.warning(detection_warning)
     elapsed = meta.get("duration_seconds") or sum(d.get("duration_seconds", 0) for d in meta.get("documents", []))
     if elapsed:
         st.caption(f"Analisi completata in {elapsed:.1f} secondi")
     unconfirmed_regions = meta.get("unconfirmed_regions", []) or []
     if unconfirmed_regions:
-        with st.expander("Regioni scartate", expanded=False):
+        with st.expander("Osservazioni da controllare / regioni scartate", expanded=False):
             st.caption("Queste zone non hanno un riscontro indipendente come etichette di prodotto e non aumentano la quantità. Se una zona contiene davvero un materiale, aggiungilo dal modulo qui sotto.")
             for discarded_index, region in enumerate(unconfirmed_regions):
+                if region.get('code') or region.get('lot'):
+                    st.write(f"REF: {region.get('code') or 'da leggere'} · Lotto: {region.get('lot') or 'da leggere'} · Scadenza: {region.get('expiry') or 'da leggere'}")
                 if region.get("crop_data_url"):
                     st.image(region["crop_data_url"], caption=f"Pagina {region.get('page', '')}")
                 if st.button("Recupera questa etichetta", key=f"recover_region_{discarded_index}_{st.session_state.get('scarico_editor_revision',0)}"):

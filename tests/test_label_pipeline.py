@@ -314,3 +314,20 @@ def test_printed_gtin_conflict_cannot_be_overwritten_by_datamatrix():
     assert result['gtin'] is None
     assert result['gtin_ocr_original']=='07611819268623'
     assert 'Conflitto OCR/GS1: gtin' in result['warning']
+
+
+def test_positioned_decoder_retains_two_identical_physical_datamatrices(monkeypatch):
+    import zxingcpp
+    calls=[]
+    def barcode(x):
+        point=lambda x,y:SimpleNamespace(x=x,y=y)
+        return SimpleNamespace(bytes=b'(17)350801(10)419L516',symbology_identifier=']d2',format='DataMatrix',
+            position=SimpleNamespace(top_left=point(x,10),top_right=point(x+10,10),
+                                     bottom_left=point(x,20),bottom_right=point(x+10,20)))
+    def read(image):
+        calls.append(1)
+        return [barcode(10),barcode(60)] if len(calls)==1 else []
+    monkeypatch.setattr(zxingcpp,'read_barcodes',read)
+    rows=decode_barcodes(Image.new('RGB',(100,100)),with_positions=True)
+    assert len(rows)==2 and rows[0]['lot']==rows[1]['lot']=='419L516'
+    assert rows[0]['bbox']!=rows[1]['bbox']

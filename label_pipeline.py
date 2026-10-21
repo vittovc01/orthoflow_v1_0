@@ -13,7 +13,7 @@ from pathlib import Path
 
 from PIL import Image, ImageOps, ImageFilter
 
-PIPELINE_VERSION = 'physical-label-v18-api-recovery'
+PIPELINE_VERSION = 'physical-label-v19-oriented-consensus'
 
 
 def local_ref_evidence(image):
@@ -86,7 +86,7 @@ def compare_reads(first, second):
     for field in ('code', 'lot', 'expiry', 'gtin'):
         a, b = first.get(field), second.get(field)
         if not a or not b or str(a).strip() != str(b).strip():
-            row[field] = None
+            row[field] = (a or b) if not a or not b else None
             warnings.append('Letture indipendenti discordanti o incomplete: ' + field)
     row['warning'] = ' · '.join(warnings) or None
     return row
@@ -229,7 +229,7 @@ def gs1_parse(raw):
     return result
 
 
-def decode_barcodes(image):
+def decode_barcodes(image, with_positions=False):
     import zxingcpp
     results = []
     # Retry conservative threshold/scale variants; retain every distinct payload.
@@ -242,16 +242,24 @@ def decode_barcodes(image):
     # whose module boundary falls between pixels. Never invent a payload.
     if max(gray.size) < 1200:
         variants.append(gray.resize(tuple(round(v*1.5) for v in gray.size), Image.Resampling.NEAREST))
-    seen = set()
     for variant in variants:
         for barcode in zxingcpp.read_barcodes(variant):
             raw = barcode.bytes.decode('utf-8', errors='replace')
             symbology = getattr(barcode, 'symbology_identifier', '')
-            if raw in seen:
+            box = None
+            if with_positions:
+                points = [getattr(barcode.position, name) for name in ('top_left','top_right','bottom_right','bottom_left')]
+                box = [min(p.x for p in points)*1000/variant.width,
+                       min(p.y for p in points)*1000/variant.height,
+                       max(p.x for p in points)*1000/variant.width,
+                       max(p.y for p in points)*1000/variant.height]
+            if any(existing['raw'] == raw and (not with_positions or
+                   max(abs(a-b) for a,b in zip(existing['bbox'],box)) < 12)
+                   for existing in results):
                 continue
             if symbology in {']d2', ']C1'} or raw.startswith((']d2', ']C1', '(01)')):
-                seen.add(raw)
-                results.append({'raw': raw, 'format': str(barcode.format), **gs1_parse(raw)})
+                results.append({'raw': raw, 'format': str(barcode.format), **gs1_parse(raw),
+                                **({'bbox':box} if with_positions else {})})
     return results
 
 
