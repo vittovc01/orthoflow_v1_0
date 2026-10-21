@@ -23,10 +23,12 @@ def _flag(name: str, default: str="false") -> bool:
     return _secret(name,default).strip().lower() in {"1","true","yes","y","on"}
 
 def ai_status():
+    # Explicit cost policy: legacy Astra secrets must not override the requested
+    # mini migration. DDT keeps its independent configured model.
     missing=[]
     if not _secret("OPENAI_API_KEY"): missing.append("OPENAI_API_KEY")
     if not _flag("ENABLE_AI_OCR","false"): missing.append("ENABLE_AI_OCR=true")
-    return {"enabled":not missing,"missing":missing,"model":_secret("OPENAI_VISION_MODEL","gpt-5-mini"),"label_model":_secret("SCARICO_FULL_PAGE_MODEL","gpt-6-astra")}
+    return {"enabled":not missing,"missing":missing,"model":_secret("OPENAI_VISION_MODEL","gpt-5-mini"),"label_model":"gpt-5.4-mini"}
 
 def ai_enabled(): return bool(ai_status()["enabled"])
 
@@ -85,6 +87,30 @@ def _track_usage(response, mode, model, suffix):
     except Exception:
         pass
 
+
+def _track_label_usage(reads, suffix, outcome):
+    """Called by the app thread, never from concurrent OpenAI workers."""
+    if not reads:
+        return
+    try:
+        import streamlit as st
+        from supabase import create_client
+        url = _secret('SUPABASE_URL')
+        key = _secret('SUPABASE_SERVICE_KEY') or _secret('SUPABASE_ANON_KEY') or _secret('SUPABASE_KEY')
+        if not url or not key:
+            return
+        records = [dict(utente=str(st.session_state.get('user','')), modulo='scarico_sala',
+            modello=r['model'], input_tokens=r['input_tokens'], output_tokens=r['output_tokens'],
+            total_tokens=r['total_tokens'], costo_usd=r.get('estimated_cost_usd'),
+            file_tipo=suffix, esito=outcome) for r in reads if r.get('estimated_cost_usd') is not None]
+        if not records:
+            return
+        create_client(url.rstrip('/'), key).table('ocr_usage').insert(records).execute()
+    except Exception:
+        # Consumption is also returned with the review; a telemetry outage must
+        # never submit another AI request or discard the recognized labels.
+        pass
+
 def analyze_document(path: str, mode: str="scarico_sala") -> Dict[str,Any]:
     status=ai_status()
     if not status["enabled"]: raise RuntimeError("AI OCR non abilitato. Configura OPENAI_API_KEY e ENABLE_AI_OCR=true nei Secrets.")
@@ -94,9 +120,16 @@ def analyze_document(path: str, mode: str="scarico_sala") -> Dict[str,Any]:
     client=OpenAI(api_key=_secret("OPENAI_API_KEY"), timeout=180 if mode=="scarico_sala" else 60, max_retries=0 if mode=="scarico_sala" else 1); schema=DDT_SCHEMA if mode=="ddt" else SCARICO_SALA_SCHEMA
     if mode == "scarico_sala":
         from whole_page_labels import analyze_labels
-        return analyze_labels(path, client, status["label_model"],
-            {"type":"object","properties":ITEM_PROPERTIES,"required":ITEM_REQUIRED,"additionalProperties":False},
-            _parse_response)
+        from whole_page_labels import WholePageReadError
+        try:
+            result = analyze_labels(path, client, status["label_model"],
+                {"type":"object","properties":ITEM_PROPERTIES,"required":ITEM_REQUIRED,"additionalProperties":False},
+                _parse_response)
+        except WholePageReadError as exc:
+            _track_label_usage(exc.api_usage, p.suffix.lower(), 'ERROR')
+            raise
+        _track_label_usage(result.get('api_usage', []), p.suffix.lower(), 'OK')
+        return result
     if p.suffix.lower()==".pdf":
         pdf_b64=base64.b64encode(p.read_bytes()).decode("utf-8")
         content=[

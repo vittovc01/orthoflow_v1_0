@@ -28,7 +28,7 @@ def analyze_documents(documents, *, analyzer, catalog=None, soon_days=90):
     if not 1<=len(documents)<=20 or sum(len(d.content) for d in documents)>50*1024*1024:
         raise ValueError('Caricare da 1 a 20 documenti, massimo 50 MiB totali')
     result = {'items':[],'annotated_pages':[],'detection_warnings':[],
-              'unconfirmed_regions':[],'documents':[],'review_required':True}
+              'unconfirmed_regions':[],'documents':[],'review_required':True,'api_usage':[]}
     seen_documents = {}
     provider_block = None
     with TemporaryDirectory(prefix='orthoflow-review-') as tmp:
@@ -55,6 +55,7 @@ def analyze_documents(documents, *, analyzer, catalog=None, soon_days=90):
                     provider_block = (kind, provider_notice(kind))
             except Exception as exc:
                 from whole_page_labels import WholePageReadError
+                result['api_usage'].extend(dict(r, document_index=index) for r in getattr(exc, 'api_usage', []))
                 reason = exc.public_reason if isinstance(exc, WholePageReadError) else type(exc).__name__
                 kind = getattr(exc, 'kind', None)
                 if kind in ('quota', 'rate_limit'):
@@ -62,6 +63,7 @@ def analyze_documents(documents, *, analyzer, catalog=None, soon_days=90):
                 result['detection_warnings'].append(f'Documento {index+1}: analisi non completata ({reason})')
                 result['documents'].append({'index':index,'name':document.name,'status':'failed','failure_kind':kind})
                 continue
+            result['api_usage'].extend(dict(r, document_index=index) for r in incoming.get('api_usage', []))
             result['documents'].append({'index':index,'name':document.name,'status':'analyzed',
                                         'model':incoming.get('ocr_model'),
                                         'duration_seconds':round(perf_counter()-started, 2)})

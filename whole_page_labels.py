@@ -8,6 +8,7 @@ import math
 from collections import Counter
 from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor
+from ocr_costs import response_usage
 from ai_failures import failure_kind, provider_notice, request_with_backoff
 
 from label_pipeline import (PIPELINE_VERSION, iter_pages as render_pages, image_url, compare_reads,
@@ -32,7 +33,8 @@ source_text deve contenere soltanto REF, lotto e scadenza del prodotto.
 
 
 class WholePageReadError(RuntimeError):
-    def __init__(self, page, failures, kind=None):
+    def __init__(self, page, failures, kind=None, api_usage=None):
+        self.api_usage = list(api_usage or [])
         self.kind = kind
         self.public_reason = f'Pagina {page}: ' + '; '.join(failures)
         super().__init__(self.public_reason)
@@ -54,15 +56,15 @@ def failure_reason(exc):
 
 
 def vision_options(model):
-    if model in {'gpt-6-astra','gpt-5.4'}:
+    if model in {'gpt-6-astra','gpt-5.4','gpt-5.4-mini'}:
         return 'original', {'reasoning':{'effort':'low'}}
     return 'high', {}
 
 
-def prepare_page(page, patch_budget=28000):
+def prepare_page(page, patch_budget=28000, max_dimension=65535):
     """Keep the whole page; bound original-detail requests below API limits."""
     patches = lambda image: math.ceil(image.width/32)*math.ceil(image.height/32)
-    scale = min(1,65535/max(page.size),math.sqrt(patch_budget/patches(page)))
+    scale = min(1,max_dimension/max(page.size),math.sqrt(patch_budget/patches(page)))
     if scale < 1:
         page = page.resize(tuple(max(1,math.floor(v*scale*.99)) for v in page.size))
     while patches(page) > patch_budget:
@@ -178,13 +180,8 @@ def read_page_once(client, model, schema, page_url, attempt):
                 {'type':'input_text','text':PROMPT + ('\nSeconda lettura indipendente: riconta tutti gli adesivi da zero.' if attempt else '')},
                 {'type':'input_image','image_url':page_url,'detail':detail}]}],
             text={'format':{'type':'json_schema','name':'whole_page_product_labels','schema':schema,'strict':True}}, **options)
-    try:
-        return request_with_backoff(request), model
-    except Exception as exc:
-        if model != 'gpt-6-astra' or getattr(exc, 'status_code', None) != 404:
-            raise
-        model = 'gpt-5.4'
-        return request_with_backoff(request), model
+    # Never upgrade to a more expensive model after an error.
+    return request_with_backoff(request), model
 
 
 def analyze_labels(path, client, model, item_schema, parse):
@@ -203,14 +200,16 @@ def _analyze_labels(path, client, model, item_schema, parse, executor, readers):
             'required':['bbox','rotation','item'],'additionalProperties':False}},
         'warning':{'type':['string','null']}},'required':['labels','warning'],'additionalProperties':False}
     digest = hashlib.sha256(Path(path).read_bytes()).hexdigest()[:20]
-    items, warnings = [], []
+    items, warnings, api_usage = [], [], []
     active_model = model
     blocked = None
     for number, page in enumerate(render_pages(path), 1):
         if blocked:
             page.close()
-            raise WholePageReadError(number, [provider_notice(blocked)], kind=blocked)
-        read_page = prepare_page(page)
+            raise WholePageReadError(number, [provider_notice(blocked)], kind=blocked, api_usage=api_usage)
+        # Mini original-detail limits: 10,000 patches / 6,000 px maximum.
+        # Keep native scans below those limits; only oversized pages are scaled.
+        read_page = prepare_page(page, patch_budget=10000, max_dimension=6000) if active_model == 'gpt-5.4-mini' else prepare_page(page)
         page_url = image_url(read_page)
         futures = [readers.submit(read_page_once, client, active_model, schema, page_url, attempt)
                    for attempt in range(2)]
@@ -220,9 +219,9 @@ def _analyze_labels(path, client, model, item_schema, parse, executor, readers):
         for attempt, future in enumerate(futures):
             try:
                 raw_response, used_model = future.result()
-                if used_model == 'gpt-5.4' and active_model == 'gpt-6-astra':
-                    active_model = used_model
-                    warnings.append('Modello gpt-6-astra non disponibile per questo account: lettura eseguita con gpt-5.4 a risoluzione originale')
+                usage = response_usage(raw_response, used_model)
+                if usage is not None:
+                    api_usage.append(dict(usage, page=number, read=attempt+1))
                 response = parse(raw_response)
                 reads.append(observations(response))
                 if response.get('warning'):
@@ -243,7 +242,7 @@ def _analyze_labels(path, client, model, item_schema, parse, executor, readers):
         while len(reads) < 2:
             reads.append(None)
         if reads == [None, None]:
-            raise WholePageReadError(number, [provider_notice(blocked)] if blocked else ['entrambe le letture fallite', *failures], kind=blocked)
+            raise WholePageReadError(number, [provider_notice(blocked)] if blocked else ['entrambe le letture fallite', *failures], kind=blocked, api_usage=api_usage)
         rows = merge_reads(reads[0] or [], reads[1] or [])
         warnings.append(f'Pagina {number}: prima lettura {len(reads[0] or [])}, seconda lettura {len(reads[1] or [])}, etichette da verificare {len(rows)}')
         if not rows:
@@ -278,7 +277,7 @@ def _analyze_labels(path, client, model, item_schema, parse, executor, readers):
         page.close()
     return {'document_type':'scarico_sala','items':items,'back_orders':[],
             'pipeline_version':PIPELINE_VERSION,'physical_label_count':len(items),
-            'ocr_model':active_model, 'provider_failure_kind':blocked,
+            'ocr_model':active_model, 'provider_failure_kind':blocked, 'api_usage':api_usage,
             'detection_warnings':warnings,'unconfirmed_regions':[], 'annotated_pages':[],
             'count_verified':False,'clinic_name':None,'clinical_record':None,
             'procedure_date':None,'surgeon':None,'confidence':0}

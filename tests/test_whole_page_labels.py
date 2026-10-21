@@ -165,7 +165,7 @@ def test_full_page_model_defaults_do_not_change_ddt_model(monkeypatch):
     import ai_ocr
     monkeypatch.setattr(ai_ocr,'_secret',lambda name,default='': default)
     status = ai_ocr.ai_status()
-    assert status['label_model'] == 'gpt-6-astra'
+    assert status['label_model'] == 'gpt-5.4-mini'
     assert status['model'] == 'gpt-5-mini'
     assert vision_options(status['label_model']) == ('original',{'reasoning':{'effort':'low'}})
     assert vision_options('gpt-4.1') == ('high',{})
@@ -182,7 +182,7 @@ def test_original_detail_bounds_whole_image_without_cropping():
     assert page.size == (160,90)
 
 
-def test_model_not_available_uses_explicit_original_detail_fallback(tmp_path,monkeypatch):
+def test_mini_not_available_never_upgrades_to_an_expensive_model(tmp_path,monkeypatch):
     path = tmp_path/'source.png'
     Image.new('RGB',(20,20)).save(path)
     calls = []
@@ -190,19 +190,15 @@ def test_model_not_available_uses_explicit_original_detail_fallback(tmp_path,mon
         status_code = 404
     def create(**kwargs):
         calls.append(kwargs)
+        assert kwargs['model'] == 'gpt-5.4-mini'
         assert kwargs['input'][0]['content'][1]['detail'] == 'original'
         assert kwargs['reasoning'] == {'effort':'low'}
-        if kwargs['model'] == 'gpt-6-astra':
-            raise ModelUnavailable()
-        assert kwargs['model'] == 'gpt-5.4'
-        return response([label([10,10,900,900])])
+        raise ModelUnavailable()
     monkeypatch.setattr('region_privacy.safe_product_regions',lambda *a:([],[]))
-    result = analyze_labels(path,SimpleNamespace(responses=SimpleNamespace(create=create)),
-                            'gpt-6-astra',{},lambda x:x)
-    assert len(calls) == 4 and len(result['items']) == 1
-    assert result['ocr_model'] == 'gpt-5.4'
-    assert result['items'][0]['ocr_model'] == 'gpt-5.4'
-    assert any('non disponibile' in w for w in result['detection_warnings'])
+    with pytest.raises(WholePageReadError):
+        analyze_labels(path,SimpleNamespace(responses=SimpleNamespace(create=create)),
+                       'gpt-5.4-mini',{},lambda x:x)
+    assert len(calls) == 2
 
 
 def test_existing_session_upgrades_cached_analyzer(monkeypatch):
