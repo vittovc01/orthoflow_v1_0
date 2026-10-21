@@ -8,6 +8,7 @@ import math
 from collections import Counter
 from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor
+from PIL import Image
 from review_editor import product_ref
 from ocr_costs import response_usage
 from ai_failures import failure_kind, provider_notice, request_with_backoff
@@ -210,7 +211,7 @@ def restore_rotated_observations(rows):
 def page_barcode_evidence(page):
     """Optional local GS1 reads; no crops, uploads or unbounded full-page copies."""
     scale = min(1.5,2000/max(page.size))
-    bounded = page.resize(tuple(max(1,round(v*scale)) for v in page.size)) if scale != 1 else page
+    bounded = page.resize(tuple(max(1,round(v*scale)) for v in page.size), Image.Resampling.LANCZOS) if scale != 1 else page
     try:
         return decode_barcodes(bounded, with_positions=True)
     except Exception:
@@ -287,7 +288,6 @@ def _analyze_labels(path, client, model, item_schema, parse, executor, readers):
         read_page = prepare_page(page, patch_budget=10000, max_dimension=6000) if active_model == 'gpt-5.4-mini' else prepare_page(page)
         page_url = image_url(read_page)
         # Mini sees a second orientation of the entire document, without crops.
-        from PIL import Image
         rotated_page = read_page.transpose(Image.Transpose.ROTATE_270) if active_model == 'gpt-5.4-mini' else None
         second_url = image_url(rotated_page) if rotated_page is not None else page_url
         if rotated_page is not None:
