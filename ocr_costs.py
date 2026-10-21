@@ -3,7 +3,7 @@
 USD estimates at standard rates checked 2026-10-21; not provider invoices.
 Output tokens include any provider-billed reasoning tokens, never added twice.
 """
-RATES = {'gpt-5.4-mini': (.75, .075, 4.5), 'gpt-6-astra': (10, 1, 50),
+RATES = {'gpt-6.1-sol': (2, .10, 10), 'gpt-5.4-mini': (.75, .075, 4.5), 'gpt-6-astra': (10, 1, 50),
          'gpt-5.4': (2.5, .25, 15)}
 
 

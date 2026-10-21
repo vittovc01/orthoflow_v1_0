@@ -24,11 +24,11 @@ def _flag(name: str, default: str="false") -> bool:
 
 def ai_status():
     # Explicit cost policy: legacy Astra secrets must not override the requested
-    # mini migration. DDT keeps its independent configured model.
+    # Sol migration. DDT keeps its independent configured model.
     missing=[]
     if not _secret("OPENAI_API_KEY"): missing.append("OPENAI_API_KEY")
     if not _flag("ENABLE_AI_OCR","false"): missing.append("ENABLE_AI_OCR=true")
-    return {"enabled":not missing,"missing":missing,"model":_secret("OPENAI_VISION_MODEL","gpt-5-mini"),"label_model":"gpt-5.4-mini"}
+    return {"enabled":not missing,"missing":missing,"model":_secret("OPENAI_VISION_MODEL","gpt-5-mini"),"label_model":"gpt-6.1-sol"}
 
 def ai_enabled(): return bool(ai_status()["enabled"])
 

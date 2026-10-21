@@ -63,7 +63,7 @@ def failure_reason(exc):
 
 
 def vision_options(model):
-    if model in {'gpt-6-astra','gpt-5.4','gpt-5.4-mini'}:
+    if model in {'gpt-6-astra','gpt-6.1-sol','gpt-5.4','gpt-5.4-mini'}:
         return 'original', {'reasoning':{'effort':'low'}}
     return 'high', {}
 
@@ -252,6 +252,7 @@ def read_page_once(client, model, schema, page_url, attempt):
     def request():
         detail, options = vision_options(model)
         return client.responses.create(model=model, store=False,
+            **({'service_tier':'default'} if model == 'gpt-6.1-sol' else {}),
             input=[{'role':'user','content':[
                 {'type':'input_text','text':PROMPT + ('\nSeconda lettura indipendente: riconta tutti gli adesivi da zero.' if attempt else '')},
                 {'type':'input_image','image_url':page_url,'detail':detail}]}],
@@ -288,7 +289,7 @@ def _analyze_labels(path, client, model, item_schema, parse, executor, readers):
         read_page = prepare_page(page, patch_budget=10000, max_dimension=6000) if active_model == 'gpt-5.4-mini' else prepare_page(page)
         page_url = image_url(read_page)
         # Mini sees a second orientation of the entire document, without crops.
-        rotated_page = read_page.transpose(Image.Transpose.ROTATE_270) if active_model == 'gpt-5.4-mini' else None
+        rotated_page = read_page.transpose(Image.Transpose.ROTATE_270) if active_model in {'gpt-5.4-mini','gpt-6.1-sol'} else None
         second_url = image_url(rotated_page) if rotated_page is not None else page_url
         if rotated_page is not None:
             rotated_page.close()
@@ -305,7 +306,7 @@ def _analyze_labels(path, client, model, item_schema, parse, executor, readers):
                     api_usage.append(dict(usage, page=number, read=attempt+1))
                 response = parse(raw_response)
                 observed = observations(response)
-                if attempt == 1 and active_model == 'gpt-5.4-mini':
+                if attempt == 1 and active_model in {'gpt-5.4-mini','gpt-6.1-sol'}:
                     observed = restore_rotated_observations(observed)
                 reads.append(observed)
                 if response.get('warning'):

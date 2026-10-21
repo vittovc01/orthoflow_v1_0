@@ -14,7 +14,7 @@ from tests.test_whole_page_labels import response, label
 def test_legacy_secret_cannot_reactivate_astra(monkeypatch):
     import ai_ocr
     monkeypatch.setattr(ai_ocr,'_secret',lambda name,default='': 'gpt-6-astra' if name=='SCARICO_FULL_PAGE_MODEL' else default)
-    assert ai_ocr.ai_status()['label_model']=='gpt-5.4-mini'
+    assert ai_ocr.ai_status()['label_model']=='gpt-6.1-sol'
     assert ai_ocr.ai_status()['model']=='gpt-5-mini'
 
 
@@ -95,6 +95,8 @@ def test_real_entrypoint_forces_mini_and_persists_usage_in_app_thread(tmp_path,m
     calls=[]
     def create(**kwargs):
         calls.append(kwargs['model'])
+        assert kwargs['service_tier']=='default'
+        assert kwargs['input'][0]['content'][1]['detail']=='original'
         import json
         return SimpleNamespace(usage=usage(),output_text=json.dumps(response([label([10,10,900,900])])))
     monkeypatch.setattr(ai_ocr,'OpenAI',lambda **k:SimpleNamespace(responses=SimpleNamespace(create=create)))
@@ -102,7 +104,7 @@ def test_real_entrypoint_forces_mini_and_persists_usage_in_app_thread(tmp_path,m
     recorded=[]
     monkeypatch.setattr(ai_ocr,'_track_label_usage',lambda reads,suffix,outcome:recorded.append((reads,suffix,outcome,current_thread().name)))
     result=ai_ocr.analyze_document(str(path),'scarico_sala')
-    assert calls==['gpt-5.4-mini']*2 and len(result['items'])==1
+    assert calls==['gpt-6.1-sol']*2 and len(result['items'])==1
     assert len(recorded)==1 and len(recorded[0][0])==2 and recorded[0][2]=='OK'
     assert recorded[0][3]==current_thread().name
 
@@ -140,7 +142,8 @@ def test_duplicate_document_does_not_duplicate_usage():
     assert [d['status'] for d in result['documents']]==['analyzed','duplicate']
 
 
-def test_mini_second_read_is_rotated_full_page_and_restores_coordinates(tmp_path,monkeypatch):
+@pytest.mark.parametrize('model',['gpt-5.4-mini','gpt-6.1-sol'])
+def test_mini_second_read_is_rotated_full_page_and_restores_coordinates(tmp_path,monkeypatch,model):
     import base64
     path=tmp_path/'vertical.png'
     original=Image.new('RGB',(80,160),'white');original.putpixel((0,0),(255,0,0));original.save(path)
@@ -157,6 +160,12 @@ def test_mini_second_read_is_rotated_full_page_and_restores_coordinates(tmp_path
         box=[600,100,900,300] if second else [100,100,300,400]
         return response([label(box)])
     result=analyze_labels(path,SimpleNamespace(responses=SimpleNamespace(create=create)),
-                          'gpt-5.4-mini',{},lambda x:x)
+                          model,{},lambda x:x)
     assert sorted(sizes)==[(80,160),(160,80)] and len(result['items'])==1
     assert result['items'][0]['ocr_reads'][0]['bbox']==result['items'][0]['ocr_reads'][1]['bbox']
+
+
+def test_sol_standard_cost_counts_both_reads():
+    result=response_usage({'usage':usage()},'gpt-6.1-sol')
+    assert result['estimated_cost_usd']==pytest.approx(.0381)
+    assert usage_totals([result,result])['estimated_cost_usd']==pytest.approx(.0762)
