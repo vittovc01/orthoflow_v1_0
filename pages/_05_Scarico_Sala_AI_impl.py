@@ -15,7 +15,7 @@ from ocr_review import build_review, aggregate_review, merge_confirmed_fields
 from review_editor import (apply_review_edits, row_errors, row_name, expected_label_count as initial_label_count,
                            count_warning, catalogue_warning, canonical_values, text_value, quantity_value)
 from ocr_service import analyze_documents
-from scarico_workflow import reset_destination, destination_errors, stock_snapshot, stock_quantities
+from scarico_workflow import reset_destination, destination_errors, stock_snapshot, stock_quantities, supports_structure_stock
 from review_exports import review_csv, review_xlsx
 from ocr_repository import OriginalDocument, SupabaseReviewRepository, without_images, load_gtin_catalog
 
@@ -604,7 +604,7 @@ line = st.selectbox("Linea", ["TRAUMA", "PROTESICA", "CMF", "SPINE", "SPORTS", "
     index=None, placeholder="Seleziona la linea", key="scarico_price_line")
 if destination_errors(selected_client, line):
     st.info("Seleziona struttura e linea per abilitare la creazione dell’intervento e lo scarico.")
-is_malzoni = clean(selected_client.get("codice_cliente")) == "9010013"
+has_structure_stock = supports_structure_stock(selected_client.get("codice_cliente"))
 if source_rows:
     st.caption(f"OCR: {len(source_rows)} righe riconosciute · {len(rows)} righe nella lista modificabile · {len(excluded_rows)} righe di altri produttori escluse.")
 if excluded_rows:
@@ -638,12 +638,12 @@ def render_material_editor():
         for col in preferred:
             if col not in df_rows.columns:
                 df_rows[col] = ""
-        if is_malzoni:
+        if has_structure_stock:
             if "conto_deposito_struttura" not in df_rows.columns:
                 df_rows["conto_deposito_struttura"] = False
             df_rows["conto_deposito_struttura"] = df_rows["conto_deposito_struttura"].fillna(False).astype(bool)
             preferred.insert(1, "conto_deposito_struttura")
-            st.info("Malzoni: spunta il materiale della struttura Smart Track. Prezzi, fatturato e ordini restano inclusi; queste righe non scaricano la vostra giacenza.")
+            st.info("Spunta “Conto deposito struttura” per il materiale di proprietà della struttura. Prezzi, fatturato e ordini restano inclusi; queste righe non scaricano la vostra giacenza.")
         if is_physical_ai:
             preferred = ["label_id", "esito"] + [c for c in preferred if c!="senza_lotto"]
             df_rows["esito"] = ["🔴 "+"; ".join(row_errors(r)) if row_errors(r) else "" for r in rows]
@@ -924,7 +924,7 @@ if confirm or archive_review:
         st.warning("Magazzino non verificabile in anteprima: il server controllerà le giacenze durante la conferma.")
     if is_physical_ai and stock is not None:
         checked_rows = [r for r, _, _, _ in valid_rows
-                        if not (is_malzoni and bool(r.get("conto_deposito_struttura", False)))]
+                        if not (has_structure_stock and bool(r.get("conto_deposito_struttura", False)))]
         identity_errors = inventory_errors(checked_rows, stock)
         if identity_errors:
             st.warning("Intervento registrabile: le discrepanze di magazzino saranno salvate nelle anomalie. " + "; ".join(identity_errors))
@@ -933,7 +933,7 @@ if confirm or archive_review:
     # UX pre-flight: raggruppa duplicati. La RPC ripete il controllo con lock DB ed è quella autoritativa.
     requested = {}
     for r, code, lot, qty in valid_rows:
-        if is_malzoni and bool(r.get("conto_deposito_struttura", False)):
+        if has_structure_stock and bool(r.get("conto_deposito_struttura", False)):
             continue
         key = (ncode(code), lot)
         requested[key] = requested.get(key, 0.0) + qty
@@ -998,7 +998,7 @@ if confirm or archive_review:
             "validazione": validation,
             "prezzo": float(price),
             "prezzo_source": price_source,
-            "conto_deposito_struttura": is_malzoni and bool(r.get("conto_deposito_struttura", False)),
+            "conto_deposito_struttura": has_structure_stock and bool(r.get("conto_deposito_struttura", False)),
         })
 
     header = {

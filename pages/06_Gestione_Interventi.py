@@ -1,4 +1,5 @@
 import os
+from scarico_workflow import supports_structure_stock
 import logging
 import re
 from calendar import monthrange
@@ -355,12 +356,12 @@ if save_header:
     if pricing_changed and price_preview is None:
         st.stop()
     try:
-        if clean(edit_customer_code) != "9010013":
+        if not supports_structure_stock(edit_customer_code) or clean(edit_customer_code) != clean(intervention.get("codice_cliente")):
             structure_rows = (sb().table("righe_intervento").select("id")
                               .eq("intervento_id", intervention_id)
                               .eq("origine", "CONTO DEPOSITO STRUTTURA").limit(1).execute().data or [])
             if structure_rows:
-                st.error("Questo intervento contiene materiale della struttura Malzoni: correggi prima la proprietà delle righe, poi cambia cliente.")
+                st.error("Questo intervento contiene materiale di proprietà della struttura: correggi prima la proprietà delle righe, poi cambia cliente.")
                 st.stop()
         old_mag = clean(intervention.get("magazzino_scarico") or intervention.get("magazzino"))
         if edit_mag != old_mag:
@@ -386,7 +387,7 @@ if save_header:
         st.error(f"Aggiornamento testata non completato: {e}")
 
 customer_code = clean(intervention.get("codice_cliente"))
-is_malzoni = customer_code == "9010013"
+has_structure_stock = supports_structure_stock(customer_code)
 line = clean(intervention.get("linea"))
 mag = clean(intervention.get("magazzino_scarico") or intervention.get("magazzino")) or "MAG1"
 
@@ -454,7 +455,7 @@ for r in rows:
     })
 
 df = pd.DataFrame(prepared).drop(columns=["prezzo_source"])
-if is_malzoni:
+if has_structure_stock:
     cols = list(df.columns)
     cols.remove("conto_deposito_struttura")
     cols.insert(cols.index("codice") + 1, "conto_deposito_struttura")
@@ -472,11 +473,11 @@ edited = st.data_editor(
     hide_index=True,
     use_container_width=True,
     num_rows="fixed",
-    disabled=["id", "prezzo_offerta", "fonte", "totale"] + (["origine"] if is_malzoni else []),
+    disabled=["id", "prezzo_offerta", "fonte", "totale"] + (["origine"] if has_structure_stock else []),
     column_config={
         "conto_deposito_struttura": st.column_config.CheckboxColumn(
             "Conto deposito struttura", default=False,
-            help="Materiale Malzoni / Smart Track: mantiene fatturato e ordini, senza movimento del nostro magazzino."),
+            help="Materiale di proprietà della struttura: mantiene fatturato e ordini, senza movimento del nostro magazzino."),
         "id": st.column_config.NumberColumn("ID", format="%d"),
         "codice": st.column_config.TextColumn("Codice Johnson/REF", required=True),
         "descrizione": st.column_config.TextColumn("Descrizione"),
@@ -524,11 +525,11 @@ if st.button("💾 Salva tutte le modifiche", type="primary", use_container_widt
         if no_lot and "Non sterile senza lotto" not in validation:
             validation = (validation + " · Non sterile senza lotto").strip(" ·")
         old_structure = bool(old.get("conto_deposito_struttura", False))
-        structure = is_malzoni and bool(row.get("conto_deposito_struttura", False))
+        structure = has_structure_stock and bool(row.get("conto_deposito_struttura", False))
         origin = "CONTO DEPOSITO STRUTTURA" if structure else (
             "CONTO DEPOSITO" if old_structure else clean(row["origine"]) or "CONTO DEPOSITO")
-        if not is_malzoni and origin == "CONTO DEPOSITO STRUTTURA":
-            errors.append(f"Riga {rid}: conto deposito struttura disponibile solo per Malzoni.")
+        if not has_structure_stock and origin == "CONTO DEPOSITO STRUTTURA":
+            errors.append(f"Riga {rid}: conto deposito struttura non abilitato per questo cliente.")
             continue
         reintegro = bool(row["reintegro"])
         try:

@@ -59,14 +59,15 @@ def test_courier_navigation_and_role_filter(mobile_server):
         browser.close()
 
 
-def test_agent_edits_delete_and_persistent_smarttrack(mobile_server):
+@pytest.mark.parametrize("customer_code",["9010013","9010054"])
+def test_agent_edits_delete_and_persistent_smarttrack(mobile_server,customer_code):
     with sync_playwright() as p:
         browser=p.chromium.launch()
         page=browser.new_page(viewport={'width':390,'height':844},is_mobile=True,has_touch=True)
         sign_in(page,mobile_server,'agente')
         page.get_by_role('navigation').get_by_role('link',name='Scarico').click()
         expect(page.get_by_role('heading',name='Scarico sala')).to_be_visible()
-        page.get_by_label('Struttura',exact=True).select_option('9010013')
+        page.get_by_label('Struttura',exact=True).select_option(customer_code)
         page.get_by_role('button',name='Aggiungi riga manuale').click()
         page.get_by_label('Codice',exact=True).fill('1504-00-126')
         page.get_by_label('Lotto',exact=True).fill('B')

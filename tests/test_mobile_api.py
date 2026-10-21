@@ -193,3 +193,16 @@ def test_invalid_public_origin_fails_closed(setup,monkeypatch,invalid):
     monkeypatch.setenv('MOBILE_PUBLIC_ORIGIN',invalid)
     monkeypatch.delenv('RENDER_EXTERNAL_URL',raising=False)
     assert login(client).status_code==503
+
+
+@pytest.mark.parametrize('code,status',[('9010013',200),('9010054',200),('UNSUPPORTED',422)])
+def test_mobile_structure_stock_uses_the_same_customer_allowlist(setup,code,status):
+    client,backend,_=setup
+    backend.tables['clienti']=[dict(codice_cliente=code,descrizione='Test hospital',agente='Agente Test')]
+    login(client,'agente')
+    response=client.post('/api/scarico/preview',json=payload(customer_code=code,
+        items=[dict(code='1504-00-126',lot='B',quantity=2,structure_stock=True)]))
+    assert response.status_code==status
+    if status==200:
+        assert response.json()['items'][0]['conto_deposito_struttura'] is True
+        assert response.json()['total']==290

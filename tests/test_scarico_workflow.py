@@ -95,3 +95,19 @@ def test_server_guard_rejects_a_forged_submit_before_any_write():
     with pytest.raises(Stop):
         exec(compile(ast.Module(body=[submit.body[0]],type_ignores=[]),'guard','exec'),ns)
     assert len(errors)==2 and 'struttura' in errors[0] and 'linea' in errors[1]
+
+
+@pytest.mark.parametrize('code,expected', [('9010013',True),('9010054',True),('OTHER',False),('',False),(None,False)])
+def test_structure_stock_is_available_only_for_enabled_customers(code,expected):
+    from scarico_workflow import supports_structure_stock
+    assert supports_structure_stock(code) is expected
+
+
+@pytest.mark.parametrize('code,expected_structure',[('9010013',True),('9010054',True),('OTHER',False)])
+def test_structure_stock_anomalies_are_classified_for_enabled_hospitals(code,expected_structure):
+    from stock_anomalies import split_stock_anomalies
+    anomaly=dict(intervento_id=1,codice='TEST-A',lotto='LOT')
+    material=dict(intervento_id=1,codice='TESTA',lotto='LOT',origine='CONTO DEPOSITO STRUTTURA')
+    active,unlinked,structure=split_stock_anomalies([anomaly],[dict(id=1,codice_cliente=code)],[material])
+    assert bool(structure) is expected_structure and bool(active) is not expected_structure
+    assert not unlinked

@@ -42,3 +42,7 @@ def stock_quantities(rows):
         key = (code, text_value(row.get('lotto')))
         quantities[key] = quantities.get(key, 0.0) + max(0.0, float(row.get('quantita') or 0))
     return quantities
+
+
+def supports_structure_stock(customer_code):
+    return text_value(customer_code) in {'9010013', '9010054'}
