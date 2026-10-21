@@ -8,6 +8,7 @@ import math
 from collections import Counter
 from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor
+from review_editor import product_ref
 from ocr_costs import response_usage
 from ai_failures import failure_kind, provider_notice, request_with_backoff
 
@@ -18,6 +19,7 @@ from label_pipeline import (PIPELINE_VERSION, iter_pages as render_pages, image_
 PROMPT = """Leggi visivamente TUTTA la foto del foglio, prima di considerare i ritagli.
 Trascrivi OGNI etichetta fisica originale di prodotto ortopedico: REF stampato
 completo di punti/trattini e suffissi S/TS, lotto e scadenza ISO YYYY-MM-DD.
+Nel campo code scrivi solo il codice prodotto, senza la dicitura stampata REF.
 Esamina ogni colonna, bordo, etichetta verticale, inclinata o parzialmente coperta.
 Due adesivi fisici con identici REF e lotto sono DUE osservazioni, ognuna quantity=1.
 Non contare due volte barcode o righe dello stesso adesivo. Non contare intestazioni,
@@ -100,6 +102,7 @@ def observations(result):
         if not valid or not (0 <= box[0] < box[2] <= 1000 and 0 <= box[1] < box[3] <= 1000):
             raise ValueError('Posizione etichetta non valida: rianalizzare la pagina')
         row = dict(entry['item'], bbox=list(box), rotation=entry['rotation'])
+        row['code'] = product_ref(row.get('code')) or None
         row['quantity'] = 1
         # Do not retain unstructured page text in product audit records.
         row['source_text'] = ' | '.join(str(row.get(k) or '') for k in ('code','lot','expiry'))
@@ -238,7 +241,7 @@ def _analyze_labels(path, client, model, item_schema, parse, executor, readers):
                     # The sibling may already be in flight: retain any successful
                     # result, never launch further pages after a provider block.
                 else:
-                    warnings.append(f'Pagina {number}: lettura {attempt+1} non completata ({type(exc).__name__}); verificare il conteggio sul foglio')
+                    warnings.append(f'Pagina {number}: lettura {attempt+1} non completata; il confronto indipendente è incompleto. Controlla REF, lotto, scadenza e quantità di tutte le etichette sul foglio')
         while len(reads) < 2:
             reads.append(None)
         if reads == [None, None]:

@@ -90,3 +90,16 @@ def test_empty_dataframe_flags_cannot_silently_exclude_an_invalid_row():
     item=row();item.update(escludi_riga=float('nan'),scadenza='')
     assert expected_label_count([item])==1
     assert row_errors(item)==['TEST-A, lotto LOT-A: scadenza mancante']
+
+
+@pytest.mark.parametrize('raw,expected',[
+    ('REF 3095-040','3095-040'),('ref:1504-00-204','1504-00-204'),
+    (' REF\u00a0413.016S ', '413.016S'),('REF 413.016TS','413.016TS'),
+    ('REFERENCE-A','REFERENCE-A'),('REF123','REF123'),('413.016S','413.016S'),
+])
+def test_printed_ref_marker_is_not_product_identity(raw, expected):
+    from review_editor import product_ref, canonical_values
+    from ocr_review import exact_code
+    assert product_ref(raw) == expected
+    assert canonical_values({'code':raw})['codice'] == expected
+    assert exact_code(raw) == exact_code(expected)
