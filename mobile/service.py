@@ -1,5 +1,6 @@
 """Server-only adapters to the same operational tables and stock RPC as the desktop."""
 import io
+from scarico_workflow import supports_structure_stock
 import math
 import re
 import uuid
@@ -137,8 +138,8 @@ def build_scarico(sb, row, body):
         code, lot = r.code.strip(), r.lot.strip()
         if not code or (not lot and not r.lotless) or (lot and r.lotless):
             raise HTTPException(422, 'Verifica codice e lotto: conferma senza lotto solo per i non sterili.')
-        if r.structure_stock and body.customer_code != '9010013':
-            raise HTTPException(422, 'Conto deposito struttura disponibile solo per Malzoni.')
+        if r.structure_stock and not supports_structure_stock(body.customer_code):
+            raise HTTPException(422, 'Conto deposito struttura non abilitato per questo cliente.')
         manufacturer = r.manufacturer.upper()
         is_jnj = any(s in manufacturer for s in ('JOHNSON', 'J&J', 'SYNTHES', 'DEPUY'))
         if manufacturer and not is_jnj and not r.verified:

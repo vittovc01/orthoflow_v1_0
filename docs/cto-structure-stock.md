@@ -3,7 +3,8 @@
 Enabled customer codes are Malzoni `9010013` and the registered
 **Ospedale C.T.O. `9010054`**. Matching is by customer code, never a fuzzy name.
 
-In Scarico Sala AI the editable ownership checkbox appears for both customers.
+In Scarico Sala AI and Gestione Interventi the editable ownership checkbox appears
+for both customers. The mobile API and anomaly classification use the same allowlist.
 Checked rows retain product, lot, expiry, quantity, price and revenue, with origin
 `CONTO DEPOSITO STRUTTURA`. They skip our stock checks, debit, stock movements,
 stock anomalies and kit replenishment. Unchecked rows follow normal stock rules.

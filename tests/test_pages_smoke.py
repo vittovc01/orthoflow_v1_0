@@ -602,3 +602,27 @@ def test_destination_starts_empty_and_both_fields_are_required(backend):
     at.run()
     assert not at.exception
     assert structure().value is None and line().value is None and submit().disabled
+
+
+@pytest.mark.parametrize('code',['9010013','9010054'])
+def test_intervention_editor_preserves_hospital_ownership(code,backend,monkeypatch):
+    header=dict(id=42,codice_cliente=code,cliente='Test hospital',struttura='Test hospital',
+        data_intervento='2026-10-21',linea='TRAUMA',magazzino_scarico='MAG1')
+    material=dict(id=99,intervento_id=42,codice='TEST',lotto='LOT',scadenza='2035-01-01',
+        quantita=1,prezzo=20,totale=20,valore=20,origine='CONTO DEPOSITO STRUTTURA',prezzo_source='MANUALE')
+    class Query:
+        def __init__(self,name):self.name=name;self.offset=0
+        def range(self,start,end):self.offset=start;return self
+        def execute(self):
+            return SimpleNamespace(data={'interventi':[header],'righe_intervento':[material],
+                'clienti':[] if self.offset else [dict(codice_cliente=code,descrizione='Test hospital')]}.get(self.name,[]))
+        def __getattr__(self,name):
+            assert name not in {'insert','update','delete','upsert'}
+            return lambda *args,**kwargs:self
+    monkeypatch.setattr(backend,'table',lambda name:Query(name))
+    at=app();at.session_state['user']='ci-user';at.session_state['ruolo']='Admin';at.session_state['permessi']=['DIREZIONE']
+    at.run();at.switch_page('pages/06_Gestione_Interventi.py').run()
+    assert not at.exception
+    editor=next(d for d in at.dataframe if 'conto_deposito_struttura' in d.value.columns)
+    assert bool(editor.value.iloc[0]['conto_deposito_struttura']) is True
+    assert editor.value.iloc[0]['totale']==20

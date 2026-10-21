@@ -1,4 +1,7 @@
 """Shared classification for the Home and anomaly resolution page."""
+from scarico_workflow import supports_structure_stock
+
+
 def normalized_code(value):
     return "".join(c for c in str(value or "").upper() if c.isascii() and c.isalnum())
 
@@ -21,7 +24,7 @@ def split_stock_anomalies(anomalies, interventions, materials):
             continue
         key = (str(anomaly.get("intervento_id")), normalized_code(anomaly.get("codice")), normalized_lot(anomaly.get("lotto")))
         matches = by_item.get(key, [])
-        if str(intervention.get("codice_cliente")) == "9010013" and matches and all(
+        if supports_structure_stock(intervention.get("codice_cliente")) and matches and all(
                 r.get("origine") == "CONTO DEPOSITO STRUTTURA" for r in matches):
             structure.append(anomaly)
             continue
