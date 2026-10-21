@@ -1,4 +1,3 @@
-from clinic_matching import clinic_default_index
 import os
 import json
 import copy
@@ -16,6 +15,7 @@ from ocr_review import build_review, aggregate_review, merge_confirmed_fields
 from review_editor import (apply_review_edits, row_errors, row_name, expected_label_count as initial_label_count,
                            count_warning, catalogue_warning, canonical_values, text_value, quantity_value)
 from ocr_service import analyze_documents
+from scarico_workflow import reset_destination, destination_errors, stock_snapshot, stock_quantities
 from review_exports import review_csv, review_xlsx
 from ocr_repository import OriginalDocument, SupabaseReviewRepository, without_images, load_gtin_catalog
 
@@ -222,10 +222,14 @@ def offer_ids_for(customer_code, line):
         out = []
         for link in links:
             oid = link.get("offerta_id")
-            heads = (sb().table("offerte_header").select("id,linea")
-                     .eq("id", oid).limit(1).execute().data or [])
-            if heads and clean(heads[0].get("linea")).upper() == clean(line).upper():
+            if oid is not None:
                 out.append(oid)
+        if not out:
+            return []
+        heads = (sb().table("offerte_header").select("id,linea")
+                 .in_("id", out).execute().data or [])
+        matching = {h["id"] for h in heads if clean(h.get("linea")).upper() == clean(line).upper()}
+        out = [oid for oid in out if oid in matching]
         return out
     except Exception:
         return []
@@ -267,7 +271,7 @@ def offer_prices_for(oid):
 @lru_cache(maxsize=None)
 def price_for(customer_code, product_code, line):
     target = clean(product_code).upper()
-    if not target:
+    if not target or not clean(customer_code) or not clean(line):
         return None
     try:
         for oid in offer_ids_for(customer_code, line):
@@ -304,6 +308,8 @@ def manual_price_for(customer_code, code, line):
 
 @lru_cache(maxsize=None)
 def remembered_prices_for(customer_code, line):
+    if not clean(customer_code) or not clean(line):
+        return {}
     # La memoria deriva esclusivamente da prezzi manuali realmente salvati.
     try:
         rows = sb().rpc("prezzi_manuali_struttura", {
@@ -318,25 +324,6 @@ def remembered_prices_for(customer_code, line):
 
 def remembered_price_for(customer_code, product_code, line):
     return remembered_prices_for(customer_code, line).get(ncode(product_code))
-
-
-def available_qty(mag, code, lot):
-    """Pre-check UX; include null/empty lots only for confirmed lotless rows."""
-    try:
-        query = (sb().table("giacenze").select("codice,lotto,quantita,origine")
-                 .eq("codice_magazzino", mag).eq("origine", "CONTO DEPOSITO").eq("codice", code))
-        if lot:
-            query = query.eq("lotto", lot)
-        total, offset = 0.0, 0
-        while True:
-            batch = query.order("id").range(offset, offset + 499).execute().data or []
-            total += sum(max(0.0, float(r.get("quantita") or 0)) for r in batch
-                         if ncode(r.get("codice")) == ncode(code) and clean(r.get("lotto")) == lot)
-            if len(batch) < 500:
-                return total
-            offset += 500
-    except Exception:
-        return 0.0
 
 
 def is_other_manufacturer(value):
@@ -357,9 +344,12 @@ def run_ai(path, documents=None):
                                    "type": st.session_state.get("scarico_file_type", "")}]
         originals = [OriginalDocument(d.get("name") or Path(d["path"]).name, Path(d["path"]).read_bytes()) for d in documents]
         with st.spinner(f"Analisi AI di {len(documents)} file: codici, lotti e scadenze…"):
-            try: extraction_catalog=load_gtin_catalog(sb())
-            except Exception: extraction_catalog=None
-            meta = analyze_documents(originals, analyzer=analyze_document,catalog=extraction_catalog)
+            meta = analyze_documents(originals, analyzer=analyze_document)
+            try:
+                extraction_catalog = load_gtin_catalog(sb(), gtins=[r.get('gtin') for r in meta.get('items', [])])
+            except Exception:
+                extraction_catalog = None
+            meta = build_review(meta, catalog=extraction_catalog)
             if meta.get('documents') and all(d.get('status') == 'failed' for d in meta['documents']):
                 for warning in meta.get('detection_warnings', []):
                     st.error(warning)
@@ -372,6 +362,7 @@ def run_ai(path, documents=None):
         st.session_state.pop("scarico_audit_request", None)
         st.session_state["scarico_correction_log"] = []
         st.session_state.pop("scarico_discharge_request_id",None)
+        reset_destination(st.session_state)
         st.session_state["scarico_ai_rows"] = combined_rows
         st.session_state["scarico_ai_original_rows"] = copy.deepcopy(combined_rows)
         st.session_state["scarico_documents"] = documents
@@ -592,23 +583,27 @@ if is_physical_ai:
     # must not download the entire catalogue again. A new analysis refreshes it.
     if "scarico_gtin_catalog" not in st.session_state:
         try:
-            st.session_state["scarico_gtin_catalog"] = load_gtin_catalog(sb())
+            st.session_state["scarico_gtin_catalog"] = load_gtin_catalog(sb(), gtins=[r.get("gtin") for r in source_rows])
         except Exception:
             st.session_state["scarico_gtin_catalog"] = None
     catalog = st.session_state["scarico_gtin_catalog"]
     review = build_review({"items":source_rows}, catalog=catalog)
     assessed_rows = review["items"]
     st.session_state["scarico_missing_gtins"]=review["missing_gtins"]
+if st.session_state.pop("scarico_reset_destination", False) or "scarico_destination_client" not in st.session_state:
+    reset_destination(st.session_state)
 clients = client_options()
-ai_clinic = clean(meta.get("clinic_name"))
 if clients:
-    default_idx = clinic_default_index(ai_clinic, clients)
-    selected_client = st.selectbox("Struttura / cliente", clients, index=default_idx, format_func=lambda x: x["label"])
+    selected_client = st.selectbox("Struttura / cliente", clients, index=None,
+        placeholder="Seleziona la struttura", key="scarico_destination_client",
+        format_func=lambda x: x["label"]) or {}
 else:
-    selected_client = {"codice_cliente": "", "descrizione": st.text_input("Struttura / cliente", value=ai_clinic)}
-
-
-line = st.selectbox("Linea", ["TRAUMA", "PROTESICA", "CMF", "SPINE", "SPORTS", "ALTRO"], key="scarico_price_line")
+    selected_client = {}
+    st.warning("Nessuna struttura disponibile: carica l’anagrafica clienti prima di confermare.")
+line = st.selectbox("Linea", ["TRAUMA", "PROTESICA", "CMF", "SPINE", "SPORTS", "ALTRO"],
+    index=None, placeholder="Seleziona la linea", key="scarico_price_line")
+if destination_errors(selected_client, line):
+    st.info("Seleziona struttura e linea per abilitare la creazione dell’intervento e lo scarico.")
 is_malzoni = clean(selected_client.get("codice_cliente")) == "9010013"
 if source_rows:
     st.caption(f"OCR: {len(source_rows)} righe riconosciute · {len(rows)} righe nella lista modificabile · {len(excluded_rows)} righe di altri produttori escluse.")
@@ -846,9 +841,14 @@ with st.form("scarico_ai_confirm"):
         st.caption("Archivio OCR attivo: conserva revisione, correzioni e soli ritagli delle etichette. Il documento completo non viene archiviato.")
     with st.expander("Solo archiviazione, senza scarico", expanded=False):
         archive_review = form_submit_button("Conferma e archivia revisione OCR (senza scarico)", disabled=(not is_physical_ai or not archive_enabled or len(rows)==0))
-    confirm = form_submit_button("📤 Crea intervento e scarica materiali", type="primary", use_container_width=True, disabled=(len(rows) == 0))
+    confirm = form_submit_button("📤 Crea intervento e scarica materiali", type="primary", use_container_width=True, disabled=(len(rows) == 0 or bool(destination_errors(selected_client, line))))
 
 if confirm or archive_review:
+    if confirm:
+        for error in destination_errors(selected_client, line):
+            st.error(error)
+        if destination_errors(selected_client, line):
+            st.stop()
     if any(d.get("status")=="failed" for d in meta.get("documents",[]) if isinstance(d,dict)):
         st.error("Uno o più documenti non sono stati analizzati. Consulta l’avviso sopra e ripeti la lettura dei documenti già caricati prima della conferma.")
         st.stop()
@@ -915,24 +915,20 @@ if confirm or archive_review:
         st.error("Nessuna riga valida: servono codice e quantità > 0; il lotto è richiesto salvo materiale confermato non sterile senza lotto.")
         st.stop()
 
-    if is_physical_ai:
+    # One snapshot for identity and quantity pre-checks; the RPC still repeats
+    # all stock checks with database locks inside the authoritative transaction.
+    stock = None
+    try:
+        stock = stock_snapshot(sb(), mag)
+    except Exception:
+        st.warning("Magazzino non verificabile in anteprima: il server controllerà le giacenze durante la conferma.")
+    if is_physical_ai and stock is not None:
         checked_rows = [r for r, _, _, _ in valid_rows
                         if not (is_malzoni and bool(r.get("conto_deposito_struttura", False)))]
-        try:
-            stock, offset = [], 0
-            while True:
-                batch = (sb().table("giacenze").select("codice,lotto,scadenza,quantita")
-                    .eq("codice_magazzino", mag).eq("origine", "CONTO DEPOSITO")
-                    .order("id").range(offset, offset + 499).execute().data or [])
-                stock.extend(batch)
-                if len(batch) < 500:
-                    break
-                offset += 500
-            identity_errors = inventory_errors(checked_rows, stock)
-        except Exception:
-            identity_errors = ["Magazzino non verificabile: riprovare prima di confermare"]
+        identity_errors = inventory_errors(checked_rows, stock)
         if identity_errors:
             st.warning("Intervento registrabile: le discrepanze di magazzino saranno salvate nelle anomalie. " + "; ".join(identity_errors))
+    quantities = stock_quantities(stock or [])
 
     # UX pre-flight: raggruppa duplicati. La RPC ripete il controllo con lock DB ed è quella autoritativa.
     requested = {}
@@ -944,7 +940,9 @@ if confirm or archive_review:
     shortages = []
     for (norm_code, lot), qty in requested.items():
         sample_code = next(code for _, code, l, _ in valid_rows if ncode(code) == norm_code and l == lot)
-        avail = available_qty(mag, sample_code, lot)
+        avail = quantities.get((norm_code, lot), 0.0)
+        if stock is None:
+            continue
         if avail < qty:
             shortages.append({"Codice": sample_code, "Lotto": lot, "Disponibile": avail, "Richiesto": qty, "Magazzino": mag})
     if shortages:
@@ -1097,6 +1095,8 @@ if confirm or archive_review:
                 st.session_state.pop(k, None)
         st.session_state["scarico_editor_revision"] = int(st.session_state.get("scarico_editor_revision", 0)) + 1
         st.session_state["scarico_upload_revision"] = int(st.session_state.get("scarico_upload_revision", 0)) + 1
+        # Widgets were instantiated on this run: clear them before the next render.
+        st.session_state["scarico_reset_destination"] = True
         st.cache_data.clear()
     except Exception as e:
         msg = str(e)

@@ -293,3 +293,27 @@ def test_stale_product_extraction_cannot_be_archived():
     with pytest.raises(ValueError,match='privacy'):
         SupabaseReviewRepository(client).save_product_review(**args)
     assert client.writes==0
+
+
+def test_archive_crops_overlap_and_all_finish_before_review_insert():
+    from threading import Barrier
+    client=FakeClient();args=arguments()
+    args['documents']=[original(),original(),original()]
+    both=Barrier(3,timeout=3)
+    upload=client.upload
+    def parallel_upload(path,content,file_options):
+        assert not client.records
+        both.wait()
+        upload(path,content,file_options)
+    client.upload=parallel_upload
+    saved=SupabaseReviewRepository(client).save_confirmed(**args)
+    assert len(saved['documents'])==3 and len(client.objects)==3 and len(client.records)==1
+
+
+def test_archive_upload_failure_does_not_insert_review():
+    client=FakeClient();args=arguments();args['documents']=[original(),original()]
+    def fail(*a,**kw):raise TimeoutError()
+    client.upload=fail
+    with pytest.raises(RuntimeError,match='Archivio foto non completato'):
+        SupabaseReviewRepository(client).save_confirmed(**args)
+    assert not client.records

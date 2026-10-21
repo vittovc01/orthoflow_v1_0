@@ -8,6 +8,7 @@ import hashlib
 import base64
 import json
 import math
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from io import BytesIO
@@ -159,8 +160,9 @@ class SupabaseReviewRepository:
             if existing.get('payload_sha256')!=fingerprint or existing.get('actor')!=str(actor):
                 raise ValueError('ID revisione già usato per dati diversi')
             return existing
-        storage = self.client.storage.from_(BUCKET)
-        for path, content, mime in uploads:
+        def upload_one(entry):
+            path, content, mime = entry
+            storage = self.client.storage.from_(BUCKET)
             try:
                 storage.upload(path,content,file_options={'content-type':mime,'upsert':'false'})
             except Exception as exc:
@@ -172,6 +174,10 @@ class SupabaseReviewRepository:
                     raise RuntimeError('Archivio foto non completato; riprovare con lo stesso ID revisione') from exc
                 if hashlib.sha256(previous).digest()!=hashlib.sha256(content).digest():
                     raise RuntimeError('Foto archivio discordante: verifica amministrativa richiesta') from exc
+        # Bounded I/O overlap only; every immutable crop must be confirmed before
+        # inserting the review or allowing the stock transaction to proceed.
+        with ThreadPoolExecutor(max_workers=3, thread_name_prefix='review-crop') as executor:
+            list(executor.map(upload_one, uploads))
         record = {'id':request_id, **payload,'payload_sha256':fingerprint,
                   'confirmed_at':datetime.now(timezone.utc).isoformat()}
         try:
@@ -202,16 +208,28 @@ def load_catalog_codes(client, table='codici_prodotto_scan', column='codice_arti
         offset += len(rows)
 
 
-def load_gtin_catalog(client):
+def load_gtin_catalog(client, *, gtins=None):
     """Authoritative GTIN -> REF comparison; never fall back to scan registrations."""
+    wanted = None if gtins is None else sorted({str(g).strip() for g in gtins if g and str(g).strip().lower() != 'nan'})
+    if wanted == []:
+        return {}
+    # Filtered requests are small; retain the complete-catalogue API for imports.
+    if wanted is not None and len(wanted) > 200:
+        result = {}
+        for start in range(0, len(wanted), 200):
+            result.update(load_gtin_catalog(client, gtins=wanted[start:start+200]))
+        return result
     catalog,offset={},0
     while True:
-        rows=client.table('articoli_gtin').select('gtin,ref').order('gtin').range(offset,offset+499).execute().data or []
+        query = client.table('articoli_gtin').select('gtin,ref')
+        if wanted is not None:
+            query = query.in_('gtin', wanted)
+        rows=query.order('gtin').range(offset,offset+499).execute().data or []
         for row in rows:
             gtin=str(row.get('gtin') or '').strip(); ref=str(row.get('ref') or '').strip()
             if gtin and ref:
                 if gtin in catalog and catalog[gtin]!=ref:
                     raise ValueError('GTIN associato a REF discordanti nel catalogo')
                 catalog[gtin]=ref
-        if len(rows)<500:return catalog
+        if not rows:return catalog
         offset+=len(rows)
