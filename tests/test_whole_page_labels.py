@@ -165,7 +165,7 @@ def test_full_page_model_defaults_do_not_change_ddt_model(monkeypatch):
     import ai_ocr
     monkeypatch.setattr(ai_ocr,'_secret',lambda name,default='': default)
     status = ai_ocr.ai_status()
-    assert status['label_model'] == 'gpt-5.4-mini'
+    assert status['label_model'] == 'gpt-6.1-sol'
     assert status['model'] == 'gpt-5-mini'
     assert vision_options(status['label_model']) == ('original',{'reasoning':{'effort':'low'}})
     assert vision_options('gpt-4.1') == ('high',{})
