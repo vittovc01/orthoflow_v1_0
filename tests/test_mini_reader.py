@@ -138,3 +138,25 @@ def test_duplicate_document_does_not_duplicate_usage():
     result=analyze_documents([OriginalDocument('one.png',image.getvalue()),OriginalDocument('two.png',image.getvalue())],analyzer=analyzer)
     assert calls==[1] and len(result['api_usage'])==2
     assert [d['status'] for d in result['documents']]==['analyzed','duplicate']
+
+
+def test_mini_second_read_is_rotated_full_page_and_restores_coordinates(tmp_path,monkeypatch):
+    import base64
+    path=tmp_path/'vertical.png'
+    original=Image.new('RGB',(80,160),'white');original.putpixel((0,0),(255,0,0));original.save(path)
+    monkeypatch.setattr('whole_page_labels.optional_product_regions',lambda page:([],False))
+    monkeypatch.setattr('whole_page_labels.page_barcode_evidence',lambda page:[])
+    sizes=[]
+    def create(**kwargs):
+        content=kwargs['input'][0]['content']
+        page=Image.open(BytesIO(base64.b64decode(content[1]['image_url'].split(',')[1])))
+        sizes.append(page.size)
+        second='Seconda lettura' in content[0]['text']
+        assert page.size==((160,80) if second else (80,160))
+        assert page.getpixel((159,0) if second else (0,0))==(255,0,0)
+        box=[600,100,900,300] if second else [100,100,300,400]
+        return response([label(box)])
+    result=analyze_labels(path,SimpleNamespace(responses=SimpleNamespace(create=create)),
+                          'gpt-5.4-mini',{},lambda x:x)
+    assert sorted(sizes)==[(80,160),(160,80)] and len(result['items'])==1
+    assert result['items'][0]['ocr_reads'][0]['bbox']==result['items'][0]['ocr_reads'][1]['bbox']

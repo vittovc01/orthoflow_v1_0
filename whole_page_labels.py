@@ -30,6 +30,10 @@ Non ricostruire caratteri nascosti: usa null e warning se il campo non è leggib
 La posizione serve solo a collegare l'osservazione alla foto: bbox normalizzato
 [sinistra,alto,destra,basso] 0..1000, una posizione per singolo adesivo.
 Non raggruppare per REF/lotto. Riporta anche le etichette parzialmente illeggibili.
+Il lotto è ESCLUSIVAMENTE il valore stampato accanto al simbolo LOT: non usare
+misure, diametri, lunghezze, numeri di catalogo o frammenti del REF come lotto.
+Leggi tutte le cifre e lettere del LOT, anche sulle etichette verticali. La scadenza
+è la data vicino alla clessidra: non inventare giorno 01 o una data plausibile.
 source_text deve contenere soltanto REF, lotto e scadenza del prodotto.
 """
 
@@ -110,7 +114,7 @@ def observations(result):
     return out
 
 
-def merge_reads(first, second):
+def merge_reads(first, second, uncertain=None):
     """One-to-one spatial consensus; product identity NEVER deduplicates labels."""
     def identity(row):
         return tuple(str(row.get(k) or '').strip() for k in ('code','lot','expiry'))
@@ -131,9 +135,28 @@ def merge_reads(first, second):
             available.remove(j)
             result.append(compare_reads(a,second[j]))
         return result
+    # Anchor the review in the pass with most complete product identities.
+    # A poorer pass is corroboration, not a second inventory to append blindly.
+    quality = lambda rows: (sum(all(r.get(k) for k in ('code','lot','expiry')) for r in rows),
+                            sum(bool(r.get(k)) for r in rows for k in ('code','lot','expiry')))
+    if quality(second) > quality(first):
+        first, second = second, first
+    matched, used = {}, set()
+    # Match equal REF occurrences one-to-one even when model boxes drift.
+    # Preserve multiplicity: matching two identical screws still yields two rows.
+    codes = {r.get('code') for r in first if r.get('code')}
+    for code in codes:
+        left = [i for i,r in enumerate(first) if r.get('code') == code]
+        right = [j for j,r in enumerate(second) if r.get('code') == code]
+        pairs = sorted(((int(identity(first[i]) == identity(second[j])),
+                         spatial_score(first[i]['bbox'],second[j]['bbox']),i,j)
+                        for i in left for j in right), reverse=True)
+        for _,score,i,j in pairs:
+            if i not in matched and j not in used:
+                matched[i] = j
+                used.add(j)
     edges = sorted(((spatial_score(a['bbox'], b['bbox']), i, j) for i, a in enumerate(first)
                     for j, b in enumerate(second)), reverse=True)
-    matched, used = {}, set()
     for score, i, j in edges:
         if score < .35:
             break
@@ -153,17 +176,66 @@ def merge_reads(first, second):
                              for k,x in enumerate(second) if k != matched[i]) or
                          any(spatial_score(b['bbox'], x['bbox']) >= chosen-.05
                              for k,x in enumerate(first) if k != i))
-            if ambiguous:
+            same_ref = a.get('code') and a.get('code') == b.get('code')
+            overlapping = any(iou(a['bbox'],x['bbox']) > .85 for k,x in enumerate(first) if k != i) or any(iou(b['bbox'],x['bbox']) > .85 for k,x in enumerate(second) if k != matched[i])
+            if overlapping or (ambiguous and not same_ref):
                 for field in ('code','lot','expiry'):
                     row[field] = None
                 row['warning'] = 'Posizioni ambigue tra le due letture: verificare questa etichetta'
         else:
-            row = dict(a, ocr_reads=[dict(a)], warning='Etichetta presente solo nella prima lettura: verificare sul foglio')
+            row = dict(a, ocr_reads=[dict(a)], warning='Etichetta presente in una sola lettura: verificare sul foglio')
         result.append(row)
     for j, b in enumerate(second):
         if j not in used:
-            result.append(dict(b, ocr_reads=[dict(b)], warning='Etichetta presente solo nella seconda lettura: verificare sul foglio'))
+            possible_duplicate = (not b.get('code') or b.get('code') in codes or
+                                  any(spatial_score(a['bbox'],b['bbox']) >= .15 for a in first))
+            candidate = dict(b, ocr_reads=[dict(b)],
+                             warning='Osservazione non abbinata: verificare se è una nuova etichetta o un duplicato')
+            if possible_duplicate and uncertain is not None:
+                uncertain.append(candidate)
+            else:
+                result.append(candidate)
     return result
+
+
+def restore_rotated_observations(rows):
+    """Inverse of a clockwise full-page 90 degree rotation (normalized coords)."""
+    for row in rows:
+        x0,y0,x1,y1 = row['bbox']
+        row['bbox'] = [y0,1000-x1,y1,1000-x0]
+        row['rotation'] = (row.get('rotation',0) - 90) % 360
+    return rows
+
+
+def page_barcode_evidence(page):
+    """Optional local GS1 reads; no crops, uploads or unbounded full-page copies."""
+    scale = min(1,2000/max(page.size))
+    bounded = page.resize(tuple(max(1,round(v*scale)) for v in page.size)) if scale < 1 else page
+    try:
+        return decode_barcodes(bounded, with_positions=True)
+    except Exception:
+        return []
+    finally:
+        if bounded is not page:
+            bounded.close()
+
+
+def attach_page_barcodes(rows, barcodes):
+    """Associate only a single GS1 centre enclosed by a unique label outline."""
+    assigned = {}
+    for barcode in barcodes:
+        if barcode.get('error') or not barcode.get('bbox'):
+            continue
+        box = barcode['bbox']
+        x,y = (box[0]+box[2])/2,(box[1]+box[3])/2
+        hits = [i for i,row in enumerate(rows) if any(
+            b[0] <= x <= b[2] and b[1] <= y <= b[3]
+            for b in [row['bbox']] + [read['bbox'] for read in row.get('ocr_reads',[])])]
+        if len(hits) == 1:
+            assigned.setdefault(hits[0],[]).append(barcode)
+    for i,evidence in assigned.items():
+        rows[i] = reconcile(rows[i],evidence)
+    return rows
 
 
 def optional_product_regions(page):
@@ -203,7 +275,7 @@ def _analyze_labels(path, client, model, item_schema, parse, executor, readers):
             'required':['bbox','rotation','item'],'additionalProperties':False}},
         'warning':{'type':['string','null']}},'required':['labels','warning'],'additionalProperties':False}
     digest = hashlib.sha256(Path(path).read_bytes()).hexdigest()[:20]
-    items, warnings, api_usage = [], [], []
+    items, warnings, api_usage, uncertain_regions = [], [], [], []
     active_model = model
     blocked = None
     for number, page in enumerate(render_pages(path), 1):
@@ -214,7 +286,13 @@ def _analyze_labels(path, client, model, item_schema, parse, executor, readers):
         # Keep native scans below those limits; only oversized pages are scaled.
         read_page = prepare_page(page, patch_budget=10000, max_dimension=6000) if active_model == 'gpt-5.4-mini' else prepare_page(page)
         page_url = image_url(read_page)
-        futures = [readers.submit(read_page_once, client, active_model, schema, page_url, attempt)
+        # Mini sees a second orientation of the entire document, without crops.
+        from PIL import Image
+        rotated_page = read_page.transpose(Image.Transpose.ROTATE_270) if active_model == 'gpt-5.4-mini' else None
+        second_url = image_url(rotated_page) if rotated_page is not None else page_url
+        if rotated_page is not None:
+            rotated_page.close()
+        futures = [readers.submit(read_page_once, client, active_model, schema, page_url if attempt == 0 else second_url, attempt)
                    for attempt in range(2)]
         evidence = executor.submit(optional_product_regions, page)
         reads, failures, blocked = [], [], None
@@ -226,7 +304,10 @@ def _analyze_labels(path, client, model, item_schema, parse, executor, readers):
                 if usage is not None:
                     api_usage.append(dict(usage, page=number, read=attempt+1))
                 response = parse(raw_response)
-                reads.append(observations(response))
+                observed = observations(response)
+                if attempt == 1 and active_model == 'gpt-5.4-mini':
+                    observed = restore_rotated_observations(observed)
+                reads.append(observed)
                 if response.get('warning'):
                     warnings.append(f'Pagina {number}: {response["warning"]}')
             except Exception as exc:
@@ -246,7 +327,14 @@ def _analyze_labels(path, client, model, item_schema, parse, executor, readers):
             reads.append(None)
         if reads == [None, None]:
             raise WholePageReadError(number, [provider_notice(blocked)] if blocked else ['entrambe le letture fallite', *failures], kind=blocked, api_usage=api_usage)
-        rows = merge_reads(reads[0] or [], reads[1] or [])
+        page_uncertain = []
+        rows = merge_reads(reads[0] or [], reads[1] or [], page_uncertain)
+        rows = attach_page_barcodes(rows, page_barcode_evidence(page))
+        for candidate in page_uncertain:
+            candidate.update(page=number, source_document=digest, crop_data_url=None)
+        uncertain_regions.extend(page_uncertain)
+        if page_uncertain:
+            warnings.append(f'Pagina {number}: {len(page_uncertain)} osservazioni non abbinate, escluse dal conteggio proposto e recuperabili nelle osservazioni da controllare')
         warnings.append(f'Pagina {number}: prima lettura {len(reads[0] or [])}, seconda lettura {len(reads[1] or [])}, etichette da verificare {len(rows)}')
         if not rows:
             warnings.append(f'Pagina {number}: nessuna etichetta letta; aggiungere le righe mancanti o riprovare')
@@ -265,7 +353,7 @@ def _analyze_labels(path, client, model, item_schema, parse, executor, readers):
             if len(matches) == 1:
                 crop = crop_region(page, matches[0]['bbox'])
                 try:
-                    row = reconcile(row, decode_barcodes(crop))
+                    row = reconcile(row, list(row.get('barcodes') or []) + decode_barcodes(crop))
                 except Exception:
                     pass
                 row['crop_data_url'] = image_url(crop)
@@ -281,6 +369,6 @@ def _analyze_labels(path, client, model, item_schema, parse, executor, readers):
     return {'document_type':'scarico_sala','items':items,'back_orders':[],
             'pipeline_version':PIPELINE_VERSION,'physical_label_count':len(items),
             'ocr_model':active_model, 'provider_failure_kind':blocked, 'api_usage':api_usage,
-            'detection_warnings':warnings,'unconfirmed_regions':[], 'annotated_pages':[],
+            'detection_warnings':warnings,'unconfirmed_regions':uncertain_regions, 'annotated_pages':[],
             'count_verified':False,'clinic_name':None,'clinical_record':None,
             'procedure_date':None,'surgeon':None,'confidence':0}

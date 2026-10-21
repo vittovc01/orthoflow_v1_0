@@ -35,7 +35,7 @@ def test_ref_disagreement_is_not_silently_corrected():
 def test_second_pass_recovers_missing_label():
     a, b = label([10,10,300,200]), label([600,10,900,200])
     merged = merge_reads([a], [b,a])
-    assert len(merged) == 2 and 'seconda lettura' in merged[1]['warning']
+    assert len(merged) == 2 and any(len(r['ocr_reads']) == 1 for r in merged)
 
 
 def test_both_independent_reads_overlap_and_encode_the_full_page_once(tmp_path, monkeypatch):
@@ -308,3 +308,65 @@ def test_first_read_failure_keeps_successful_second_read(tmp_path, monkeypatch):
     assert len(result['items']) == 1
     assert result['items'][0]['warning']
     assert any('Quota' in w for w in result['detection_warnings'])
+
+
+def test_partial_pass_does_not_erase_available_fields():
+    a = label([10,10,100,200])
+    b = dict(a,lot=None,expiry=None)
+    row = merge_reads([a],[b])[0]
+    assert row['lot'] == a['lot'] and row['expiry'] == a['expiry']
+    assert 'incomplete' in row['warning']
+    assert row['ocr_reads'][1]['lot'] is None
+
+
+def test_twelve_vertical_labels_with_drifting_boxes_do_not_become_nineteen():
+    codes = ['04.112.143S','04.211.016S','04.211.010S','04.211.016S',
+             '04.200.018S','404.814S','413.014S','04.211.016S',
+             '412.103S','219.910S','04.211.016S','214.544S']
+    complete = [label([i*70,100,i*70+60,300],code=c,lot=f'LOT{i}') for i,c in enumerate(codes)]
+    partial = [label([i*70,600,i*70+60,800],code=c,lot=None,expiry=None) for i,c in enumerate(codes)]
+    partial.append(label([900,600,950,800],code=None,lot=None,expiry=None))
+    uncertain=[]
+    rows=merge_reads(partial,complete,uncertain)
+    assert len(rows)==12 and sum(r['quantity'] for r in rows)==12
+    assert len(uncertain)==1 and uncertain[0]['code'] is None
+    assert sum(r['code']=='04.211.016S' for r in rows)==4
+    assert all(r['lot'] and r['expiry'] for r in rows)
+
+
+def test_unmatched_same_ref_stays_recoverable_without_increasing_quantity():
+    first=[label([0,0,100,100])]
+    uncertain=[]
+    second=[first[0],label([800,800,900,900])]
+    # The more complete pass is the anchor, so both physical occurrences survive.
+    assert len(merge_reads(first,second,uncertain)) == 2
+    assert uncertain == []
+
+
+def test_clockwise_page_coordinates_are_restored_exactly():
+    from whole_page_labels import restore_rotated_observations
+    row=label([600,100,900,300])
+    restored=restore_rotated_observations([row])[0]
+    assert restored['bbox']==[100,100,300,400]
+
+
+def test_page_barcode_fills_missing_fields_only_with_unique_spatial_owner():
+    from whole_page_labels import attach_page_barcodes
+    a=label([0,0,300,900],lot=None,expiry=None)
+    b=label([500,0,800,900],code='OTHER',lot=None,expiry=None)
+    barcode={'bbox':[100,100,150,150],'raw':'(17)350801(10)419L516',
+             'lot':'419L516','expiry':'2035-08-01'}
+    rows=attach_page_barcodes([a,b],[barcode])
+    assert rows[0]['lot']=='419L516' and rows[0]['expiry']=='2035-08-01'
+    assert rows[1]['lot'] is None
+    overlapping=dict(b,bbox=a['bbox'])
+    assert attach_page_barcodes([a,overlapping],[barcode])[0]['lot'] is None
+
+
+def test_page_barcode_disagreement_never_silently_overwrites_ocr():
+    from whole_page_labels import attach_page_barcodes
+    a=label([0,0,300,900],lot='491.516')
+    barcode={'bbox':[100,100,150,150],'raw':'(10)419L516','lot':'419L516'}
+    row=attach_page_barcodes([a],[barcode])[0]
+    assert row['lot'] is None and row['lot_ocr_original']=='491.516'
+    assert row['barcodes'][0]['lot']=='419L516'
