@@ -49,6 +49,10 @@ def analyze_documents(documents, *, analyzer, catalog=None, soon_days=90):
                     continue
                 incoming = analyzer(str(path),mode='scarico_sala')
                 seen_documents[fingerprint] = index
+                if incoming.get('provider_failure_kind') in ('quota', 'rate_limit'):
+                    from ai_failures import provider_notice
+                    kind = incoming['provider_failure_kind']
+                    provider_block = (kind, provider_notice(kind))
             except Exception as exc:
                 from whole_page_labels import WholePageReadError
                 reason = exc.public_reason if isinstance(exc, WholePageReadError) else type(exc).__name__

@@ -169,14 +169,33 @@ def optional_product_regions(page):
         return [], True
 
 
+def read_page_once(client, model, schema, page_url, attempt):
+    """A worker owns its model/fallback; no shared mutable request state."""
+    def request():
+        detail, options = vision_options(model)
+        return client.responses.create(model=model, store=False,
+            input=[{'role':'user','content':[
+                {'type':'input_text','text':PROMPT + ('\nSeconda lettura indipendente: riconta tutti gli adesivi da zero.' if attempt else '')},
+                {'type':'input_image','image_url':page_url,'detail':detail}]}],
+            text={'format':{'type':'json_schema','name':'whole_page_product_labels','schema':schema,'strict':True}}, **options)
+    try:
+        return request_with_backoff(request), model
+    except Exception as exc:
+        if model != 'gpt-6-astra' or getattr(exc, 'status_code', None) != 404:
+            raise
+        model = 'gpt-5.4'
+        return request_with_backoff(request), model
+
+
 def analyze_labels(path, client, model, item_schema, parse):
-    # Only local evidence runs in parallel. API reads remain sequential, with
-    # the same model, pixels, prompts, consensus and rate-limit handling.
-    with ThreadPoolExecutor(max_workers=1, thread_name_prefix='product-evidence') as executor:
-        return _analyze_labels(path, client, model, item_schema, parse, executor)
+    # Two independent reads overlap; pages/documents remain sequential to bound
+    # memory and provider concurrency. Local evidence has its own single worker.
+    with ThreadPoolExecutor(max_workers=2, thread_name_prefix='label-read') as readers:
+        with ThreadPoolExecutor(max_workers=1, thread_name_prefix='product-evidence') as executor:
+            return _analyze_labels(path, client, model, item_schema, parse, executor, readers)
 
 
-def _analyze_labels(path, client, model, item_schema, parse, executor):
+def _analyze_labels(path, client, model, item_schema, parse, executor, readers):
     schema = {'type':'object','properties':{
         'labels':{'type':'array','items':{'type':'object','properties':{
             'bbox':{'type':'array','items':{'type':'integer'},'minItems':4,'maxItems':4},
@@ -186,33 +205,26 @@ def _analyze_labels(path, client, model, item_schema, parse, executor):
     digest = hashlib.sha256(Path(path).read_bytes()).hexdigest()[:20]
     items, warnings = [], []
     active_model = model
+    blocked = None
     for number, page in enumerate(render_pages(path), 1):
+        if blocked:
+            page.close()
+            raise WholePageReadError(number, [provider_notice(blocked)], kind=blocked)
         read_page = prepare_page(page)
         page_url = image_url(read_page)
-        evidence = None
-        reads = []
-        failures = []
-        for attempt in range(2):
+        futures = [readers.submit(read_page_once, client, active_model, schema, page_url, attempt)
+                   for attempt in range(2)]
+        evidence = executor.submit(optional_product_regions, page)
+        reads, failures, blocked = [], [], None
+        # Consume in stable pass order even when the second finishes first.
+        for attempt, future in enumerate(futures):
             try:
-                def request():
-                    detail, options = vision_options(active_model)
-                    return client.responses.create(model=active_model, store=False,
-                        input=[{'role':'user','content':[
-                            {'type':'input_text','text':PROMPT + ('\nSeconda lettura indipendente: riconta tutti gli adesivi da zero.' if attempt else '')},
-                            {'type':'input_image','image_url':page_url,'detail':detail}]}],
-                        text={'format':{'type':'json_schema','name':'whole_page_product_labels','schema':schema,'strict':True}}, **options)
-                try:
-                    raw_response = request_with_backoff(request)
-                except Exception as exc:
-                    if active_model != 'gpt-6-astra' or getattr(exc,'status_code',None) != 404:
-                        raise
-                    active_model = 'gpt-5.4'
+                raw_response, used_model = future.result()
+                if used_model == 'gpt-5.4' and active_model == 'gpt-6-astra':
+                    active_model = used_model
                     warnings.append('Modello gpt-6-astra non disponibile per questo account: lettura eseguita con gpt-5.4 a risoluzione originale')
-                    raw_response = request_with_backoff(request)
                 response = parse(raw_response)
                 reads.append(observations(response))
-                if evidence is None:
-                    evidence = executor.submit(optional_product_regions, page)
                 if response.get('warning'):
                     warnings.append(f'Pagina {number}: {response["warning"]}')
             except Exception as exc:
@@ -220,15 +232,18 @@ def _analyze_labels(path, client, model, item_schema, parse, executor):
                 failures.append(failure_reason(exc))
                 kind = failure_kind(exc)
                 if kind:
-                    if not any(r is not None for r in reads):
-                        raise WholePageReadError(number, [provider_notice(kind)], kind=kind) from None
-                    warnings.append(provider_notice(kind))
-                    break
-                warnings.append(f'Pagina {number}: lettura {attempt+1} non completata ({type(exc).__name__}); verificare il conteggio sul foglio')
+                    blocked = kind
+                    notice = provider_notice(kind)
+                    if notice not in warnings:
+                        warnings.append(notice)
+                    # The sibling may already be in flight: retain any successful
+                    # result, never launch further pages after a provider block.
+                else:
+                    warnings.append(f'Pagina {number}: lettura {attempt+1} non completata ({type(exc).__name__}); verificare il conteggio sul foglio')
         while len(reads) < 2:
             reads.append(None)
         if reads == [None, None]:
-            raise WholePageReadError(number, ['entrambe le letture fallite', *failures])
+            raise WholePageReadError(number, [provider_notice(blocked)] if blocked else ['entrambe le letture fallite', *failures], kind=blocked)
         rows = merge_reads(reads[0] or [], reads[1] or [])
         warnings.append(f'Pagina {number}: prima lettura {len(reads[0] or [])}, seconda lettura {len(reads[1] or [])}, etichette da verificare {len(rows)}')
         if not rows:
@@ -258,9 +273,12 @@ def _analyze_labels(path, client, model, item_schema, parse, executor):
             from ocr_review import assess_label
             row['assessment'] = assess_label(row)
             items.append(row)
+        if read_page is not page:
+            read_page.close()
+        page.close()
     return {'document_type':'scarico_sala','items':items,'back_orders':[],
             'pipeline_version':PIPELINE_VERSION,'physical_label_count':len(items),
-            'ocr_model':active_model,
+            'ocr_model':active_model, 'provider_failure_kind':blocked,
             'detection_warnings':warnings,'unconfirmed_regions':[], 'annotated_pages':[],
             'count_verified':False,'clinic_name':None,'clinical_record':None,
             'procedure_date':None,'surgeon':None,'confidence':0}

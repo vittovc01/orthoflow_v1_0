@@ -38,33 +38,29 @@ def test_second_pass_recovers_missing_label():
     assert len(merged) == 2 and 'seconda lettura' in merged[1]['warning']
 
 
-def test_local_evidence_overlaps_second_read_without_parallel_api_calls(tmp_path, monkeypatch):
-    from threading import Event
+def test_both_independent_reads_overlap_and_encode_the_full_page_once(tmp_path, monkeypatch):
+    from threading import Barrier
     path = tmp_path/'source.png'
     Image.new('RGB',(20,20)).save(path)
-    second_started, local_started = Event(), Event()
+    both_started = Barrier(2, timeout=3)
     calls, encodings = [], []
     from whole_page_labels import image_url as encode
     def encode_once(image):
         encodings.append(1)
         return encode(image)
     monkeypatch.setattr('whole_page_labels.image_url', encode_once)
-    def local(page):
-        local_started.set()
-        assert second_started.wait(2), 'evidence must overlap the next AI read'
-        return [], []
+    monkeypatch.setattr('region_privacy.safe_product_regions', lambda page:([], []))
     def create(**kwargs):
         calls.append(kwargs)
-        if len(calls) == 2:
-            second_started.set()
-            assert local_started.wait(2), 'local evidence must already be running'
+        both_started.wait()  # deadlocks/fails if requests are serialized
         return response([label([10,10,900,900])])
-    monkeypatch.setattr('region_privacy.safe_product_regions', local)
     result = analyze_labels(path, SimpleNamespace(responses=SimpleNamespace(create=create)),
                             'gpt-6-astra', {}, lambda x:x)
     assert len(calls) == 2 and len(encodings) == 1 and len(result['items']) == 1
     assert result['items'][0]['code'] == '4515-70-005'
     assert calls[0]['input'][0]['content'][1] == calls[1]['input'][0]['content'][1]
+    assert len(result['items'][0]['ocr_reads']) == 2
+    assert len({c['input'][0]['content'][0]['text'] for c in calls}) == 2
 
 
 def test_ambiguous_positions_do_not_establish_consensus():
@@ -124,7 +120,6 @@ def test_full_page_reaches_both_reads_even_when_local_detector_fails(tmp_path, m
             assert image.size == source.size and image.getpixel((0,0)) == (0,0,255)
         return response(rows)
     def fail(*args, **kwargs):
-        assert 1 <= len(calls) <= 2  # evidence may overlap the second read
         raise RuntimeError('detector unavailable')
     monkeypatch.setattr('region_privacy.safe_product_regions', fail)
     result = analyze_labels(path, SimpleNamespace(responses=SimpleNamespace(create=create)),
@@ -204,7 +199,7 @@ def test_model_not_available_uses_explicit_original_detail_fallback(tmp_path,mon
     monkeypatch.setattr('region_privacy.safe_product_regions',lambda *a:([],[]))
     result = analyze_labels(path,SimpleNamespace(responses=SimpleNamespace(create=create)),
                             'gpt-6-astra',{},lambda x:x)
-    assert len(calls) == 3 and len(result['items']) == 1
+    assert len(calls) == 4 and len(result['items']) == 1
     assert result['ocr_model'] == 'gpt-5.4'
     assert result['items'][0]['ocr_model'] == 'gpt-5.4'
     assert any('non disponibile' in w for w in result['detection_warnings'])
@@ -225,7 +220,7 @@ def test_provider_diagnostics_do_not_echo_secrets():
     assert failure_reason(error) == 'RuntimeError'
 
 
-def test_quota_stops_before_second_read_and_fallback(tmp_path):
+def test_quota_has_only_two_inflight_reads_and_no_retries_or_fallback(tmp_path):
     from whole_page_labels import WholePageReadError
     from tests.test_ai_failures import ProviderError
     path = tmp_path/'source.png'
@@ -237,7 +232,7 @@ def test_quota_stops_before_second_read_and_fallback(tmp_path):
     with pytest.raises(WholePageReadError) as error:
         analyze_labels(path, SimpleNamespace(responses=SimpleNamespace(create=create)),
                        'gpt-6-astra', {}, lambda x:x)
-    assert len(calls) == 1 and error.value.kind == 'quota'
+    assert len(calls) == 2 and error.value.kind == 'quota'
     assert 'non serve rifare la foto' in error.value.public_reason
     assert 'secret' not in error.value.public_reason
 
@@ -301,3 +296,19 @@ def test_provider_limit_does_not_resubmit_remaining_documents():
     assert calls == [1]
     assert all(d['status'] == 'failed' and d['failure_kind'] == 'quota' for d in result['documents'])
     assert all('nuova foto' not in w for w in result['detection_warnings'])
+
+
+def test_first_read_failure_keeps_successful_second_read(tmp_path, monkeypatch):
+    from tests.test_ai_failures import ProviderError
+    path = tmp_path/'source.png'
+    Image.new('RGB', (20,20)).save(path)
+    monkeypatch.setattr('region_privacy.safe_product_regions', lambda page:([], []))
+    def create(**kwargs):
+        if 'Seconda lettura' not in kwargs['input'][0]['content'][0]['text']:
+            raise ProviderError('insufficient_quota')
+        return response([label([10,10,900,900])])
+    result = analyze_labels(path, SimpleNamespace(responses=SimpleNamespace(create=create)),
+                            'gpt-6-astra', {}, lambda x:x)
+    assert len(result['items']) == 1
+    assert result['items'][0]['warning']
+    assert any('Quota' in w for w in result['detection_warnings'])

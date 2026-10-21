@@ -17,7 +17,10 @@ class ReadOnlyBackend:
         return self
 
     def execute(self):
-        return SimpleNamespace(data=[], count=0)
+        return SimpleNamespace(data=[
+            {'codice_cliente':'A','descrizione':'Struttura A'},
+            {'codice_cliente':'B','descrizione':'Struttura B'},
+        ] if self.reads and self.reads[-1]=='clienti' else [], count=0)
 
     def __getattr__(self, name):
         if name in {"insert", "update", "delete", "upsert", "rpc"}:
@@ -121,6 +124,9 @@ def test_physical_label_review_blocks_unverified_count_without_writes(backend):
         'crop_data_url': image_url(Image.new('RGB',(100,40),'white')),
     }]
     at.switch_page('pages/05_Scarico_Sala_AI.py').run()
+    next(s for s in at.selectbox if s.label=='Struttura / cliente').select_index(0)
+    next(s for s in at.selectbox if s.label=='Linea').select('TRAUMA')
+    at.run()
     assert not at.exception
     assert any(m.label=='Etichette individuate' and m.value=='1' for m in at.metric)
     next(b for b in at.button if b.label=='📤 Crea intervento e scarica materiali').click()
@@ -167,7 +173,7 @@ def test_material_list_exports_and_catalogue_snapshot_without_technical_noise(ba
     assert not at.exception
     records = list(csv.DictReader(StringIO(downloads['Scarica lista CSV'].decode('utf-8-sig')),delimiter=';'))
     assert records[0]['Lotto']=='00999' and records[0]['Quantità']=='2'
-    assert backend.reads.count('articoli_gtin') == reads == 1
+    assert backend.reads.count('articoli_gtin') == reads == 0  # no detected GTIN: no catalogue download
     assert any(l['field']=='lotto' for l in at.session_state['scarico_correction_log'])
     assert len([c for c in at.checkbox if c.label.startswith('Ho controllato')]) == 1
 
@@ -197,6 +203,9 @@ def test_single_confirmation_accepts_missing_gtin_and_advisory_count(backend,mon
     at.session_state['scarico_ai_rows']=[{'label_id':'one','codice':'TEST-A','lotto':'LOT-A',
         'scadenza':'2035-01-01','quantita':2,'gtin':float('nan'),'verificata':False}]
     at.switch_page('pages/05_Scarico_Sala_AI.py').run()
+    next(s for s in at.selectbox if s.label=='Struttura / cliente').select_index(0)
+    next(s for s in at.selectbox if s.label=='Linea').select('TRAUMA')
+    at.run()
     assert not at.exception
     assert not any('GTIN' in t.label for t in at.text_input)
     assert len([c for c in at.checkbox if c.label.startswith('Ho ')])==1
@@ -321,6 +330,9 @@ def test_invalid_row_is_red_and_blocks_with_ref_and_lot(backend):
         {'label_id':'good','codice':'TEST-GOOD','lotto':'LOT-GOOD','scadenza':'2035-01-01','quantita':1},
         {'label_id':'bad','codice':'TEST-BAD','lotto':'LOT-BAD','scadenza':float('nan'),'quantita':1}]
     at.switch_page('pages/05_Scarico_Sala_AI.py').run()
+    next(s for s in at.selectbox if s.label=='Struttura / cliente').select_index(0)
+    next(s for s in at.selectbox if s.label=='Linea').select('TRAUMA')
+    at.run()
     table=next(d for d in at.dataframe if 'esito' in d.value.columns)
     assert table.value['esito'][0]=='' and table.value['esito'][1].startswith('🔴')
     next(c for c in at.checkbox if c.label.startswith('Ho controllato REF')).check()
@@ -347,6 +359,9 @@ def test_timeout_retry_reuses_discharge_request_uuid(backend,monkeypatch):
     at.session_state['scarico_source']='AI';at.session_state['scarico_ai_meta']={'pipeline_version':PIPELINE_VERSION}
     at.session_state['scarico_ai_rows']=[{'label_id':'one','codice':'TEST-A','lotto':'TEST-LOT','scadenza':'2035-01-01','quantita':1}]
     at.switch_page('pages/05_Scarico_Sala_AI.py').run()
+    next(s for s in at.selectbox if s.label=='Struttura / cliente').select_index(0)
+    next(s for s in at.selectbox if s.label=='Linea').select('TRAUMA')
+    at.run()
     next(c for c in at.checkbox if c.label.startswith('Ho controllato REF')).check()
     next(b for b in at.button if b.label=='📤 Crea intervento e scarica materiali').click();at.run()
     assert not at.exception and len(calls)==1
@@ -544,6 +559,9 @@ def test_smart_track_flags_reach_final_discharge_after_multiple_toggles(backend,
     at.session_state["scarico_ai_rows"]=[dict(label_id=f"label-{i}",codice="TEST-A",lotto=f"LOT{i}",
         scadenza="2035-01-01",quantita=1,produttore="Synthes") for i in range(2)]
     at.switch_page("pages/05_Scarico_Sala_AI.py").run()
+    next(s for s in at.selectbox if s.label=='Struttura / cliente').select_index(0)
+    next(s for s in at.selectbox if s.label=='Linea').select('TRAUMA')
+    at.run()
     assert not at.exception
     for values in [(True,False),(True,True),(False,True)]:
         at.session_state["scarico_ai_editor_9010013_0"]={"edited_rows":{
@@ -557,3 +575,28 @@ def test_smart_track_flags_reach_final_discharge_after_multiple_toggles(backend,
     assert not at.exception
     args=next(args for name,args in calls if name=="crea_intervento_scarico_ai_verificato_v2")
     assert [r["conto_deposito_struttura"] for r in args["p_rows"]]==[False,True]
+
+
+def test_destination_starts_empty_and_both_fields_are_required(backend):
+    from label_pipeline import PIPELINE_VERSION
+    at=app()
+    at.session_state['user']='ci-user';at.session_state['ruolo']='Admin';at.session_state['permessi']=['DIREZIONE']
+    at.run()
+    at.session_state['scarico_source']='AI'
+    at.session_state['scarico_ai_meta']={'pipeline_version':PIPELINE_VERSION, 'clinic_name':'Struttura A'}
+    at.session_state['scarico_ai_rows']=[dict(label_id='one',codice='TEST',lotto='LOT',scadenza='2035-01-01',quantita=1)]
+    at.switch_page('pages/05_Scarico_Sala_AI.py').run()
+    assert not at.exception
+    structure=lambda: next(s for s in at.selectbox if s.label=='Struttura / cliente')
+    line=lambda: next(s for s in at.selectbox if s.label=='Linea')
+    submit=lambda: next(b for b in at.button if b.label=='📤 Crea intervento e scarica materiali')
+    assert structure().value is None and line().value is None
+    assert submit().disabled
+    structure().select_index(0);at.run()
+    assert line().value is None and submit().disabled
+    line().select('PROTESICA');at.run()
+    assert not submit().disabled
+    at.session_state['scarico_reset_destination']=True
+    at.run()
+    assert not at.exception
+    assert structure().value is None and line().value is None and submit().disabled
