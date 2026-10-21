@@ -370,3 +370,12 @@ def test_page_barcode_disagreement_never_silently_overwrites_ocr():
     row=attach_page_barcodes([a],[barcode])[0]
     assert row['lot'] is None and row['lot_ocr_original']=='491.516'
     assert row['barcodes'][0]['lot']=='419L516'
+
+
+def test_ref_spacing_or_punctuation_difference_does_not_erase_reading():
+    a=label([10,10,300,200],code='04.112.143S')
+    b=dict(a,code='04.112.143 S')
+    row=merge_reads([a],[b])[0]
+    assert row['code']=='04.112.143S'
+    assert row['ocr_reads'][1]['code']=='04.112.143 S'
+    assert merge_reads([a],[dict(b,code='04.112.143')])[0]['code'] is None

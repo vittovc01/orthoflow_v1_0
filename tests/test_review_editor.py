@@ -103,3 +103,57 @@ def test_printed_ref_marker_is_not_product_identity(raw, expected):
     assert product_ref(raw) == expected
     assert canonical_values({'code':raw})['codice'] == expected
     assert exact_code(raw) == exact_code(expected)
+
+
+def test_conflicting_ref_candidates_are_recoverable_with_manual_audit():
+    from ocr_review import readable_candidates
+    original=row();original['codice']=''
+    original['ocr_reads']=[{'code':'REF 04.112.143S'},{'code':'04.112.145S'}]
+    candidates=readable_candidates(original,'code')
+    assert [r['value'] for r in candidates]==['04.112.143S','04.112.145S']
+    assert original['codice']==''
+    proposals=[dict(original,codice=candidates[0]['value'])]
+    rows,logs=apply_review_edits([original],proposals,actor='admin',timestamp='2026-10-21T20:40:00Z')
+    assert rows[0]['codice']=='04.112.143S' and rows[0]['ocr_reads']==original['ocr_reads']
+    change=next(r for r in logs if r['field']=='codice')
+    assert change['original']=='' and change['corrected']=='04.112.143S'
+    assert change['method']=='manuale' and change['user']=='admin'
+
+
+def test_expiry_candidates_reparse_raw_gs1_and_never_turn_gtin_into_ref():
+    from ocr_review import readable_candidates
+    original=row();original['ocr_reads']=[{'expiry':'2031-05-31'}]
+    original['barcodes']=[{'raw':'(17)310501(10)8L19412','expiry':'2099-01-01'},
+                          {'raw':'bad payload','expiry':'2098-01-01'}]
+    assert [r['value'] for r in readable_candidates(original,'expiry')]==['2031-05-31','2031-05-01']
+    original['gtin']='07611819381742'
+    assert readable_candidates(original,'code')==[]
+
+
+def test_recovery_button_updates_existing_session_and_audits_without_reanalysis():
+    import ast
+    import textwrap
+    from pathlib import Path
+    from contextlib import nullcontext
+    from types import SimpleNamespace
+    from review_editor import text_value,row_name
+    source=Path('pages/_05_Scarico_Sala_AI_impl.py').read_text()
+    block=source.split('    from ocr_review import readable_candidates\n',1)[1].split('    with st.expander("Dettagli del riconoscimento"',1)[0]
+    block='from ocr_review import readable_candidates\n'+textwrap.dedent(block)
+    original=row();original['codice']=''
+    original['ocr_reads']=[{'code':'04.112.143S'}]
+    state={'scarico_ai_rows':[original]}
+    class Rerun(Exception):pass
+    def rerun():raise Rerun()
+    st=SimpleNamespace(session_state=state,expander=lambda *a,**k:nullcontext(),
+                       caption=lambda *a:None,markdown=lambda *a:None,
+                       button=lambda *a,**k:True,rerun=rerun)
+    with pytest.raises(Rerun):
+        exec(compile(ast.parse(block),'candidate_recovery','exec'),
+             {'st':st,'clean':text_value,'row_name':row_name,'user':lambda:'admin',
+              'apply_review_edits':apply_review_edits})
+    assert state['scarico_ai_rows'][0]['codice']=='04.112.143S'
+    assert state['scarico_ai_rows'][0]['lotto']=='LOT-A'
+    assert state['scarico_ai_rows'][0]['label_id']=='one'
+    assert state['scarico_editor_revision']==1
+    assert state['scarico_correction_log'][0]['method']=='manuale'

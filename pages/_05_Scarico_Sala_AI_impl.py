@@ -717,6 +717,32 @@ def render_material_editor():
 edited = render_material_editor()
 
 if is_physical_ai:
+    from ocr_review import readable_candidates
+    candidate_rows = []
+    latest_rows = st.session_state.get("scarico_ai_rows", []) or []
+    for candidate_row in latest_rows:
+        if candidate_row.get("escludi_riga"):
+            continue
+        for field,alias,title in (("code","codice","REF"),("lot","lotto","lotto"),("expiry","scadenza","scadenza")):
+            if not clean(candidate_row.get(alias, candidate_row.get(field))):
+                options = readable_candidates(candidate_row,field)
+                if options:
+                    candidate_rows.append((candidate_row,alias,title,options))
+    if candidate_rows:
+        with st.expander("Completa i campi con i valori già letti", expanded=True):
+            st.caption("Quando le letture non concordano, i valori restano disponibili qui. Confrontali con la foto e scegli quello corretto: la scelta viene registrata come correzione manuale, senza una nuova analisi AI.")
+            for candidate_row,alias,title,options in candidate_rows:
+                st.markdown(f"**{row_name(candidate_row)} · {title} da controllare**")
+                for option_index,option in enumerate(options):
+                    label = f"Usa {title}: {option['value']} ({', '.join(option['sources'])})"
+                    if st.button(label,key=f"recover_read_{candidate_row['label_id']}_{alias}_{option_index}_{st.session_state.get('scarico_editor_revision',0)}"):
+                        current = st.session_state.get("scarico_ai_rows", []) or []
+                        proposals = [dict(r,**{alias:option['value']}) if r.get('label_id')==candidate_row['label_id'] else dict(r) for r in current]
+                        updated,corrections = apply_review_edits(current,proposals,actor=user())
+                        st.session_state["scarico_ai_rows"] = updated
+                        st.session_state.setdefault("scarico_correction_log",[]).extend(corrections)
+                        st.session_state["scarico_editor_revision"] = int(st.session_state.get("scarico_editor_revision",0))+1
+                        st.rerun()
     with st.expander("Dettagli del riconoscimento", expanded=False):
         show_technical = st.checkbox("Mostra riscontri e controlli tecnici", value=False)
         if show_technical:
