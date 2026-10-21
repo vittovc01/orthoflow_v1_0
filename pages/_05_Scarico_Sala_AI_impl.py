@@ -15,6 +15,7 @@ from ocr_review import build_review, aggregate_review, merge_confirmed_fields
 from review_editor import (apply_review_edits, row_errors, row_name, expected_label_count as initial_label_count,
                            count_warning, catalogue_warning, canonical_values, text_value, quantity_value)
 from ocr_service import analyze_documents
+from ocr_costs import usage_totals
 from scarico_workflow import reset_destination, destination_errors, stock_snapshot, stock_quantities, supports_structure_stock
 from review_exports import review_csv, review_xlsx
 from ocr_repository import OriginalDocument, SupabaseReviewRepository, without_images, load_gtin_catalog
@@ -501,6 +502,10 @@ if meta and st.session_state.get("scarico_source") == "AI":
     used_models = sorted({d['model'] for d in meta.get('documents',[]) if d.get('model')})
     if used_models:
         st.caption('Modello usato per questi risultati: ' + ', '.join(used_models))
+    if meta.get('api_usage'):
+        consumption = usage_totals(meta['api_usage'])
+        if consumption['estimated_cost_usd'] is not None:
+            st.caption(f"Costo AI stimato di questa analisi: $ {consumption['estimated_cost_usd']:.4f} · {consumption['reads']} letture · tariffe standard, IVA esclusa")
     failed_analysis = bool(meta.get('documents')) and all(d.get('status') == 'failed' for d in meta['documents'])
     st.caption(f"Versione usata per questi risultati: {meta.get('pipeline_version') or ('analisi non completata' if failed_analysis else 'precedente')}")
     if meta.get("pipeline_version") != PIPELINE_VERSION:
