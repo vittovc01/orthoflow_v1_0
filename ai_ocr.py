@@ -208,10 +208,10 @@ def _ddt_text_fallback(path, result):
     return result
 
 def normalize_ai_items(result):
-    from review_editor import technical_gtin, text_value
+    from review_editor import technical_gtin, text_value, product_ref
     out=[]
     for it in result.get("items",[]):
-        code=text_value(it.get("code")); manufacturer=text_value(it.get("manufacturer"))
+        code=product_ref(it.get("code")); manufacturer=text_value(it.get("manufacturer"))
         raw_expiry=it.get("expiry") or ""
         expiry=_normalize_expiry(raw_expiry)
         warning=it.get("warning") or ""

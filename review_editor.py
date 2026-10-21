@@ -20,6 +20,15 @@ def text_value(value):
     return '' if text.lower() in {'nan','nat','none','null','<na>'} else text
 
 
+def product_ref(value):
+    """Remove a printed REF field marker, preserving product punctuation/suffixes.
+
+    A separator is required: codes beginning REFERENCE or REF123 stay intact.
+    """
+    text = text_value(value).upper()
+    return re.sub(r'^REF(?:\s*[:：]\s*|\s+)', '', text).strip()
+
+
 def technical_gtin(value):
     text = text_value(value)
     return text or None
@@ -30,7 +39,7 @@ def canonical_values(row):
     for field, alias in ALIASES.items():
         value = row.get(alias, row.get(field))
         result[alias] = (value if text_value(value) else None) if field=='quantity' else text_value(value)
-        if field=='code':result[alias]=result[alias].upper()
+        if field=='code':result[alias]=product_ref(result[alias])
         if field=='expiry' and result[alias]:
             for fmt in ('%Y-%m-%d','%d/%m/%Y','%d-%m-%Y','%Y/%m/%d'):
                 try:

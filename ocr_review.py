@@ -3,7 +3,7 @@
 Scores describe available evidence, NOT calibrated probabilities of correctness.
 No function in this module writes stock, files, or database records.
 """
-from review_editor import text_value, technical_gtin
+from review_editor import text_value, technical_gtin, product_ref
 import calendar
 import re
 from datetime import date, datetime
@@ -14,7 +14,7 @@ ALIASES = {'code':'codice','lot':'lotto','expiry':'scadenza','description':'desc
 
 def exact_code(value):
     """Normalize catalogue lookup punctuation only; never replace OCR characters."""
-    return re.sub(r'[^A-Z0-9]', '', str(value or '').upper())
+    return re.sub(r'[^A-Z0-9]', '', product_ref(value))
 
 
 def normalize_expiry(value):
