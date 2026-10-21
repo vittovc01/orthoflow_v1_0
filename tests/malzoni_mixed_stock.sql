@@ -26,7 +26,7 @@ begin
   jsonb_build_array(jsonb_build_object('codice',v_code,'lotto','TEST','quantita',1,'prezzo',100,'conto_deposito_struttura',true)), 'TEST_ROLLBACK');
   raise exception 'Expected Malzoni restriction';
  exception when others then
-  if sqlerrm <> 'CONTO_DEPOSITO_STRUTTURA_SOLO_MALZONI' then raise; end if;
+  if sqlerrm <> 'CONTO_DEPOSITO_STRUTTURA_NON_ABILITATO' then raise; end if;
  end;
  select count(*) into n from interventi;
  if n <> v_before then raise exception 'non-Malzoni left partial intervention'; end if;

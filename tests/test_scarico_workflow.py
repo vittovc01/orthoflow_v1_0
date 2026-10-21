@@ -95,3 +95,9 @@ def test_server_guard_rejects_a_forged_submit_before_any_write():
     with pytest.raises(Stop):
         exec(compile(ast.Module(body=[submit.body[0]],type_ignores=[]),'guard','exec'),ns)
     assert len(errors)==2 and 'struttura' in errors[0] and 'linea' in errors[1]
+
+
+@pytest.mark.parametrize('code,expected', [('9010013',True),('9010054',True),('OTHER',False),('',False),(None,False)])
+def test_structure_stock_is_available_only_for_enabled_customers(code,expected):
+    from scarico_workflow import supports_structure_stock
+    assert supports_structure_stock(code) is expected

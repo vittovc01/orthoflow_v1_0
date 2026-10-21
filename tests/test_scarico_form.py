@@ -2,7 +2,7 @@ import ast,copy,re
 from pathlib import Path
 import sys
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
-from scarico_workflow import reset_destination, destination_errors
+from scarico_workflow import reset_destination, destination_errors, supports_structure_stock
 from review_editor import canonical_values, apply_review_edits, row_errors
 from review_exports import review_csv, review_xlsx
 from datetime import date
@@ -10,7 +10,7 @@ from types import SimpleNamespace
 import pandas as pd
 s=Path('pages/_05_Scarico_Sala_AI_impl.py').read_text(); tree=ast.parse(s)
 clean=lambda v:'' if v is None or (isinstance(v,float) and pd.isna(v)) else str(v).strip()
-ns={'canonical_values':canonical_values,'reset_destination':reset_destination,'destination_errors':destination_errors,'clean':clean,'ncode':lambda v:re.sub('[^A-Z0-9]','',str(v or '').upper())}; f=next(n for n in tree.body if isinstance(n,ast.FunctionDef) and n.name=='is_other_manufacturer')
+ns={'canonical_values':canonical_values,'reset_destination':reset_destination,'destination_errors':destination_errors,'supports_structure_stock':supports_structure_stock,'clean':clean,'ncode':lambda v:re.sub('[^A-Z0-9]','',str(v or '').upper())}; f=next(n for n in tree.body if isinstance(n,ast.FunctionDef) and n.name=='is_other_manufacturer')
 exec(compile(ast.Module(body=[f],type_ignores=[]),'filter','exec'),ns)
 assert all(not ns['is_other_manufacturer'](v) for v in ['Johnson & Johnson','J&J MedTech','DePuy Synthes','NON LETTO','',None])
 assert all(ns['is_other_manufacturer'](v) for v in ['Stryker','Zimmer Biomet','Medtronic','B. Braun','Smith & Nephew'])
@@ -79,7 +79,7 @@ physical=[canonical_values(dict(label_id=f"label-{i}",codice="1504-00-126",
  lotto=f"LOT{i}",scadenza="2035-01-01",quantita=1,produttore="Synthes")) for i in range(2)]
 physical_base=copy.deepcopy(physical)
 fragment_st=FragmentST(physical)
-ns.update(st=fragment_st,rows=physical,source_rows=physical,is_physical_ai=True,is_malzoni=True,
+ns.update(st=fragment_st,rows=physical,source_rows=physical,is_physical_ai=True,has_structure_stock=True,
           selected_client={"codice_cliente":"9010013"},user=lambda:"ci-user",
           apply_review_edits=apply_review_edits,row_errors=row_errors)
 fragment=next(n for n in tree.body if isinstance(n,ast.FunctionDef) and n.name=="render_material_editor")

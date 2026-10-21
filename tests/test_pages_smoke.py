@@ -538,12 +538,13 @@ def test_structure_price_preview_and_save_clear_old_editor(backend,monkeypatch,n
             assert table.iloc[0]["prezzo"]==new_price and table.iloc[0]["totale"]==25
 
 
-def test_smart_track_flags_reach_final_discharge_after_multiple_toggles(backend,monkeypatch):
+@pytest.mark.parametrize("customer_code,customer_name", [("9010013","Malzoni"),("9010054","Ospedale C.T.O.")])
+def test_smart_track_flags_reach_final_discharge_after_multiple_toggles(backend,monkeypatch,customer_code,customer_name):
     calls=[]
     class Query:
         def __init__(self,name):self.name=name
         def execute(self):
-            return SimpleNamespace(data=[{"codice_cliente":"9010013","descrizione":"Malzoni"}] if self.name=="clienti" else [])
+            return SimpleNamespace(data=[{"codice_cliente":customer_code,"descrizione":customer_name}] if self.name=="clienti" else [])
         def __getattr__(self,name):
             assert name not in {"insert","update","delete","upsert"}
             return lambda *a,**kw:self
@@ -564,7 +565,7 @@ def test_smart_track_flags_reach_final_discharge_after_multiple_toggles(backend,
     at.run()
     assert not at.exception
     for values in [(True,False),(True,True),(False,True)]:
-        at.session_state["scarico_ai_editor_9010013_0"]={"edited_rows":{
+        at.session_state[f"scarico_ai_editor_{customer_code}_0"]={"edited_rows":{
             i:{"conto_deposito_struttura":v} for i,v in enumerate(values)},"added_rows":[],"deleted_rows":[]}
         at.run()
         assert not at.exception and not calls
