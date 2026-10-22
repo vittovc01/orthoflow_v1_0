@@ -1,4 +1,5 @@
 import io
+from shelf_scanning import shelf_url, DEFAULT_APP_URL
 import zipfile
 import pandas as pd
 import qrcode
@@ -52,7 +53,7 @@ def clean(v): return str(v or '').strip().upper()
 
 def shelf_key(mag,corsia,scaffale): return f'{clean(mag)}|{clean(corsia)}|{clean(scaffale)}'
 
-def shelf_payload(mag,corsia,scaffale): return f'OFWMS:SHELF:{shelf_key(mag,corsia,scaffale)}'
+def shelf_payload(mag,corsia,scaffale): return shelf_url(app_base,mag,corsia,scaffale)
 
 def qr_png(payload,box_size=10):
     qr=qrcode.QRCode(version=None,box_size=box_size,border=4)
@@ -97,6 +98,12 @@ require_access()
 st.title('🏷️ QR Scaffali')
 st.caption('Un solo QR identifica l’intero scaffale. Ripiani e postazioni restano nel database per indicare dove recuperare ogni prodotto.')
 
+app_base=st.text_input('Indirizzo web dell’app nei QR',value=str(st.secrets.get('PUBLIC_APP_URL') or DEFAULT_APP_URL))
+try:
+    shelf_url(app_base,'MAG','A','01')
+except ValueError as exc:
+    st.error(str(exc)); st.stop()
+st.caption('I nuovi QR aprono lo scaffale dal telefono. È necessario accedere con un account autorizzato. I vecchi QR con solo OFWMS:SHELF vanno ristampati.')
 data=shelves()
 if data.empty:
     st.info('Nessuno scaffale disponibile. Prima crea almeno una ubicazione nel WMS indicando corsia e scaffale.')

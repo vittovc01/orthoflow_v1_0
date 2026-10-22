@@ -11,6 +11,16 @@ is_director = role == "Admin" or "DIREZIONE" in permissions
 
 office_module = str(st.query_params.get('module', '')) if st.session_state.get('office_runtime') else ''
 
+# Preserve shelf links through login, without exposing warehouse data publicly.
+from shelf_scanning import shelf_target
+_requested_shelf=shelf_target(st.query_params.get('shelf',''))
+if _requested_shelf:
+    st.session_state['wms_shelf_target']=_requested_shelf
+if (not office_module and st.session_state.get('wms_shelf_target') and logged_in
+        and (is_director or 'LOGISTICA' in permissions)):
+    office_module='gestione-scaffale'
+
+
 
 def page(*args, **kwargs):
     # Open the selected module at the office root. This avoids the initial
