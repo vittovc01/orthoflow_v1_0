@@ -103,4 +103,7 @@ def test_second_product_scan_refreshes_form_ref_and_lot(monkeypatch):
     assert not at.exception
     assert field('Codice articolo Johnson').value=='04.211.016S' and field('Lotto').value=='LOT2'
     assert next(x for x in at.date_input if x.label=='Scadenza').value==date(2035,12,31)
+    next(x for x in at.button if x.label=='Nuova scansione prodotto').click().run()
+    assert not at.exception and field('Oppure inserisci/incolla il codice letto').value==''
+    assert field('Lotto').value=='' and at.session_state['shelf_scan_revision']==1
     st.cache_resource.clear();st.cache_data.clear()

@@ -1,6 +1,6 @@
 import re
 import hashlib
-from shelf_scanning import normalize_scan, parse_product, find_product_mapping, shelf_target
+from shelf_scanning import normalize_scan, parse_product, find_product_mapping, shelf_target, request_new_scan
 from datetime import date
 import pandas as pd
 import streamlit as st
@@ -157,9 +157,14 @@ c1,c2,c3=st.columns(3)
 c1.metric('Scaffale',scaffale); c2.metric('Ripiani',loc['ripiano'].nunique() if not loc.empty else 0); c3.metric('Postazioni',len(loc))
 
 st.subheader('➕ Aggiungi prodotto tramite scanner Johnson')
+if st.session_state.pop('shelf_reset_scan',False):
+    st.session_state['manual_product']=''
+if st.button('Nuova scansione prodotto'):
+    request_new_scan(st.session_state)
+    st.rerun()
 raw=''
 if qrcode_scanner is not None:
-    raw=normalize(qrcode_scanner(key=f'shelf_product_{mag}_{corsia}_{scaffale}'))
+    raw=normalize(qrcode_scanner(key=f"shelf_product_{mag}_{corsia}_{scaffale}_{st.session_state.get('shelf_scan_revision',0)}"))
 manual=st.text_input('Oppure inserisci/incolla il codice letto',key='manual_product')
 raw=raw or normalize(manual)
 
@@ -198,6 +203,7 @@ if save:
                     sb().table('codici_prodotto_scan').upsert({'codice_scansionato':parsed['raw'],'gtin':parsed['gtin'] or None,'codice_articolo':clean(codice),'descrizione':(mapped or {}).get('descrizione',''),'attivo':True},on_conflict='codice_scansionato').execute()
                 audit('AGGIUNGI_PRODOTTO_SCAFFALE',f'{mag}/{corsia}/{scaffale}/{ripiano}/{posizione}; {clean(codice)}; lotto {clean(lotto)}; qta {qty}')
                 st.success(f'Prodotto salvato: Scaffale {scaffale} → Ripiano {ripiano} → Postazione {posizione}.')
+                request_new_scan(st.session_state)
                 st.rerun()
             except Exception as e: st.error(f'Salvataggio non eseguito: {e}')
 

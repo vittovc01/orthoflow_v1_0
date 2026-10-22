@@ -69,3 +69,9 @@ def shelf_url(base,mag,corsia,scaffale):
     root=parsed._replace(query='',fragment='').geturl().rstrip('/')+'/'
     token='OFWMS:SHELF:'+'|'.join(str(x).strip().upper() for x in (mag,corsia,scaffale))
     return root+'?'+urlencode({'shelf':token})
+
+
+def request_new_scan(state):
+    """Reset the camera component on the next rerun, after widgets are released."""
+    state['shelf_scan_revision']=int(state.get('shelf_scan_revision',0))+1
+    state['shelf_reset_scan']=True
