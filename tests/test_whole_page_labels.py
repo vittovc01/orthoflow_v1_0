@@ -379,3 +379,25 @@ def test_ref_spacing_or_punctuation_difference_does_not_erase_reading():
     assert row['code']=='04.112.143S'
     assert row['ocr_reads'][1]['code']=='04.112.143 S'
     assert merge_reads([a],[dict(b,code='04.112.143')])[0]['code'] is None
+
+
+def test_complete_same_ref_lots_are_paired_before_partial_observations():
+    # The second pass swaps the boxes. Its incomplete row must not steal the
+    # complete LOT-B observation merely because its rectangle is closer.
+    a=label([10,10,200,200],lot='LOT-A')
+    b=label([10,400,200,600],lot='LOT-B')
+    partial=dict(a,bbox=b['bbox'],lot=None,expiry=None)
+    complete=dict(b,bbox=a['bbox'])
+    rows=merge_reads([a,b],[partial,complete])
+    assert len(rows)==2
+    assert sorted(r['lot'] for r in rows)==['LOT-A','LOT-B']
+    confirmed=next(r for r in rows if r['lot']=='LOT-B')
+    assert all(r['lot']=='LOT-B' for r in confirmed['ocr_reads'])
+
+
+def test_far_apart_same_ref_different_lots_are_not_forced_into_consensus():
+    uncertain=[]
+    rows=merge_reads([label([0,0,100,100],lot='LOT-A')],
+                     [label([800,800,900,900],lot='LOT-B')],uncertain)
+    assert len(rows)==1 and rows[0]['lot']=='LOT-A'
+    assert len(uncertain)==1 and uncertain[0]['lot']=='LOT-B'
