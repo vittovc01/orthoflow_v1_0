@@ -1,4 +1,6 @@
 import re
+import hashlib
+from shelf_scanning import normalize_scan, parse_product, find_product_mapping, shelf_target
 from datetime import date
 import pandas as pd
 import streamlit as st
@@ -66,37 +68,14 @@ def stock_for(loc):
     if s.empty: return s
     return s.merge(loc[['id','ripiano','posizione','codice_ubicazione']],left_on='ubicazione_id',right_on='id',how='left',suffixes=('','_loc'))
 
-def normalize(raw): return str(raw or '').strip().replace('\u001d','|')
+def normalize(raw): return normalize_scan(raw)
 
-def parse_gs1(raw):
-    value=normalize(raw)
-    result={'raw':value,'gtin':'','lotto':'','scadenza':None}
-    compact=value.removeprefix(']d2').removeprefix(']C1')
-    for ai,val in re.findall(r'\((01|10|17)\)([^()]+)',compact):
-        val=val.strip('|')
-        if ai=='01': result['gtin']=val[:14]
-        elif ai=='10': result['lotto']=val
-        elif ai=='17' and len(val)>=6:
-            try: result['scadenza']=pd.to_datetime(val[:6],format='%y%m%d').date()
-            except Exception: pass
-    if not result['gtin']:
-        m=re.search(r'01(\d{14})',compact)
-        if m: result['gtin']=m.group(1)
-    if result['scadenza'] is None:
-        m=re.search(r'17(\d{6})',compact)
-        if m:
-            try: result['scadenza']=pd.to_datetime(m.group(1),format='%y%m%d').date()
-            except Exception: pass
-    m=re.search(r'(?:^|\|)10([^|]+)',compact)
-    if m and not result['lotto']: result['lotto']=m.group(1)
-    return result
 
-def find_mapping(parsed):
-    try:
-        q=sb().table('codici_prodotto_scan').select('*')
-        rows=(q.eq('gtin',parsed['gtin']).limit(1).execute().data if parsed['gtin'] else q.eq('codice_scansionato',parsed['raw']).limit(1).execute().data) or []
-        return rows[0] if rows else None
-    except Exception: return None
+def parse_gs1(raw): return parse_product(raw)
+
+
+def find_mapping(parsed): return find_product_mapping(sb(),parsed)
+
 
 def audit(action,detail):
     try: sb().table('audit_log').insert({'utente':str(st.session_state.get('user','')),'ruolo':str(st.session_state.get('ruolo','')),'azione':action,'tabella':'WMS','dettaglio':detail}).execute()
@@ -161,7 +140,15 @@ data=shelves()
 if data.empty:
     st.info('Crea il primo scaffale dalla sezione Gestisci scaffali qui sopra.'); st.stop()
 
-idx=st.selectbox('Scaffale da gestire',range(len(data)),format_func=lambda i:shelf_label(data.iloc[i]))
+requested=shelf_target(st.session_state.get('wms_shelf_target') or st.query_params.get('shelf',''))
+if requested and st.session_state.get('wms_shelf_applied') != requested:
+    matches=[i for i in range(len(data)) if tuple(clean(data.iloc[i][k]) for k in ('codice_magazzino','corsia','scaffale'))==requested]
+    if matches:
+        st.session_state['managed_shelf_choice']=matches[0]
+    else:
+        st.warning('Lo scaffale del QR non è presente tra gli scaffali disponibili.')
+    st.session_state['wms_shelf_applied']=requested
+idx=st.selectbox('Scaffale da gestire',range(len(data)),format_func=lambda i:shelf_label(data.iloc[i]),key='managed_shelf_choice')
 r=data.iloc[idx]
 mag,corsia,scaffale=clean(r['codice_magazzino']),clean(r['corsia']),clean(r['scaffale'])
 loc=locations_for(mag,corsia,scaffale)
@@ -182,10 +169,12 @@ if raw:
     a,b,c=st.columns(3)
     a.metric('GTIN',parsed['gtin'] or 'Non letto'); b.metric('Lotto',parsed['lotto'] or 'Da confermare'); c.metric('Scadenza',str(parsed['scadenza'] or 'Da confermare'))
 
-with st.form('add_to_shelf'):
+if mapped and mapped.get('mapping_error'):
+    st.warning(mapped['mapping_error'])
+with st.form('add_to_shelf_'+hashlib.sha256(raw.encode()).hexdigest()[:12]):
     codice=st.text_input('Codice articolo Johnson',value=(mapped or {}).get('codice_articolo',''))
     lotto=st.text_input('Lotto',value=parsed.get('lotto',''))
-    scadenza=st.date_input('Scadenza',value=parsed.get('scadenza') or date.today())
+    scadenza=st.date_input('Scadenza',value=parsed.get('scadenza'))
     qty=st.number_input('Quantità',min_value=0.01,value=1.0,step=1.0)
     ripiani=sorted(loc['ripiano'].dropna().astype(str).unique().tolist()) if not loc.empty else []
     ripiano=st.selectbox('Ripiano',ripiani) if ripiani else st.text_input('Ripiano')
@@ -197,13 +186,14 @@ with st.form('add_to_shelf'):
 
 if save:
     if not clean(codice) or not clean(lotto): st.error('Codice articolo e lotto sono obbligatori.')
+    elif sterile and scadenza is None: st.error('Scadenza non letta: inseriscila prima di salvare.')
     else:
         target=loc[(loc['ripiano'].astype(str)==str(ripiano)) & (loc['posizione'].astype(str)==str(posizione))]
         if target.empty: st.error('Ripiano/postazione non configurati per questo scaffale. Creali prima nel WMS → Ubicazioni.')
         else:
             t=target.iloc[0]
             try:
-                sb().table('giacenze_ubicazioni').upsert({'ubicazione_id':int(t['id']),'codice_magazzino':mag,'codice':clean(codice),'lotto':clean(lotto),'scadenza':scadenza.isoformat(),'origine':'SCANNER_SCAFFALE','quantita':float(qty),'quantita_impegnata':0,'sterile':bool(sterile)},on_conflict='ubicazione_id,codice,lotto,origine,sterile').execute()
+                sb().table('giacenze_ubicazioni').upsert({'ubicazione_id':int(t['id']),'codice_magazzino':mag,'codice':clean(codice),'lotto':clean(lotto),'scadenza':scadenza.isoformat() if scadenza else None,'origine':'SCANNER_SCAFFALE','quantita':float(qty),'quantita_impegnata':0,'sterile':bool(sterile)},on_conflict='ubicazione_id,codice,lotto,origine,sterile').execute()
                 if raw:
                     sb().table('codici_prodotto_scan').upsert({'codice_scansionato':parsed['raw'],'gtin':parsed['gtin'] or None,'codice_articolo':clean(codice),'descrizione':(mapped or {}).get('descrizione',''),'attivo':True},on_conflict='codice_scansionato').execute()
                 audit('AGGIUNGI_PRODOTTO_SCAFFALE',f'{mag}/{corsia}/{scaffale}/{ripiano}/{posizione}; {clean(codice)}; lotto {clean(lotto)}; qta {qty}')

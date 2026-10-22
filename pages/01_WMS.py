@@ -1,4 +1,5 @@
 import io
+from shelf_scanning import parse_product, find_product_mapping
 import re
 import zipfile
 from datetime import date, timedelta
@@ -155,38 +156,7 @@ def normalize_scan(raw):
     return value
 
 
-def parse_gs1(raw):
-    """Estrae i campi GS1 più comuni. Il risultato va sempre confermato dall'operatore."""
-    value = normalize_scan(raw)
-    result = {"raw": value, "gtin": "", "lotto": "", "scadenza": None, "seriale": ""}
-    compact = value.removeprefix("]d2").removeprefix("]C1")
-
-    # Formato leggibile con parentesi: (01)...(17)...(10)...
-    for ai, val in re.findall(r"\((01|10|17|21)\)([^()]+)", compact):
-        val = val.strip("|")
-        if ai == "01": result["gtin"] = val[:14]
-        elif ai == "10": result["lotto"] = val
-        elif ai == "21": result["seriale"] = val
-        elif ai == "17" and len(val) >= 6:
-            try: result["scadenza"] = pd.to_datetime(val[:6], format="%y%m%d").date()
-            except Exception: pass
-
-    # Formato GS1 concatenato più frequente: 01 + 14 cifre, 17 + 6 cifre.
-    if not result["gtin"]:
-        match = re.search(r"01(\d{14})", compact)
-        if match: result["gtin"] = match.group(1)
-    if result["scadenza"] is None:
-        match = re.search(r"17(\d{6})", compact)
-        if match:
-            try: result["scadenza"] = pd.to_datetime(match.group(1), format="%y%m%d").date()
-            except Exception: pass
-
-    # AI variabili delimitati da FNC1, rappresentato qui con |.
-    lot_match = re.search(r"(?:^|\|)10([^|]+)", compact)
-    if lot_match and not result["lotto"]: result["lotto"] = lot_match.group(1)
-    serial_match = re.search(r"(?:^|\|)21([^|]+)", compact)
-    if serial_match and not result["seriale"]: result["seriale"] = serial_match.group(1)
-    return result
+def parse_gs1(raw): return parse_product(raw)
 
 
 def scan_widget(key, label="Scansiona codice"):
@@ -215,18 +185,7 @@ def location_from_scan(raw):
     return rows[0] if rows else None
 
 
-def find_article(scan_data):
-    raw = scan_data.get("raw", "")
-    gtin = scan_data.get("gtin", "")
-    try:
-        query = sb().table("codici_prodotto_scan").select("*")
-        if gtin:
-            rows = query.eq("gtin", gtin).limit(1).execute().data or []
-        else:
-            rows = query.eq("codice_scansionato", raw).limit(1).execute().data or []
-        return rows[0] if rows else None
-    except Exception:
-        return None
+def find_article(scan_data): return find_product_mapping(sb(),scan_data)
 
 
 require_access()
