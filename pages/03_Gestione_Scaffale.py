@@ -1,7 +1,7 @@
 import re
 import hashlib
 from shelf_scanning import normalize_scan, parse_product, find_product_mapping, shelf_target, request_new_scan
-from datetime import date
+from datetime import date, datetime
 import pandas as pd
 import streamlit as st
 from orthoflow_branding import configure_page
@@ -156,6 +156,41 @@ loc=locations_for(mag,corsia,scaffale)
 c1,c2,c3=st.columns(3)
 c1.metric('Scaffale',scaffale); c2.metric('Ripiani',loc['ripiano'].nunique() if not loc.empty else 0); c3.metric('Postazioni',len(loc))
 
+@st.fragment(run_every="30s")
+def live_shelf_inventory(mag, corsia, scaffale):
+    # Query both tables on every refresh: newly added positions and lots appear too.
+    require_access()
+    st.subheader('📦 Contenuto attuale dello scaffale')
+    st.button('Aggiorna elenco scaffale', key='refresh_shelf_inventory')
+    try:
+        current_locations = locations_for(mag, corsia, scaffale)
+        current_stock = stock_for(current_locations)
+    except Exception:
+        st.error('Impossibile aggiornare lo scaffale. Riprova con Aggiorna elenco scaffale.')
+        return
+    st.caption(f"Ultimo aggiornamento: {datetime.now().astimezone().strftime('%d/%m/%Y %H:%M:%S %Z')} · Aggiornamento automatico ogni 30 secondi mentre la pagina è aperta.")
+    st.caption('Il QR resta lo stesso. Prelievi e reintegri compaiono dopo la registrazione nell’app.')
+    if current_locations.empty:
+        st.info('Nessun ripiano o postazione attiva per questo scaffale.')
+        return
+    if current_stock.empty:
+        st.info('Lo scaffale non contiene ancora prodotti registrati.')
+    for level, positions in current_locations.groupby('ripiano', sort=True, dropna=False):
+        st.markdown(f'### Ripiano {level}')
+        for _, position in positions.sort_values('posizione').iterrows():
+            st.markdown(f"**Postazione {position['posizione']}**")
+            rows = (current_stock[current_stock['ubicazione_id'] == position['id']]
+                    if not current_stock.empty else pd.DataFrame())
+            if rows.empty:
+                st.caption('Postazione vuota')
+                continue
+            columns = [c for c in ['codice', 'descrizione', 'lotto', 'scadenza', 'quantita'] if c in rows.columns]
+            st.dataframe(rows[columns].sort_values([c for c in ['codice', 'lotto', 'scadenza'] if c in columns]),
+                         use_container_width=True, hide_index=True)
+
+live_shelf_inventory(mag, corsia, scaffale)
+st.divider()
+
 st.subheader('➕ Aggiungi prodotto tramite scanner Johnson')
 if st.session_state.pop('shelf_reset_scan',False):
     st.session_state['manual_product']=''
@@ -206,11 +241,4 @@ if save:
                 request_new_scan(st.session_state)
                 st.rerun()
             except Exception as e: st.error(f'Salvataggio non eseguito: {e}')
-
-st.divider(); st.subheader('📦 Contenuto attuale dello scaffale')
-stock=stock_for(loc)
-if stock.empty: st.info('Lo scaffale non contiene ancora prodotti registrati.')
-else:
-    cols=[c for c in ['codice','lotto','scadenza','quantita','ripiano','posizione','codice_ubicazione'] if c in stock.columns]
-    st.dataframe(stock[cols].sort_values([c for c in ['ripiano','posizione','codice'] if c in cols]),use_container_width=True,hide_index=True)
 

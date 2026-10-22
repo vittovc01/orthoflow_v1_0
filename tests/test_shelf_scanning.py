@@ -8,11 +8,13 @@ GTIN='07611819425248'
 def payload(lot):return '01'+GTIN+'17'+'351200'+'10'+lot
 
 class Query:
-    def __init__(self,db,table):self.db,self.table,self.filters=db,table,{}
+    def __init__(self,db,table):self.db,self.table,self.filters=db,table,{};self.predicates=[]
     def select(self,*a,**k):return self
     def eq(self,k,v):self.filters[k]=v;return self
+    def in_(self,k,values):self.predicates.append(lambda r:r.get(k) in values);return self
+    def gt(self,k,value):self.predicates.append(lambda r:r.get(k,0)>value);return self
     def execute(self):
-        return SimpleNamespace(data=[r for r in self.db.rows.get(self.table,[]) if all(r.get(k)==v for k,v in self.filters.items())])
+        return SimpleNamespace(data=[r for r in self.db.rows.get(self.table,[]) if all(r.get(k)==v for k,v in self.filters.items()) and all(p(r) for p in self.predicates)])
     def __getattr__(self,name):
         if name in {'insert','update','upsert','delete'}:raise AssertionError('No stock writes in scan tests')
         return lambda *a,**k:self
@@ -106,4 +108,41 @@ def test_second_product_scan_refreshes_form_ref_and_lot(monkeypatch):
     next(x for x in at.button if x.label=='Nuova scansione prodotto').click().run()
     assert not at.exception and field('Oppure inserisci/incolla il codice letto').value==''
     assert field('Lotto').value=='' and at.session_state['shelf_scan_revision']==1
+    st.cache_resource.clear();st.cache_data.clear()
+
+
+def test_live_shelf_replaces_withdrawn_lot_and_discovers_new_positions(monkeypatch):
+    import streamlit as st
+    import supabase
+    from streamlit.testing.v1 import AppTest
+    def location(id, level, position):
+        return dict(id=id,codice_magazzino='MAG1',corsia='A',scaffale='01',
+                    ripiano=level,posizione=position,codice_ubicazione=f'MAG1-A-01-{level}-{position}',attiva=True)
+    db=Backend({'v_wms_scaffali':[{'codice_magazzino':'MAG1','corsia':'A','scaffale':'01'}],
+                'ubicazioni_magazzino':[location(1,'A','01'),location(2,'A','02')],
+                'giacenze_ubicazioni':[
+                    dict(ubicazione_id=1,codice='REF1',lotto='OLD',scadenza='2030-01-01',quantita=1),
+                    dict(ubicazione_id=999,codice='OTHER-SHELF',lotto='OUTSIDE',quantita=5)]})
+    link=shelf_url('https://example.org','MAG1','A','01')
+    st.cache_resource.clear();st.cache_data.clear()
+    monkeypatch.setattr(supabase,'create_client',lambda *a,**k:db)
+    at=AppTest.from_file(Path(__file__).resolve().parents[1]/'pages/03_Gestione_Scaffale.py',default_timeout=30)
+    at.secrets['SUPABASE_URL']='http://localhost:1';at.secrets['SUPABASE_SERVICE_KEY']='test'
+    at.session_state['user']='test';at.session_state['ruolo']='Admin';at.session_state['permessi']=[]
+    at.run()
+    assert not at.exception
+    assert len(at.dataframe)==1 and at.dataframe[0].value['lotto'].tolist()==['OLD']
+    assert any(x.value=='Postazione vuota' for x in at.caption)
+    # Simulate movements recorded by another operator, including a new position.
+    db.rows['giacenze_ubicazioni'][0]['quantita']=0
+    db.rows['ubicazioni_magazzino'].append(location(3,'B','03'))
+    db.rows['giacenze_ubicazioni'].append(dict(ubicazione_id=3,codice='REF1',lotto='NEW',scadenza='2032-02-01',quantita=2))
+    next(b for b in at.button if b.label=='Aggiorna elenco scaffale').click().run()
+    assert not at.exception
+    assert len(at.dataframe)==1
+    assert at.dataframe[0].value['lotto'].tolist()==['NEW']
+    assert at.dataframe[0].value['quantita'].tolist()==[2]
+    labels=[x.value for x in at.markdown]
+    assert '### Ripiano B' in labels and '**Postazione 03**' in labels
+    assert shelf_url('https://example.org','MAG1','A','01')==link
     st.cache_resource.clear();st.cache_data.clear()
