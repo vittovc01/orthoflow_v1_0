@@ -142,7 +142,7 @@ def test_duplicate_document_does_not_duplicate_usage():
     assert [d['status'] for d in result['documents']]==['analyzed','duplicate']
 
 
-@pytest.mark.parametrize('model',['gpt-5.4-mini','gpt-6.1-sol'])
+@pytest.mark.parametrize('model',['gpt-5.4-mini'])
 def test_mini_second_read_is_rotated_full_page_and_restores_coordinates(tmp_path,monkeypatch,model):
     import base64
     path=tmp_path/'vertical.png'
@@ -169,3 +169,23 @@ def test_sol_standard_cost_counts_both_reads():
     result=response_usage({'usage':usage()},'gpt-6.1-sol')
     assert result['estimated_cost_usd']==pytest.approx(.0381)
     assert usage_totals([result,result])['estimated_cost_usd']==pytest.approx(.0762)
+
+
+def test_sol_uses_astra_native_full_page_view_for_both_reads(tmp_path,monkeypatch):
+    import base64
+    path=tmp_path/'native.png'
+    page=Image.new('RGB',(80,160),'white');page.putpixel((0,0),(255,0,0));page.save(path)
+    monkeypatch.setattr('whole_page_labels.optional_product_regions',lambda page:([],False))
+    monkeypatch.setattr('whole_page_labels.page_barcode_evidence',lambda page:[])
+    calls=[]
+    def create(**kwargs):
+        content=kwargs['input'][0]['content']
+        image=Image.open(BytesIO(base64.b64decode(content[1]['image_url'].split(',')[1])))
+        assert image.size==(80,160) and image.getpixel((0,0))==(255,0,0)
+        assert kwargs['model']=='gpt-6.1-sol' and kwargs['service_tier']=='default'
+        calls.append(content[0]['text'])
+        return response([label([100,100,300,400])])
+    result=analyze_labels(path,SimpleNamespace(responses=SimpleNamespace(create=create)),
+                          'gpt-6.1-sol',{},lambda x:x)
+    assert len(calls)==2 and sum('Seconda lettura' in p for p in calls)==1
+    assert len(result['items'])==1 and result['items'][0]['code']

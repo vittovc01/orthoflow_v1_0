@@ -143,15 +143,28 @@ def merge_reads(first, second, uncertain=None):
     if quality(second) > quality(first):
         first, second = second, first
     matched, used = {}, set()
+    # Pair complete matching identities before weaker REF/geometry matches.
+    # Otherwise a partial observation can consume the only corroborating read
+    # for a different physical sticker sharing the same REF.
+    complete_pairs = sorted(((spatial_score(a['bbox'], b['bbox']), i, j)
+        for i, a in enumerate(first) for j, b in enumerate(second)
+        if all(identity(a)) and identity(a) == identity(b)), reverse=True)
+    for _, i, j in complete_pairs:
+        if i not in matched and j not in used:
+            matched[i] = j
+            used.add(j)
     # Match equal REF occurrences one-to-one even when model boxes drift.
     # Preserve multiplicity: matching two identical screws still yields two rows.
     codes = {r.get('code') for r in first if r.get('code')}
     for code in codes:
         left = [i for i,r in enumerate(first) if r.get('code') == code]
         right = [j for j,r in enumerate(second) if r.get('code') == code]
-        pairs = sorted(((int(identity(first[i]) == identity(second[j])),
+        pairs = sorted(((int(bool(first[i].get('lot')) and first[i].get('lot') == second[j].get('lot')),
                          spatial_score(first[i]['bbox'],second[j]['bbox']),i,j)
-                        for i in left for j in right), reverse=True)
+                        for i in left for j in right
+                        if not (first[i].get('lot') and second[j].get('lot')
+                                and first[i]['lot'] != second[j]['lot']
+                                and spatial_score(first[i]['bbox'],second[j]['bbox']) < .35)), reverse=True)
         for _,score,i,j in pairs:
             if i not in matched and j not in used:
                 matched[i] = j
@@ -288,8 +301,9 @@ def _analyze_labels(path, client, model, item_schema, parse, executor, readers):
         # Keep native scans below those limits; only oversized pages are scaled.
         read_page = prepare_page(page, patch_budget=10000, max_dimension=6000) if active_model == 'gpt-5.4-mini' else prepare_page(page)
         page_url = image_url(read_page)
-        # Mini sees a second orientation of the entire document, without crops.
-        rotated_page = read_page.transpose(Image.Transpose.ROTATE_270) if active_model in {'gpt-5.4-mini','gpt-6.1-sol'} else None
+        # Sol uses the same native full-page view as Astra for both independent reads.
+        # Only the legacy mini reader uses the rotated-page experiment.
+        rotated_page = read_page.transpose(Image.Transpose.ROTATE_270) if active_model == 'gpt-5.4-mini' else None
         second_url = image_url(rotated_page) if rotated_page is not None else page_url
         if rotated_page is not None:
             rotated_page.close()
@@ -306,7 +320,7 @@ def _analyze_labels(path, client, model, item_schema, parse, executor, readers):
                     api_usage.append(dict(usage, page=number, read=attempt+1))
                 response = parse(raw_response)
                 observed = observations(response)
-                if attempt == 1 and active_model in {'gpt-5.4-mini','gpt-6.1-sol'}:
+                if attempt == 1 and rotated_page is not None:
                     observed = restore_rotated_observations(observed)
                 reads.append(observed)
                 if response.get('warning'):
