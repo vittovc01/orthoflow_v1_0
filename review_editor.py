@@ -81,15 +81,21 @@ def row_errors(row):
         problems.append('REF mancante')
     elif not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9. /-]*',code) or re.fullmatch(r'\d{14}',code):
         problems.append('REF non valido')
-    if not lot:
+    no_lot = row['senza_lotto']
+    sterile = text_value(row.get('is_sterile')).lower() in {'true','1'} or code.endswith('S')
+    if no_lot and sterile:
+        problems.append('materiale sterile: senza lotto non ammesso')
+    if no_lot and lot:
+        problems.append('senza lotto selezionato ma lotto presente')
+    if not lot and not no_lot:
         problems.append('lotto mancante')
     elif len(lot)>20 or any(ord(c)<32 for c in lot):
         problems.append('lotto non valido')
     from ocr_review import normalize_expiry
     expiry, precision = normalize_expiry(row['scadenza'])
-    if not row['scadenza']:
+    if not row['scadenza'] and not no_lot:
         problems.append('scadenza mancante')
-    elif not expiry or precision!='day':
+    elif row['scadenza'] and (not expiry or precision!='day'):
         problems.append('scadenza non valida: indicare giorno, mese e anno')
     if quantity_value(row['quantita']) is None:
         problems.append('quantità non valida: inserire un intero maggiore di zero')
@@ -162,8 +168,6 @@ def apply_review_edits(originals, edits, *, actor, timestamp=None):
             row['quantity']=row['quantita']=quantity
         for name in ('escludi_riga','senza_lotto','conto_deposito_struttura','jnj_verificato_manualmente'):
             row[name]=text_value(row.get(name)).lower() in {'true','1'}
-        if row['lotto']:
-            row['senza_lotto']=False
         fields=set(row.get('manual_fields') or [])
         for field in sorted(EDITABLE):
             before=base.get(field)

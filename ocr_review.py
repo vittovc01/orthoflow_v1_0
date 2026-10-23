@@ -230,7 +230,7 @@ def aggregate_review(rows):
         if problems:raise ValueError('; '.join(problems))
         expiry, precision = normalize_expiry(row.get('expiry'))
         quantity=quantity_value(row.get('quantita',row.get('quantity',1)))
-        key = (str(row['code']).strip(),str(row['lot']).strip())
+        key = (str(row['code']).strip(),str(row['lot'] or '').strip())
         if key in groups:
             if groups[key]['expiry']!=expiry:
                 raise ValueError(f'{row_name(row)}: Scadenze discordanti, correggere la riga')

@@ -91,7 +91,7 @@ class SupabaseReviewRepository:
             raise ValueError('Rianalizza il documento con la versione privacy aggiornata')
         originals = {r['label_id']: r for r in original_rows}
         fields = {'label_id','code','lot','expiry','description','gtin','quantity','quantita',
-                  'manual_entry','manual_fields','escludi_riga','verificata','reviewed',
+                  'manual_entry','manual_fields','escludi_riga','verificata','reviewed','senza_lotto','is_sterile',
                   'page','bbox','rotation','source_document'}
         def product(row):
             return {k:v for k,v in canonical_item(row).items() if k in fields}
