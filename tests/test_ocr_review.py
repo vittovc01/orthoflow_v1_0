@@ -317,3 +317,11 @@ def test_archive_upload_failure_does_not_insert_review():
     with pytest.raises(RuntimeError,match='Archivio foto non completato'):
         SupabaseReviewRepository(client).save_confirmed(**args)
     assert not client.records
+
+
+def test_nonsterile_product_archive_retains_explicit_no_lot_confirmation():
+    client=FakeClient();args=product_archive_arguments()
+    for item in args['confirmed']:
+        item.update(code='440.037',codice='440.037',lotto='',lot='',scadenza='',expiry='',senza_lotto=True,is_sterile=False)
+    saved=SupabaseReviewRepository(client).save_product_review(**args)
+    assert saved['confirmed'][0]['senza_lotto'] is True

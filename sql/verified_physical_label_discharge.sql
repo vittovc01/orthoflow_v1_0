@@ -47,12 +47,13 @@ begin
      if lower(coalesce(trim(r->>'codice'),'')) in ('','nan','null','none','<na>') then
        raise exception '%: REF mancante',v_label;
      end if;
-     if lower(coalesce(trim(r->>'lotto'),'')) in ('','nan','null','none','<na>') then
+     if not coalesce((r->>'senza_lotto')::boolean,false) and lower(coalesce(trim(r->>'lotto'),'')) in ('','nan','null','none','<na>') then
        raise exception '%: lotto mancante',v_label;
      end if;
      if length(r->>'lotto')>20 or r->>'lotto' ~ '[[:cntrl:]]' then
        raise exception '%: lotto non valido',v_label;
      end if;
+     if not coalesce((r->>'senza_lotto')::boolean,false) or nullif(r->>'scadenza','') is not null then
      if coalesce(r->>'scadenza','') !~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}$' then
        raise exception '%: scadenza mancante o non valida (AAAA-MM-GG)',v_label;
      end if;
@@ -61,6 +62,7 @@ begin
      exception when invalid_datetime_format or datetime_field_overflow then
        raise exception '%: scadenza non valida',v_label;
      end;
+     end if;
    end if;
    if v_simple then
      -- Quantity is editable; keep its server-side trace tied to real review rows.
@@ -76,14 +78,15 @@ begin
         or exists(select 1 from jsonb_array_elements(p_header->'label_manifest') m
           where m->>'label_id' in (select jsonb_array_elements_text(r->'label_ids'))
           and (m->>'codice' is distinct from r->>'codice' or m->>'lotto' is distinct from r->>'lotto'
-            or m->>'scadenza' is distinct from r->>'scadenza'
+            or nullif(m->>'scadenza','') is distinct from nullif(r->>'scadenza','')
+            or coalesce((m->>'senza_lotto')::boolean,false) is distinct from coalesce((r->>'senza_lotto')::boolean,false)
             or coalesce((m->>'esclusa')::boolean,false)
             or coalesce((m->>'quantita')::numeric,0)<=0
             or trunc((m->>'quantita')::numeric)<>(m->>'quantita')::numeric)) then
        raise exception '%: quantità o dati diversi dalla revisione confermata',v_label;
      end if;
-     if coalesce(trim(r->>'lotto'),'')='' then raise exception '%: lotto mancante',v_label; end if;
-     if nullif(r->>'scadenza','') is null then raise exception '%: scadenza mancante',v_label; end if;
+     if not coalesce((r->>'senza_lotto')::boolean,false) and coalesce(trim(r->>'lotto'),'')='' then raise exception '%: lotto mancante',v_label; end if;
+     if not coalesce((r->>'senza_lotto')::boolean,false) and nullif(r->>'scadenza','') is null then raise exception '%: scadenza mancante',v_label; end if;
      if coalesce(trim(p_utente),'')='' then raise exception 'Utente della revisione mancante'; end if;
    end if;
    if coalesce(trim(r->>'codice'),'')='' or r->>'codice' ~ '^[0-9]{14}$'
@@ -97,7 +100,7 @@ begin
       and r->>'codice' ~ '^([0-9]{2}\.[0-9]{3}\.[0-9]{3}|[0-9]{3}\.[0-9]{3})5?$' then
      raise exception 'REF_STERILE_SENZA_SUFFISSO_VERIFICATO';
    end if;
-   if coalesce((r->>'is_sterile')::boolean,false) and coalesce((r->>'senza_lotto')::boolean,false) then
+   if (coalesce((r->>'is_sterile')::boolean,false) or upper(trim(r->>'codice')) like '%S') and coalesce((r->>'senza_lotto')::boolean,false) then
      raise exception 'STERILE_SENZA_LOTTO_NON_AMMESSO';
    end if;
    if not coalesce((r->>'senza_lotto')::boolean,false)

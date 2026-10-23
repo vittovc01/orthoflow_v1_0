@@ -157,3 +157,22 @@ def test_recovery_button_updates_existing_session_and_audits_without_reanalysis(
     assert state['scarico_ai_rows'][0]['label_id']=='one'
     assert state['scarico_editor_revision']==1
     assert state['scarico_correction_log'][0]['method']=='manuale'
+
+
+def test_explicit_nonsterile_without_lot_or_expiry_can_be_confirmed():
+    item=row();item.update(lotto='',scadenza='',senza_lotto=True)
+    updated,logs=apply_review_edits([row()],[item],actor='operator')
+    assert not review_errors(updated,['one'],1,True)
+    assert any(l['field']=='senza_lotto' and l['corrected'] is True for l in logs)
+    from ocr_review import validate_confirmation
+    groups=validate_confirmation({'items':updated},updated,physical_count=1,count_verified=True,actor='operator')
+    assert groups[0]['lot']=='' and groups[0]['expiry'] is None
+
+
+@pytest.mark.parametrize('changes',[
+    {'senza_lotto':False}, {'is_sterile':True}, {'codice':'413.016S'},
+    {'lotto':'REAL-LOT'}, {'scadenza':'2035-02-31'}, {'quantita':0},
+])
+def test_nonsterile_flag_cannot_hide_invalid_or_sterile_rows(changes):
+    item=row();item.update(lotto='',scadenza='',senza_lotto=True);item.update(changes)
+    assert row_errors(item)

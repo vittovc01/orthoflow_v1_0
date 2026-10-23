@@ -638,7 +638,7 @@ def render_material_editor():
             editor_rows = baseline["rows"]
         df_rows = pd.DataFrame(editor_rows)
         if is_physical_ai and "label_id" not in df_rows: df_rows["label_id"] = pd.Series(dtype="object")
-        preferred = ["codice", "lotto", "scadenza", "descrizione", "quantita", "escludi_riga", "senza_lotto", "jnj_verificato_manualmente"]
+        preferred = ["codice", "senza_lotto", "lotto", "scadenza", "descrizione", "quantita", "escludi_riga", "jnj_verificato_manualmente"]
         if "escludi_riga" not in df_rows:
             df_rows["escludi_riga"] = False
         df_rows["senza_lotto"] = df_rows.get("senza_lotto", pd.Series(False, index=df_rows.index)).fillna(False).astype(bool)
@@ -652,7 +652,7 @@ def render_material_editor():
             preferred.insert(1, "conto_deposito_struttura")
             st.info("Spunta “Conto deposito struttura” per il materiale di proprietà della struttura. Prezzi, fatturato e ordini restano inclusi; queste righe non scaricano la vostra giacenza.")
         if is_physical_ai:
-            preferred = ["label_id", "esito"] + [c for c in preferred if c!="senza_lotto"]
+            preferred = ["label_id", "esito"] + preferred
             df_rows["esito"] = ["🔴 "+"; ".join(row_errors(r)) if row_errors(r) else "" for r in rows]
         editor_frame=df_rows[preferred]
         if is_physical_ai:
@@ -1065,6 +1065,7 @@ if confirm or archive_review:
             "quantita": r.get("quantita"),
             "codice": clean(r.get("codice")), "lotto": clean(r.get("lotto")),
             "scadenza": clean(r.get("scadenza")),
+            "senza_lotto": bool(r.get("senza_lotto", False)),
             "scadenza_originale": originals.get(r.get("label_id"), {}).get("scadenza_originale"),
             "verificata": bool(r.get("verificata")),
             "evidenze_estratte": without_images(originals.get(r.get("label_id"), {})),
