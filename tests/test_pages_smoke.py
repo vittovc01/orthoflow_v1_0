@@ -164,7 +164,7 @@ def test_material_list_exports_and_catalogue_snapshot_without_technical_noise(ba
     assert not any('GTIN' in c.value or 'catalogo' in c.value for c in at.caption)
     assert not any(e.label.startswith(('Da confermare','⚠️ Da verificare')) for e in at.expander)
     assert len(at.dataframe) == 1, 'show only the editable material list by default'
-    assert list(at.dataframe[0].value.columns)[2:7] == ['codice','lotto','scadenza','descrizione','quantita']
+    assert list(at.dataframe[0].value.columns)[2:8] == ['codice','senza_lotto','lotto','scadenza','descrizione','quantita']
     assert {'Scarica lista Excel','Scarica lista CSV'} <= downloads.keys()
     reads = backend.reads.count('articoli_gtin')
     editor_key = 'scarico_ai_editor__0'
