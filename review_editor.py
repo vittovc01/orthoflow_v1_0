@@ -185,3 +185,12 @@ def apply_review_edits(originals, edits, *, actor, timestamp=None):
         if key not in seen:
             record(key,'delete','row',{a:row.get(a) for a in ALIASES.values()},None)
     return output, logs
+
+
+def set_row_excluded(rows, label_id, excluded, *, actor):
+    """Explicit operator decision; preserve the observation and audit the change."""
+    if not label_id or sum(r.get('label_id') == label_id for r in rows) != 1:
+        raise ValueError('Riga da verificare non corrispondente alla lista')
+    edits = [dict(r, escludi_riga=bool(excluded)) if r.get('label_id') == label_id else dict(r)
+             for r in rows]
+    return apply_review_edits(rows, edits, actor=actor)
