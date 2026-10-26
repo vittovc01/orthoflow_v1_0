@@ -100,12 +100,9 @@ jobs:
           --health-retries 10
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
-      - name: Client PostgreSQL 15 (stessa versione del servizio)
-        run: |
-          sudo apt-get update -qq && sudo apt-get install -y postgresql-client-15
-          echo "/usr/lib/postgresql/15/bin" >> "$GITHUB_PATH"
       - name: Test SQL su database temporaneo
-        run: bash tests/run_database_tests.sh
+        # Use the same client/server image, independent of runner apt defaults.
+        run: docker run --rm --network host --volume "$GITHUB_WORKSPACE:/workspace:ro" --workdir /workspace postgres:15 bash tests/run_database_tests.sh
 
       - name: Prova ripristino backup su database isolato
-        run: bash tests/backup_restore.sh
+        run: docker run --rm --network host --volume "$GITHUB_WORKSPACE:/workspace:ro" --workdir /workspace postgres:15 bash tests/backup_restore.sh
