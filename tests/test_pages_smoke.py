@@ -164,7 +164,8 @@ def test_material_list_exports_and_catalogue_snapshot_without_technical_noise(ba
     assert not any('GTIN' in c.value or 'catalogo' in c.value for c in at.caption)
     assert not any(e.label.startswith(('Da confermare','⚠️ Da verificare')) for e in at.expander)
     assert len(at.dataframe) == 1, 'show only the editable material list by default'
-    assert list(at.dataframe[0].value.columns)[2:8] == ['codice','senza_lotto','lotto','scadenza','descrizione','quantita']
+    assert list(at.dataframe[0].value.columns)[1] == 'escludi_riga'
+    assert list(at.dataframe[0].value.columns)[3:9] == ['codice','senza_lotto','lotto','scadenza','descrizione','quantita']
     assert {'Scarica lista Excel','Scarica lista CSV'} <= downloads.keys()
     reads = backend.reads.count('articoli_gtin')
     editor_key = 'scarico_ai_editor__0'
@@ -626,3 +627,44 @@ def test_intervention_editor_preserves_hospital_ownership(code,backend,monkeypat
     editor=next(d for d in at.dataframe if 'conto_deposito_struttura' in d.value.columns)
     assert bool(editor.value.iloc[0]['conto_deposito_struttura']) is True
     assert editor.value.iloc[0]['totale']==20
+
+
+def test_four_labels_and_extra_blank_detection_can_be_explicitly_excluded_and_saved(backend,monkeypatch):
+    from label_pipeline import PIPELINE_VERSION
+    calls=[]
+    def rpc(name,args):
+        calls.append((name,args))
+        return SimpleNamespace(execute=lambda:SimpleNamespace(data={'intervento_id':123,'righe':4,'totale':0}))
+    monkeypatch.setitem(backend.__dict__,'rpc',rpc)
+    at=app()
+    at.session_state['user']='ci-user';at.session_state['ruolo']='Admin';at.session_state['permessi']=['DIREZIONE']
+    at.run()
+    at.session_state['scarico_source']='AI'
+    at.session_state['scarico_ai_meta']={'pipeline_version':PIPELINE_VERSION}
+    items=[dict(label_id=f'label-{i}',codice=f'TEST-{i}',lotto=f'LOT-{i}',
+                scadenza='2035-01-01',quantita=1) for i in range(4)]
+    items.insert(1,dict(label_id='extra',codice='',lotto='',scadenza='',quantita=1))
+    at.session_state['scarico_ai_rows']=items
+    at.switch_page('pages/05_Scarico_Sala_AI.py').run()
+    assert not at.exception and any('REF mancante' in e.value for e in at.error)
+    # The operator sees the extra detection before horizontally scrolling the table.
+    assert any('rilevamenti in più' in w.value for w in at.warning)
+    next(b for b in at.button if b.label=='Escludi riga 2: non è materiale da scaricare').click().run()
+    assert not at.exception and not at.error and not calls
+    assert len(at.session_state['scarico_ai_rows'])==5
+    assert at.session_state['scarico_ai_rows'][1]['escludi_riga'] is True
+    assert next(n for n in at.number_input if n.label.startswith('Numero di etichette')).value==4
+    next(s for s in at.selectbox if s.label=='Struttura / cliente').select_index(0)
+    next(s for s in at.selectbox if s.label=='Linea').select('PROTESICA')
+    at.run()
+    # Count disagreement remains an advisory even after explicit exclusion.
+    next(n for n in at.number_input if n.label.startswith('Numero di etichette')).set_value(5)
+    next(c for c in at.checkbox if c.label.startswith('Ho controllato REF')).check()
+    next(b for b in at.button if b.label=='📤 Crea intervento e scarica materiali').click().run()
+    assert not at.exception
+    _,args=next((name,args) for name,args in calls if name=='crea_intervento_scarico_ai_verificato_v2')
+    assert len(args['p_rows'])==4 and sum(r['quantita'] for r in args['p_rows'])==4
+    assert args['p_header']['count_difference']==1
+    assert 'extra' not in args['p_header']['included_label_ids']
+    assert next(m for m in args['p_header']['label_manifest'] if m['label_id']=='extra')['esclusa'] is True
+    assert any(l['field']=='escludi_riga' and l['corrected'] is True for l in args['p_header']['correction_log'])

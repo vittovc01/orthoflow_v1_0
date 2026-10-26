@@ -176,3 +176,23 @@ def test_explicit_nonsterile_without_lot_or_expiry_can_be_confirmed():
 def test_nonsterile_flag_cannot_hide_invalid_or_sterile_rows(changes):
     item=row();item.update(lotto='',scadenza='',senza_lotto=True);item.update(changes)
     assert row_errors(item)
+
+
+def test_extra_blank_observation_requires_explicit_exclusion_and_is_audited():
+    from review_editor import set_row_excluded
+    from ocr_review import validate_confirmation
+    originals=[row(str(i)) for i in range(4)]
+    originals.append(dict(label_id='extra',codice='',lotto='',scadenza='',quantita=1))
+    assert review_errors(originals,[r['label_id'] for r in originals],4,True)
+    updated,logs=set_row_excluded(originals,'extra',True,actor='operator')
+    assert not originals[-1].get('escludi_riga')
+    assert len(updated)==5 and expected_label_count(updated)==4
+    assert not review_errors(updated,[r['label_id'] for r in originals],4,True)
+    saved=validate_confirmation({'items':originals},updated,physical_count=4,count_verified=True,actor='operator')
+    assert sum(r['quantity'] for r in saved)==4
+    change=next(l for l in logs if l['field']=='escludi_riga')
+    assert change['original'] is False and change['corrected'] is True
+    assert change['method']=='manuale' and change['user']=='operator' and change['timestamp']
+    restored,_=set_row_excluded(updated,'extra',False,actor='operator')
+    assert row_errors(restored[-1])
+    with pytest.raises(ValueError):set_row_excluded(originals,'unknown',True,actor='operator')

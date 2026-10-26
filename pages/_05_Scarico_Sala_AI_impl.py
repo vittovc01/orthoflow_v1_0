@@ -13,7 +13,7 @@ from whole_page_runtime import refresh_ocr_modules
 refresh_ocr_modules()
 from ocr_review import build_review, aggregate_review, merge_confirmed_fields
 from review_editor import (apply_review_edits, row_errors, row_name, expected_label_count as initial_label_count,
-                           count_warning, catalogue_warning, canonical_values, text_value, quantity_value)
+                           count_warning, catalogue_warning, canonical_values, text_value, quantity_value, set_row_excluded)
 from ocr_service import analyze_documents
 from ocr_costs import usage_totals
 from scarico_workflow import reset_destination, destination_errors, stock_snapshot, stock_quantities, supports_structure_stock
@@ -624,6 +624,23 @@ def render_material_editor():
         st.divider()
         st.subheader("✅ Lista materiali riconosciuti")
         st.caption("Modifica REF, lotto, scadenza, descrizione e quantità direttamente nella lista. Puoi aggiungere o eliminare righe; quelle escluse non vengono scaricate né esportate.")
+        if is_physical_ai:
+            incomplete = [(i, r) for i, r in enumerate(rows, 1) if row_errors(r)]
+            if incomplete:
+                st.warning('Verifica le righe incomplete: potrebbero essere etichette illeggibili oppure rilevamenti in più. '
+                           'Se una riga non corrisponde a materiale da scaricare, escludila qui sotto; '
+                           'potrai salvare le altre righe dopo la conferma finale.')
+                for number, item in incomplete:
+                    st.caption(f"Riga {number} · {row_name(item)}")
+                    if st.button(f"Escludi riga {number}: non è materiale da scaricare",
+                                 key=f"exclude_detection_{item['label_id']}"):
+                        updated, corrections = set_row_excluded(
+                            st.session_state.get('scarico_ai_rows', []), item['label_id'], True, actor=user())
+                        st.session_state['scarico_ai_rows'] = updated
+                        st.session_state.setdefault('scarico_correction_log', []).extend(corrections)
+                        st.session_state['scarico_editor_revision'] = int(st.session_state.get('scarico_editor_revision', 0)) + 1
+                        st.rerun()
+            st.caption('La colonna “Escludi riga” è all’inizio della tabella. Puoi togliere la spunta per recuperare una riga esclusa.')
         editor_rows = rows
         if is_physical_ai:
             baseline_identity = (
@@ -652,7 +669,7 @@ def render_material_editor():
             preferred.insert(1, "conto_deposito_struttura")
             st.info("Spunta “Conto deposito struttura” per il materiale di proprietà della struttura. Prezzi, fatturato e ordini restano inclusi; queste righe non scaricano la vostra giacenza.")
         if is_physical_ai:
-            preferred = ["label_id", "esito"] + preferred
+            preferred = ["label_id", "escludi_riga", "esito"] + [c for c in preferred if c != "escludi_riga"]
             df_rows["esito"] = ["🔴 "+"; ".join(row_errors(r)) if row_errors(r) else "" for r in rows]
         editor_frame=df_rows[preferred]
         if is_physical_ai:
@@ -670,7 +687,7 @@ def render_material_editor():
                 "esito": st.column_config.TextColumn("Campi da correggere"),
                 "jnj_verificato_manualmente": None,
                 "escludi_riga": st.column_config.CheckboxColumn(
-                    "Escludi riga", default=False,
+                    "Escludi riga", default=False, width="small",
                     help="La riga non verrà salvata e non genererà fatturato, ordini o movimenti di magazzino."),
                 "codice": st.column_config.TextColumn("Codice Johnson/REF"),
                 "senza_lotto": st.column_config.CheckboxColumn("Non sterile / senza lotto", default=False,
@@ -862,7 +879,7 @@ with st.form("scarico_ai_confirm"):
         value=initial_label_count(rows), key=f"physical_count_{st.session_state.get('scarico_editor_revision', 0)}") if is_physical_ai else 0
     if is_physical_ai:
         notice=count_warning(rows,expected_label_count)
-        if notice:st.warning(notice)
+        if notice:st.warning(notice + " Il conteggio diverso non blocca il salvataggio dopo la tua conferma. Escludi dalla lista eventuali righe rilevate in più.")
         duplicate_candidates=build_review({"items":source_rows}).get("cross_photo_candidates",[])
         if duplicate_candidates:
             st.warning("Stesso REF e lotto in foto diverse: escludi le ripetizioni dello stesso pezzo e mantieni le etichette fisiche distinte prima di confermare.")
