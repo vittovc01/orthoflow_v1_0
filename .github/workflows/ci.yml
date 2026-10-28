@@ -35,7 +35,7 @@ jobs:
       - name: Compilazione di tutti i file Python
         run: python -m compileall -q -x '(^|/)(\.git|\.venv|venv)/' .
       - name: Regressione etichette fisiche, GS1 e blocchi scarico
-        run: python -m pytest -q tests/test_shelf_scanning.py tests/test_mini_reader.py tests/test_scarico_workflow.py tests/test_pdf_render_memory.py tests/test_label_pipeline.py tests/test_whole_page_labels.py tests/test_ai_failures.py tests/test_ocr_review.py tests/test_gtin_catalog_import.py tests/test_review_editor.py tests/test_review_exports.py tests/test_staging_identity.py
+        run: python -m pytest -q tests/test_shelf_scanning.py tests/test_mini_reader.py tests/test_scarico_workflow.py tests/test_pdf_render_memory.py tests/test_label_pipeline.py tests/test_whole_page_labels.py tests/test_ai_failures.py tests/test_ocr_review.py tests/test_gtin_catalog_import.py tests/test_review_editor.py tests/test_review_exports.py tests/test_staging_identity.py tests/test_jj_closures.py tests/test_jj_page.py
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: '22'
@@ -45,6 +45,7 @@ jobs:
           python catalog_import.py tests/fixtures/gtin_catalog_minimal.csv --source-version ci --payload /tmp/catalog-payload.json
           node tools/gtin-staging/run.mjs /tmp/catalog-payload.json /tmp/gtin-staging /tmp/gtin-report.json
           node tools/gtin-staging/test-review.mjs
+          node tools/gtin-staging/test-jj-closures.mjs
       - name: Test scarico e filtro produttori
         run: python tests/test_scarico_form.py
       - name: Smoke test delle pagine reali
