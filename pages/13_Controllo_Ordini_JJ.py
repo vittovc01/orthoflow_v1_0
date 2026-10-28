@@ -94,14 +94,14 @@ if up and st.button("Importa / aggiorna J&J",type="primary"):
  except Exception as e: st.error(f"Import non riuscito: {e}")
 inter=get("interventi"); rig=get("righe_intervento"); ordj=get("ordini_johnson")
 if not ordj.empty:
- ordj["fase"]=ordj.apply(lambda x: "✅ CHIUSO" if pd.notna(x.get("chiuso_at")) else ("🧾 FATTURATO" if pd.notna(x.get("numero_fattura")) else "⏳ DA FATTURARE"),axis=1)
+ ordj["fase"]=ordj.apply(lambda x: "✅ CHIUSO" if pd.notna(x.get("chiuso_at")) else ("🧾 FATTURA PRESENTE" if pd.notna(x.get("numero_fattura")) else "🔎 FATTURA DA VERIFICARE"),axis=1)
  st.subheader("📅 Ciclo mensile J&J")
  _o=ordj.copy(); _o["mese_competenza"]=pd.to_datetime(_o["mese_competenza"],errors="coerce")
  _open=_o[_o["chiuso_at"].isna()]
- m1,m2,m3=st.columns(3); m1.metric("Da fatturare",int((_open["fase"]=="⏳ DA FATTURARE").sum())); m2.metric("Fatturati da chiudere",int((_open["fase"]=="🧾 FATTURATO").sum())); m3.metric("Aperti / riporto",len(_open))
+ m1,m2,m3=st.columns(3); m1.metric("Fattura da verificare",int((_open["fase"]=="🔎 FATTURA DA VERIFICARE").sum())); m2.metric("Fattura acquisita, da abbinare",int((_open["fase"]=="🧾 FATTURA PRESENTE").sum())); m3.metric("Aperti / riporto",len(_open))
  _cols=[x for x in ["numero_ordine","data_ordine","numero_fattura","data_fattura","stato_johnson","importo","mese_competenza","riportato_da_mese","fase","note_anomalia"] if x in _open]
  st.dataframe(_open[_cols].sort_values("data_ordine",ascending=False),use_container_width=True,hide_index=True)
- st.caption("A fine mese si chiudono solo le posizioni completamente riconciliate. Residui, ordini non fatturati e anomalie di prezzo restano aperti per il mese successivo.")
+ st.caption("A fine mese si chiudono solo le posizioni completamente riconciliate. Residui, ordini senza fattura acquisita e anomalie di prezzo restano aperti per il mese successivo.")
 if inter.empty: st.info("Nessun intervento disponibile."); st.stop()
 if not rig.empty:
  totals=rig.groupby("intervento_id").agg(valore_teorico=("totale","sum"),righe=("id","count")).reset_index()
@@ -163,7 +163,7 @@ st.subheader("📊 Cruscotto chiusura mensile")
 if not ordj.empty:
  tmp=ordj.copy(); tmp["mese"]=pd.to_datetime(tmp["mese_competenza"],errors="coerce").dt.to_period("M").astype(str)
  tmp["importo"]=pd.to_numeric(tmp["importo"],errors="coerce").fillna(0)
- dash=tmp.groupby("mese").agg(ordini=("id","count"),valore_jj=("importo","sum"),chiusi=("chiuso_at",lambda x:x.notna().sum()),da_fatturare=("numero_fattura",lambda x:x.isna().sum())).reset_index()
+ dash=tmp.groupby("mese").agg(ordini=("id","count"),valore_jj=("importo","sum"),chiusi=("chiuso_at",lambda x:x.notna().sum()),fattura_da_verificare=("numero_fattura",lambda x:x.isna().sum())).reset_index()
  if not ric.empty:
   rr=ric.copy(); rr["mese"]=pd.to_datetime(rr["mese_competenza"],errors="coerce").dt.to_period("M").astype(str)
   aa=rr.groupby("mese").agg(anomalie=("esito",lambda x:(x!="OK").sum()),differenze_prezzo=("differenza_prezzo",lambda x:pd.to_numeric(x,errors="coerce").abs().sum())).reset_index()
