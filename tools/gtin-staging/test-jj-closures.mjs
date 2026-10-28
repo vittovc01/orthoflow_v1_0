@@ -25,7 +25,8 @@ try {
  await assert.rejects(()=>run('PROTESICA'),/divisione o mese/);
  await assert.rejects(()=>run('TRAUMA','2026-11-01'),/divisione o mese/);
  await assert.rejects(()=>run('PROTESICA','2026-10-01','b'.repeat(64)),/Divisione sorgente/);
- await assert.rejects(()=>run('TRAUMA','2026-10-01','c'.repeat(64),[...rows,{codice:'',raw_data:{}}]),/codice/);
+ await assert.rejects(()=>run('TRAUMA','2026-10-01','e'.repeat(64)),/Esiste già/);
+ await assert.rejects(()=>run('TRAUMA','2026-11-01','c'.repeat(64),[...rows,{codice:'',raw_data:{}}]),/codice/);
  assert.equal((await db.query('select count(*)::int as n from chiusure_mensili_johnson')).rows[0].n,1);
  assert.equal((await db.query("select has_function_privilege('anon','public.importa_chiusura_jj(text,date,text,text,jsonb)','EXECUTE') as allowed")).rows[0].allowed,false);
  const pro=[{...rows[0],raw_data:{'Product[P. Bravo Franchise]':'Protesica'}}];

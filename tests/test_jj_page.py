@@ -20,6 +20,8 @@ def test_division_selection_changes_forecast_and_consuntivo(monkeypatch):
         def table(self,name): self.name=name;return self
         def select(self,*args):return self
         def eq(self,*args):return self
+        def order(self,*args):return self
+        def range(self,*args):return self
         def execute(self):return SimpleNamespace(data=tables.get(self.name,[]))
     st.cache_resource.clear()
     monkeypatch.setattr(supabase,'create_client',lambda *a,**k:Backend())

@@ -2,6 +2,8 @@
 alter table public.chiusure_mensili_johnson add column if not exists source_fingerprint text;
 create unique index if not exists ux_jj_closure_fingerprint
  on public.chiusure_mensili_johnson(source_fingerprint) where source_fingerprint is not null;
+create unique index if not exists ux_jj_closure_division_month
+ on public.chiusure_mensili_johnson(divisione,mese);
 
 create or replace function public.importa_chiusura_jj(
  p_divisione text, p_mese date, p_nome_file text, p_fingerprint text, p_righe jsonb)
@@ -16,13 +18,17 @@ begin
  end if;
  n:=jsonb_array_length(p_righe);
  if n=0 then raise exception 'Nessuna riga da importare'; end if;
- perform pg_advisory_xact_lock(hashtext('jj-closure-'||p_fingerprint));
+ perform pg_advisory_xact_lock(hashtext('jj-closure-'||p_divisione||date_trunc('month',p_mese)::date::text));
  select * into existing from public.chiusure_mensili_johnson where source_fingerprint=p_fingerprint;
  if found then
   if existing.divisione<>p_divisione or existing.mese<>date_trunc('month',p_mese)::date then
    raise exception 'File già importato con divisione o mese differenti';
   end if;
   return jsonb_build_object('id',existing.id,'righe',existing.righe_totali,'gia_presente',true);
+ end if;
+ if exists(select 1 from public.chiusure_mensili_johnson
+   where divisione=p_divisione and mese=date_trunc('month',p_mese)::date) then
+   raise exception 'Esiste già una chiusura per questa divisione e mese: verificare la nuova versione prima di importarla';
  end if;
  for r in select value from jsonb_array_elements(p_righe) loop
   if coalesce(btrim(r->>'codice'),'')='' or jsonb_typeof(r->'raw_data') is distinct from 'object' then

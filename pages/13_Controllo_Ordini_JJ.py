@@ -1,5 +1,5 @@
 import io
-from jj_closures import division, select_division, prepare_closure
+from jj_closures import division, select_division, prepare_closure, read_all
 import pandas as pd
 import streamlit as st
 from orthoflow_branding import configure_page
@@ -11,7 +11,7 @@ if not director and "AMMINISTRAZIONE" not in p: st.error("Accesso non autorizzat
 @st.cache_resource
 def sb():
  return create_client(str(st.secrets.get("SUPABASE_URL")).rstrip("/"),str(st.secrets.get("SUPABASE_SERVICE_KEY") or st.secrets.get("SUPABASE_ANON_KEY") or st.secrets.get("SUPABASE_KEY")))
-def get(t): return pd.DataFrame(sb().table(t).select("*").execute().data or [])
+def get(t): return read_all(sb(),t)
 st.title("🔎 Controllo Ordini J&J")
 st.caption("Riconcilia consumi/interventi P.M. Medical con ordini, fatture e chiusure J&J. Residui e anomalie restano aperti e passano al mese successivo.")
 up=st.file_uploader("⬆️ Importa dataset J&J consolidato (CSV/Excel)",type=["xlsx","xls","csv"])
@@ -215,6 +215,9 @@ st.subheader(f"📈 {div} · Previsione e consuntivo J&J")
 _m0=pd.Timestamp(mese_close).to_period("M").start_time.date(); _m1=(pd.Timestamp(_m0)+pd.offsets.MonthEnd(1)).date()
 ints=get("interventi"); ris=get("righe_intervento"); clos=get("chiusure_mensili_johnson")
 prev=0
+if not ints.empty and "linea" in ints:
+ _unknown=ints[ints["linea"].map(division)=="DA CLASSIFICARE"]
+ if not _unknown.empty: st.warning(f"{len(_unknown)} interventi da classificare: esclusi dai totali Trauma e Protesica finché la linea non viene corretta.")
 if not ints.empty and not ris.empty:
  ints=select_division(ints,div,"linea")
  ids=ints[(pd.to_datetime(ints["data_intervento"],errors="coerce").dt.date>=_m0)&(pd.to_datetime(ints["data_intervento"],errors="coerce").dt.date<=_m1)]["id"].tolist()
@@ -237,9 +240,11 @@ if not clos.empty:
  _fc=select_division(clos[_mc==pd.Timestamp(_m0).to_period("M")],div)
  if not _fc.empty:
   _id=st.selectbox("Chiusura importata",_fc["id"].astype(int).tolist(),format_func=lambda x: str(_fc[_fc["id"]==x].iloc[0].get("divisione"))+" · "+str(_fc[_fc["id"]==x].iloc[0].get("nome_file")),key="detail_close")
-  _det=pd.DataFrame(sb().table("righe_chiusura_johnson").select("*").eq("chiusura_id",int(_id)).execute().data or [])
+  _det=read_all(sb(),"righe_chiusura_johnson",{"chiusura_id":int(_id)})
   if not _det.empty:
-   st.dataframe(_det[[x for x in ["numero_ordine","riferimento_cliente","codice","lotto","quantita","prezzo_unitario","totale_riga"] if x in _det]],use_container_width=True,hide_index=True)
+   for _label,_key in [("fattura","Order Transactions[O. Invoice Number]"),("data_fattura","Calendar[Date]"),("tipo_movimento","Order Type[O. Sub Type]"),("descrizione","Product[Product]")]:
+    _det[_label]=_det["raw_data"].map(lambda r:r.get(_key) if isinstance(r,dict) else None)
+   st.dataframe(_det[[x for x in ["fattura","data_fattura","tipo_movimento","riferimento_cliente","numero_ordine","codice","descrizione","lotto","quantita","prezzo_unitario","totale_riga"] if x in _det]],use_container_width=True,hide_index=True)
    st.download_button("⬇️ Esporta dettaglio acquisito",_det.to_csv(index=False).encode("utf-8-sig"),f"Dettaglio_chiusura_JJ_{div}.csv","text/csv")
 
 st.divider()

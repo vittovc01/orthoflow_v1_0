@@ -2,7 +2,7 @@ import io
 from decimal import Decimal
 import pandas as pd
 import pytest
-from jj_closures import prepare_closure, select_division, decimal
+from jj_closures import prepare_closure, select_division, decimal, read_all
 
 def workbook(franchise='Trauma'):
     b=io.BytesIO()
@@ -46,3 +46,17 @@ def test_invalid_money_does_not_silently_become_zero():
     assert decimal('1.200,50 EUR')==Decimal('1200.50')
     with pytest.raises(ValueError): decimal('non leggibile')
     with pytest.raises(ValueError): decimal('Infinity')
+
+def test_detail_export_reads_more_than_postgrest_response_limit():
+    from types import SimpleNamespace
+    data=[{'id':i,'totale_riga':1} for i in range(2273)]
+    class Client:
+        def table(self,*a):return self
+        def select(self,*a):return self
+        def order(self,*a):return self
+        def eq(self,*a):return self
+        def range(self,start,end):self.bounds=(start,end);return self
+        def execute(self):return SimpleNamespace(data=data[self.bounds[0]:self.bounds[1]+1])
+    result=read_all(Client(),'righe_chiusura_johnson',{'chiusura_id':1})
+    assert len(result)==2273
+    assert result['totale_riga'].sum()==2273

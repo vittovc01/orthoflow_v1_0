@@ -7,6 +7,20 @@ import pandas as pd
 
 DIVISIONS = ('TRAUMA', 'PROTESICA')
 
+def read_all(client, table, filters=None):
+    """PostgREST caps a single response: closure details often exceed 1,000 rows."""
+    rows=[]
+    offset=0
+    while True:
+        query=client.table(table).select('*').order('id')
+        for key,value in (filters or {}).items():
+            query=query.eq(key,value)
+        page=query.range(offset,offset+499).execute().data or []
+        rows.extend(page)
+        if len(page)<500:
+            return pd.DataFrame(rows)
+        offset+=500
+
 def division(value):
     value = str(value or '').strip().upper()
     return value if value in DIVISIONS else 'DA CLASSIFICARE'
