@@ -1,4 +1,5 @@
 import io
+from jj_closures import division, select_division, prepare_closure, read_all
 import pandas as pd
 import streamlit as st
 from orthoflow_branding import configure_page
@@ -10,7 +11,7 @@ if not director and "AMMINISTRAZIONE" not in p: st.error("Accesso non autorizzat
 @st.cache_resource
 def sb():
  return create_client(str(st.secrets.get("SUPABASE_URL")).rstrip("/"),str(st.secrets.get("SUPABASE_SERVICE_KEY") or st.secrets.get("SUPABASE_ANON_KEY") or st.secrets.get("SUPABASE_KEY")))
-def get(t): return pd.DataFrame(sb().table(t).select("*").execute().data or [])
+def get(t): return read_all(sb(),t)
 st.title("🔎 Controllo Ordini J&J")
 st.caption("Riconcilia consumi/interventi P.M. Medical con ordini, fatture e chiusure J&J. Residui e anomalie restano aperti e passano al mese successivo.")
 up=st.file_uploader("⬆️ Importa dataset J&J consolidato (CSV/Excel)",type=["xlsx","xls","csv"])
@@ -55,8 +56,8 @@ if up and st.button("Importa / aggiorna J&J",type="primary"):
      z=pick(k)
      if z is not None and pd.notna(r[z]) and str(r[z]).strip():
       payload[dest]=str(pd.to_datetime(r[z]).date()) if k in ("DataOrdine","DataFattura") else str(r[z]).strip()
-    payload["codice_cliente"]=payload.get("account_jj")
-    payload["stato_riconciliazione"]="FATTURATO" if payload.get("numero_fattura") else "DA_FATTURARE"
+    payload["codice_cliente"]=None # CAC J&J is not the internal customer code
+    payload["stato_riconciliazione"]="DA_ABBINARE"
     base=pd.to_datetime(payload.get("data_fattura") or payload.get("data_ordine") or pd.Timestamp.today())
     payload["mese_competenza"]=str(base.to_period("M").start_time.date())
     old=sb().table("ordini_johnson").select("id").eq("numero_ordine",numero).limit(1).execute().data or []
@@ -93,14 +94,14 @@ if up and st.button("Importa / aggiorna J&J",type="primary"):
  except Exception as e: st.error(f"Import non riuscito: {e}")
 inter=get("interventi"); rig=get("righe_intervento"); ordj=get("ordini_johnson")
 if not ordj.empty:
- ordj["fase"]=ordj.apply(lambda x: "✅ CHIUSO" if pd.notna(x.get("chiuso_at")) else ("🧾 FATTURATO" if pd.notna(x.get("numero_fattura")) else "⏳ DA FATTURARE"),axis=1)
+ ordj["fase"]=ordj.apply(lambda x: "✅ CHIUSO" if pd.notna(x.get("chiuso_at")) else ("🧾 FATTURA PRESENTE" if pd.notna(x.get("numero_fattura")) else "🔎 FATTURA DA VERIFICARE"),axis=1)
  st.subheader("📅 Ciclo mensile J&J")
  _o=ordj.copy(); _o["mese_competenza"]=pd.to_datetime(_o["mese_competenza"],errors="coerce")
  _open=_o[_o["chiuso_at"].isna()]
- m1,m2,m3=st.columns(3); m1.metric("Da fatturare",int((_open["fase"]=="⏳ DA FATTURARE").sum())); m2.metric("Fatturati da chiudere",int((_open["fase"]=="🧾 FATTURATO").sum())); m3.metric("Aperti / riporto",len(_open))
+ m1,m2,m3=st.columns(3); m1.metric("Fattura da verificare",int((_open["fase"]=="🔎 FATTURA DA VERIFICARE").sum())); m2.metric("Fattura acquisita, da abbinare",int((_open["fase"]=="🧾 FATTURA PRESENTE").sum())); m3.metric("Aperti / riporto",len(_open))
  _cols=[x for x in ["numero_ordine","data_ordine","numero_fattura","data_fattura","stato_johnson","importo","mese_competenza","riportato_da_mese","fase","note_anomalia"] if x in _open]
  st.dataframe(_open[_cols].sort_values("data_ordine",ascending=False),use_container_width=True,hide_index=True)
- st.caption("A fine mese si chiudono solo le posizioni completamente riconciliate. Residui, ordini non fatturati e anomalie di prezzo restano aperti per il mese successivo.")
+ st.caption("A fine mese si chiudono solo le posizioni completamente riconciliate. Residui, ordini senza fattura acquisita e anomalie di prezzo restano aperti per il mese successivo.")
 if inter.empty: st.info("Nessun intervento disponibile."); st.stop()
 if not rig.empty:
  totals=rig.groupby("intervento_id").agg(valore_teorico=("totale","sum"),righe=("id","count")).reset_index()
@@ -108,17 +109,8 @@ if not rig.empty:
 else: inter["valore_teorico"]=0
 inter["valore_teorico"]=pd.to_numeric(inter["valore_teorico"],errors="coerce").fillna(0)
 def match_order(r):
- if ordj.empty:return pd.Series(["NESSUN ORDINE",None,None,None])
- cand=ordj.copy()
- if r.get("codice_cliente") and "codice_cliente" in cand: cand=cand[cand["codice_cliente"].astype(str).str.strip()==str(r["codice_cliente"]).strip()]
- if cand.empty and r.get("struttura") and "struttura" in ordj:
-  cand=ordj[ordj["struttura"].astype(str).str.lower().str.strip()==str(r["struttura"]).lower().strip()]
- if cand.empty:return pd.Series(["NESSUN ORDINE",None,None,None])
- if pd.notna(r.get("data_intervento")) and "data_ordine" in cand:
-  dd=pd.to_datetime(cand["data_ordine"],errors="coerce"); target=pd.to_datetime(r["data_intervento"]); cand=cand.assign(_dist=(dd-target).abs().dt.days).sort_values("_dist")
- o=cand.iloc[0]; imp=float(o.get("importo") or 0); teor=float(r.get("valore_teorico") or 0)
- status="CHIUSO" if teor>0 and imp>=teor*.99 else ("PARZIALE" if imp>0 else "DA VERIFICARE")
- return pd.Series([status,o.get("numero_ordine"),o.get("stato_johnson"),imp])
+ # Order totals and nearby dates are not evidence of an intervention allocation.
+ return pd.Series(["DA ABBINARE",None,None,None])
 inter[["esito","ordine_jj","stato_jj","importo_jj"]]=inter.apply(match_order,axis=1)
 a,b,c=st.columns(3); a.metric("Interventi",len(inter)); b.metric("Chiusi",int((inter.esito=="CHIUSO").sum())); c.metric("Da controllare",int((inter.esito!="CHIUSO").sum()))
 show=[x for x in ["data_intervento","cartella_clinica","struttura","codice_cliente","valore_teorico","ordine_jj","importo_jj","stato_jj","esito"] if x in inter]
@@ -126,17 +118,13 @@ st.dataframe(inter[show].sort_values("data_intervento",ascending=False),use_cont
 out=io.BytesIO()
 with pd.ExcelWriter(out,engine="xlsxwriter") as w: inter[show].to_excel(w,index=False,sheet_name="Riconciliazione")
 st.download_button("⬇️ Esporta controllo Excel",out.getvalue(),"PM_Medical_Controllo_Ordini_JJ.xlsx","application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
-st.warning("Gli abbinamenti sono automatici e servono come pre-controllo: i casi PARZIALE / DA VERIFICARE / NESSUN ORDINE richiedono verifica amministrativa.")
+st.info("Ordini e fatture importati restano da abbinare alle righe degli interventi. Struttura, data e importo non determinano la chiusura.")
 
 st.divider()
 st.subheader("🔗 Riconciliazione analitica")
 st.caption("Incrocio Codice + Lotto + Quantità + Prezzo tra righe intervento P.M. Medical e righe ordine J&J.")
 c1,c2=st.columns(2)
-if c1.button("🔄 Esegui riconciliazione automatica",type="primary"):
- try:
-  n=sb().rpc("riconcilia_johnson_auto",{}).execute().data
-  st.success(f"Riconciliazione aggiornata: {n} abbinamenti elaborati."); st.rerun()
- except Exception as e: st.error(str(e))
+st.info("La riconciliazione automatica precedente è sospesa: i collegamenti devono rispettare riferimento, prodotto, lotto e quantità residua. Nessuna chiusura per sola coincidenza di struttura o importo.")
 ric=get("riconciliazioni_johnson")
 if not ric.empty:
  rj=get("righe_ordini_johnson")
@@ -175,7 +163,7 @@ st.subheader("📊 Cruscotto chiusura mensile")
 if not ordj.empty:
  tmp=ordj.copy(); tmp["mese"]=pd.to_datetime(tmp["mese_competenza"],errors="coerce").dt.to_period("M").astype(str)
  tmp["importo"]=pd.to_numeric(tmp["importo"],errors="coerce").fillna(0)
- dash=tmp.groupby("mese").agg(ordini=("id","count"),valore_jj=("importo","sum"),chiusi=("chiuso_at",lambda x:x.notna().sum()),da_fatturare=("numero_fattura",lambda x:x.isna().sum())).reset_index()
+ dash=tmp.groupby("mese").agg(ordini=("id","count"),valore_jj=("importo","sum"),chiusi=("chiuso_at",lambda x:x.notna().sum()),fattura_da_verificare=("numero_fattura",lambda x:x.isna().sum())).reset_index()
  if not ric.empty:
   rr=ric.copy(); rr["mese"]=pd.to_datetime(rr["mese_competenza"],errors="coerce").dt.to_period("M").astype(str)
   aa=rr.groupby("mese").agg(anomalie=("esito",lambda x:(x!="OK").sum()),differenze_prezzo=("differenza_prezzo",lambda x:pd.to_numeric(x,errors="coerce").abs().sum())).reset_index()
@@ -217,42 +205,21 @@ mese_close=cm2.date_input("Mese di chiusura",value=pd.Timestamp.today().replace(
 closefile=st.file_uploader("File chiusura dettagliata J&J",type=["xlsx","xls","csv"],key="jj_close")
 if closefile and st.button("📥 Importa e confronta chiusura",type="primary"):
  try:
-  z=pd.read_csv(closefile,sep=None,engine="python",encoding="utf-8-sig") if closefile.name.lower().endswith(".csv") else pd.read_excel(closefile)
-  lc={str(k).strip().lower():k for k in z.columns}
-  def zcol(*names):
-   for n in names:
-    if n.lower() in lc:return lc[n.lower()]
-   return None
-  code=zcol("codice","codice prodotto","product code"); qty=zcol("quantita","quantità","quantity"); price=zcol("prezzo","prezzo unitario","unit price"); total=zcol("totale","totale riga","total"); order=zcol("numero ordine","numero_ordine","ordine","order"); lot=zcol("lotto","lot")
-  econ_nis=zcol("sum of [nis]","nis"); econ_is=zcol("sum of [invoiced_sales__is_]","invoiced_sales","invoiced sales"); cac=zcol("c account[c. account code (cac)]","cac"); fam=zcol("product[p. bravo major]","famiglia prodotto"); bill=zcol("c bill to[c. bill to]","bill to"); acc=zcol("c account[c. account]","account"); reg=zcol("c account[c. account region]","region"); prov=zcol("c account[c. account county]","county")
-  if code is None and econ_nis is None and econ_is is None: st.error("Formato non riconosciuto: servono colonne di dettaglio ordine oppure NIS/Invoiced Sales.")
-  else:
-   is_econ=(code is None and (econ_nis is not None or econ_is is not None))
-   valid=z.copy()
-   if is_econ and cac is not None: valid=valid[valid[cac].notna()]
-   nis_tot=float(pd.to_numeric(valid[econ_nis],errors="coerce").fillna(0).sum()) if econ_nis else 0
-   is_tot=float(pd.to_numeric(valid[econ_is],errors="coerce").fillna(0).sum()) if econ_is else 0
-   tot=float(pd.to_numeric(valid[total],errors="coerce").fillna(0).sum()) if total else nis_tot
-   h=sb().table("chiusure_mensili_johnson").insert({"mese":str(pd.Timestamp(mese_close).to_period("M").start_time.date()),"divisione":div,"nome_file":closefile.name,"importo_totale_jj":tot,"nis_totale":nis_tot,"invoiced_sales_totale":is_tot,"righe_totali":len(valid)}).execute().data[0]
-   for _,r in valid.iterrows():
-    p={"chiusura_id":h["id"],"codice":str(r[code]).strip() if code is not None and pd.notna(r[code]) else "ECONOMICO","raw_data":{str(k):None if pd.isna(v) else str(v) for k,v in r.items()}}
-    if is_econ:
-     emap=[(reg,"regione"),(prov,"provincia"),(bill,"bill_to"),(acc,"account_name"),(fam,"famiglia_prodotto"),(cac,"cac")]
-     for ec,ed in emap:
-      if ec is not None and pd.notna(r[ec]): p[ed]=str(r[ec]).strip()
-     if econ_nis is not None and pd.notna(r[econ_nis]): p["nis"]=float(pd.to_numeric(r[econ_nis],errors="coerce"))
-     if econ_is is not None and pd.notna(r[econ_is]): p["invoiced_sales"]=float(pd.to_numeric(r[econ_is],errors="coerce"))
-    for col,dest,num in [(order,"numero_ordine",False),(lot,"lotto",False),(qty,"quantita",True),(price,"prezzo_unitario",True),(total,"totale_riga",True)]:
-     if col is not None and pd.notna(r[col]): p[dest]=float(pd.to_numeric(r[col],errors="coerce")) if num and pd.notna(pd.to_numeric(r[col],errors="coerce")) else str(r[col]).strip()
-    sb().table("righe_chiusura_johnson").insert(p).execute()
-   st.success(f"Chiusura {div} importata: {len(valid)} righe · NIS € {nis_tot:,.2f} · Invoiced Sales € {is_tot:,.2f}."); st.rerun()
+  prepared=prepare_closure(closefile.getvalue(),closefile.name,div)
+  result=sb().rpc("importa_chiusura_jj",{"p_divisione":div,"p_mese":str(pd.Timestamp(mese_close).to_period("M").start_time.date()),"p_nome_file":closefile.name,"p_fingerprint":prepared["fingerprint"],"p_righe":prepared["rows"]}).execute().data
+  st.success(f"Chiusura {div}: {result['righe']} righe · " + ("già presente, nessun duplicato" if result.get("gia_presente") else "importata") + f" · Fatturato € {float(prepared['invoiced_sales']):,.2f}.")
+
  except Exception as e: st.error(f"Chiusura non importata: {e}")
 
-st.subheader("📈 Previsione P.M. Medical vs consuntivo J&J")
+st.subheader(f"📈 {div} · Previsione e consuntivo J&J")
 _m0=pd.Timestamp(mese_close).to_period("M").start_time.date(); _m1=(pd.Timestamp(_m0)+pd.offsets.MonthEnd(1)).date()
 ints=get("interventi"); ris=get("righe_intervento"); clos=get("chiusure_mensili_johnson")
 prev=0
+if not ints.empty and "linea" in ints:
+ _unknown=ints[ints["linea"].map(division)=="DA CLASSIFICARE"]
+ if not _unknown.empty: st.warning(f"{len(_unknown)} interventi da classificare: esclusi dai totali Trauma e Protesica finché la linea non viene corretta.")
 if not ints.empty and not ris.empty:
+ ints=select_division(ints,div,"linea")
  ids=ints[(pd.to_datetime(ints["data_intervento"],errors="coerce").dt.date>=_m0)&(pd.to_datetime(ints["data_intervento"],errors="coerce").dt.date<=_m1)]["id"].tolist()
  rr=ris[ris["intervento_id"].isin(ids)].copy()
  base="totale" if "totale" in rr else "valore"
@@ -260,7 +227,7 @@ if not ints.empty and not ris.empty:
 cons=0
 if not clos.empty:
  cm=pd.to_datetime(clos["mese"],errors="coerce").dt.to_period("M")
- sel=clos[(cm==pd.Timestamp(_m0).to_period("M"))]
+ sel=select_division(clos[(cm==pd.Timestamp(_m0).to_period("M"))],div)
  cons=float(pd.to_numeric(sel["importo_totale_jj"],errors="coerce").fillna(0).sum())
 a1,a2,a3=st.columns(3); a1.metric("Previsione P.M. Medical",f"€ {prev:,.2f}"); a2.metric("Chiusura J&J caricata",f"€ {cons:,.2f}"); a3.metric("Differenza",f"€ {cons-prev:,.2f}")
 st.caption("La previsione deriva dall'operatività P.M. Medical; il file finale J&J è il consuntivo ufficiale. Le differenze dovranno essere analizzate per ordine/codice/lotto/quantità/prezzo, senza considerare automaticamente il dato J&J corretto.")
@@ -270,13 +237,15 @@ st.subheader("🔬 Controllo dettagliato file finale")
 st.caption("Dopo il caricamento, P.M. Medical conserva ogni riga del file finale J&J per il confronto con consumi, ordini, prezzi e reintegri.")
 if not clos.empty:
  _mc=pd.to_datetime(clos["mese"],errors="coerce").dt.to_period("M")
- _fc=clos[_mc==pd.Timestamp(_m0).to_period("M")]
+ _fc=select_division(clos[_mc==pd.Timestamp(_m0).to_period("M")],div)
  if not _fc.empty:
   _id=st.selectbox("Chiusura importata",_fc["id"].astype(int).tolist(),format_func=lambda x: str(_fc[_fc["id"]==x].iloc[0].get("divisione"))+" · "+str(_fc[_fc["id"]==x].iloc[0].get("nome_file")),key="detail_close")
-  _det=pd.DataFrame(sb().table("righe_chiusura_johnson").select("*").eq("chiusura_id",int(_id)).execute().data or [])
+  _det=read_all(sb(),"righe_chiusura_johnson",{"chiusura_id":int(_id)})
   if not _det.empty:
-   st.dataframe(_det[[x for x in ["numero_ordine","riferimento_cliente","codice","lotto","quantita","prezzo_unitario","totale_riga"] if x in _det]],use_container_width=True,hide_index=True)
-   st.download_button("⬇️ Esporta dettaglio acquisito",_det.to_csv(index=False).encode("utf-8-sig"),"Dettaglio_chiusura_JJ.csv","text/csv")
+   for _label,_key in [("fattura","Order Transactions[O. Invoice Number]"),("data_fattura","Calendar[Date]"),("tipo_movimento","Order Type[O. Sub Type]"),("descrizione","Product[Product]")]:
+    _det[_label]=_det["raw_data"].map(lambda r:r.get(_key) if isinstance(r,dict) else None)
+   st.dataframe(_det[[x for x in ["fattura","data_fattura","tipo_movimento","riferimento_cliente","numero_ordine","codice","descrizione","lotto","quantita","prezzo_unitario","totale_riga"] if x in _det]],use_container_width=True,hide_index=True)
+   st.download_button("⬇️ Esporta dettaglio acquisito",_det.to_csv(index=False).encode("utf-8-sig"),f"Dettaglio_chiusura_JJ_{div}.csv","text/csv")
 
 st.divider()
 st.subheader("🎯 Previsione chiusura P.M. Medical")
@@ -287,30 +256,31 @@ if not pf_i.empty and not pf_r.empty:
  mesi=sorted(pf_i["_data"].dropna().dt.to_period("M").unique(),reverse=True)
  if mesi:
   pm=st.selectbox("Mese previsione",mesi,format_func=lambda x:str(x),key="forecast_month")
-  pi=pf_i[pf_i["_data"].dt.to_period("M")==pm].copy()
+  pi=select_division(pf_i[pf_i["_data"].dt.to_period("M")==pm],div,"linea")
   pr=pf_r[pf_r["intervento_id"].isin(pi["id"])].copy()
   pr["_valore"]=pd.to_numeric(pr["totale"],errors="coerce").fillna(0) if "totale" in pr else 0
   if "totale" not in pr or pd.Series(pr["_valore"]).fillna(0).eq(0).all():
    pr["_valore"]=pd.to_numeric(pr["quantita"],errors="coerce").fillna(0)*pd.to_numeric(pr["prezzo"],errors="coerce").fillna(0)
   pr=pr.merge(pi[["id","struttura","linea","codice_cliente","cartella_clinica"]].rename(columns={"id":"intervento_id"}),on="intervento_id",how="left")
-  pr["_divisione"]=pr["linea"].fillna("NON CLASSIFICATA").astype(str).str.upper()
+  pr["_divisione"]=pr["linea"].map(division)
   tot=float(pd.to_numeric(pr["_valore"],errors="coerce").fillna(0).sum())
   ordp=get("ordini_johnson"); ordtot=0.0
   if not ordp.empty and "data_ordine" in ordp and "importo" in ordp:
    om=pd.to_datetime(ordp["data_ordine"],errors="coerce").dt.to_period("M")
-   ordtot=float(pd.to_numeric(ordp.loc[om==pm,"importo"],errors="coerce").fillna(0).sum())
+   ordtot=float(pd.to_numeric(select_division(ordp.loc[om==pm],div).get("importo",pd.Series(dtype=float)),errors="coerce").fillna(0).sum())
   clp=get("chiusure_mensili_johnson"); nis=0.0; inv=0.0
   if not clp.empty:
-   cm=pd.to_datetime(clp["mese"],errors="coerce").dt.to_period("M"); mc=clp[cm==pm]
+   cm=pd.to_datetime(clp["mese"],errors="coerce").dt.to_period("M"); mc=select_division(clp[cm==pm],div)
    if "nis_totale" in mc: nis=float(pd.to_numeric(mc["nis_totale"],errors="coerce").fillna(0).sum())
    if "invoiced_sales_totale" in mc: inv=float(pd.to_numeric(mc["invoiced_sales_totale"],errors="coerce").fillna(0).sum())
   a,b,d,e=st.columns(4)
   a.metric("Previsione P.M. Medical",f"€ {tot:,.2f}")
-  b.metric("Ordini J&J rilevati",f"€ {ordtot:,.2f}",f"€ {ordtot-tot:,.2f}")
+  b.metric("Ordini J&J da classificare",len(ordp) if "divisione" not in ordp else int((ordp["divisione"].map(division)=="DA CLASSIFICARE").sum()))
+  st.caption("Gli importi degli ordini non classificati non vengono attribuiti a Trauma o Protesica. Il confronto per mese di intervento non prova la fatturazione nello stesso mese.")
   d.metric("NIS chiusura J&J",f"€ {nis:,.2f}",f"€ {nis-tot:,.2f}")
   e.metric("Invoiced Sales J&J",f"€ {inv:,.2f}")
   by=pr.groupby(["_divisione","struttura"],dropna=False).agg(Interventi=("intervento_id","nunique"),Righe=("intervento_id","size"),Previsione_EUR=("_valore","sum")).reset_index().rename(columns={"_divisione":"Divisione","struttura":"Struttura"})
   st.dataframe(by.sort_values("Previsione_EUR",ascending=False),use_container_width=True,hide_index=True)
   miss=pr[pr["linea"].isna() | pr["codice_cliente"].isna()]
   if not miss.empty: st.warning(f"{len(miss)} righe senza Linea o Codice Cliente: incluse nel totale, ma da classificare per il confronto J&J preciso.")
-  st.download_button("⬇️ Esporta previsione dettagliata",pr.to_csv(index=False).encode("utf-8-sig"),f"Previsione_PM_Medical_{pm}.csv","text/csv")
+  st.download_button("⬇️ Esporta previsione dettagliata",pr.to_csv(index=False).encode("utf-8-sig"),f"Previsione_PM_Medical_{div}_{pm}.csv","text/csv")
