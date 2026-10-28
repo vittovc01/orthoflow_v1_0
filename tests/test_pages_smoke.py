@@ -668,3 +668,28 @@ def test_four_labels_and_extra_blank_detection_can_be_explicitly_excluded_and_sa
     assert 'extra' not in args['p_header']['included_label_ids']
     assert next(m for m in args['p_header']['label_manifest'] if m['label_id']=='extra')['esclusa'] is True
     assert any(l['field']=='escludi_riga' and l['corrected'] is True for l in args['p_header']['correction_log'])
+
+
+def test_price_anomalies_use_one_atomic_batch_rpc(backend,monkeypatch):
+    calls=[]
+    def execute():
+        table=backend.reads[-1] if backend.reads else ''
+        return SimpleNamespace(data={
+            'righe_intervento':[dict(id=21,intervento_id=1,codice='REF-A',lotto='LOT-A',quantita=1,
+                                     prezzo_source='DA_VERIFICARE_DIREZIONE')],
+            'interventi':[dict(id=1,codice_cliente='A',linea='TRAUMA',cliente='Clinica A')],
+        }.get(table,[]))
+    monkeypatch.setattr(backend,'execute',execute)
+    def rpc(name,args):
+        calls.append((name,args))
+        return SimpleNamespace(execute=lambda:SimpleNamespace(data={'righe_regolarizzate':2}))
+    monkeypatch.setitem(backend.__dict__,'rpc',rpc)
+    at=app()
+    at.session_state['user']='direction';at.session_state['ruolo']='Admin';at.session_state['permessi']=['DIREZIONE']
+    at.run();at.switch_page('pages/14_Anomalie_Prezzi.py').run()
+    assert not at.exception and any('tutte le anomalie prezzo' in w.value for w in at.info)
+    next(n for n in at.number_input if n.label=='Prezzo unitario €').set_value(12.5)
+    next(b for b in at.button if b.label=='✅ Salva e regolarizza tutte le anomalie corrispondenti').click().run()
+    assert not at.exception
+    assert calls==[('regolarizza_anomalie_prezzo',dict(p_riga_id=21,p_prezzo=12.5,p_sconto=False,p_utente='direction'))]
+    assert any('Regolarizzate 2' in s.value for s in at.success)
