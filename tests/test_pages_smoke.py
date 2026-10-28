@@ -693,3 +693,49 @@ def test_price_anomalies_use_one_atomic_batch_rpc(backend,monkeypatch):
     assert not at.exception
     assert calls==[('regolarizza_anomalie_prezzo',dict(p_riga_id=21,p_prezzo=12.5,p_sconto=False,p_utente='direction'))]
     assert any('Regolarizzate 2' in s.value for s in at.success)
+
+
+@pytest.mark.parametrize('persistent',[False,True])
+def test_anomaly_auth_read_recovers_or_offers_retry_without_traceback(backend,monkeypatch,persistent):
+    class AuthReadError(Exception):
+        code='PGRST303'
+    at=app()
+    at.session_state['user']='direction';at.session_state['ruolo']='Admin';at.session_state['permessi']=['DIREZIONE']
+    at.run()
+    attempts=[]
+    broken=[True]
+    def execute():
+        attempts.append(1)
+        if broken[0] and (persistent or len(attempts)==1):
+            raise AuthReadError('technical details must stay private')
+        return SimpleNamespace(data=[])
+    monkeypatch.setattr(backend,'execute',execute)
+    at.switch_page('pages/14_Anomalie_Prezzi.py').run()
+    assert not at.exception
+    if persistent:
+        assert len(attempts)==2 and any('Connessione ai dati' in e.value for e in at.error)
+        assert not any('technical details' in e.value for e in at.error)
+        broken[0]=False
+        next(b for b in at.button if b.label=='Riprova caricamento anomalie').click().run()
+        assert not at.exception and not at.error
+    else:
+        assert not at.error and len(attempts)>=2
+    assert any('Nessuna anomalia prezzo' in s.value for s in at.success)
+
+
+def test_anomaly_read_rebuilds_client_once_and_does_not_retry_other_errors():
+    from anomaly_reads import read_rows
+    class AuthReadError(Exception):code='PGRST303'
+    clients=[object(),object()];used=[];resets=[]
+    def query(client):
+        used.append(client)
+        def execute():
+            if client is clients[0]:raise AuthReadError()
+            return SimpleNamespace(data=[{'id':1}])
+        return SimpleNamespace(execute=execute)
+    def reset():resets.append(1)
+    assert read_rows(lambda:clients[len(resets)],query,reset)==[{'id':1}]
+    assert used==clients and resets==[1]
+    def invalid_query(client):raise ValueError('unrelated failure')
+    with pytest.raises(ValueError):read_rows(lambda:clients[0],invalid_query,reset)
+    assert resets==[1]
