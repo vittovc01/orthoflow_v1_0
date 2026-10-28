@@ -21,12 +21,26 @@ def sb():
         st.stop()
     return create_client(str(url).rstrip("/"),str(key))
 
+from anomaly_reads import read_rows
+
+
+def load_rows(query):
+    try:
+        return read_rows(sb, query, sb.clear)
+    except Exception:
+        st.error("Connessione ai dati non disponibile. Premi Riprova per ricaricare le anomalie.")
+        if st.button('Riprova caricamento anomalie', key='retry_anomaly_reads'):
+            sb.clear()
+            st.rerun()
+        st.stop()
+
+
 from stock_anomalies import split_stock_anomalies
 
 st.title("⚠️ Anomalie Prezzi e Giacenze")
 st.caption("Prezzi mancanti e disponibilità di magazzino da verificare. Le due sezioni sono indipendenti.")
 
-rows=sb().table("righe_intervento").select("id,intervento_id,codice,descrizione,lotto,quantita,prezzo,prezzo_source").eq("prezzo_source","DA_VERIFICARE_DIREZIONE").order("id",desc=True).execute().data or []
+rows=load_rows(lambda client: client.table("righe_intervento").select("id,intervento_id,codice,descrizione,lotto,quantita,prezzo,prezzo_source").eq("prezzo_source","DA_VERIFICARE_DIREZIONE").order("id",desc=True))
 if not rows:
     notice=st.session_state.pop('price_anomalies_saved',None)
     if notice: st.success(notice)
@@ -35,7 +49,7 @@ if not rows:
 else:
     df=pd.DataFrame(rows)
     ids=df["intervento_id"].dropna().astype(int).unique().tolist()
-    ints=sb().table("interventi").select("id,data_intervento,cliente,struttura,cartella_clinica,linea,agente").in_("id",ids).execute().data or []
+    ints=load_rows(lambda client: client.table("interventi").select("id,data_intervento,cliente,struttura,cartella_clinica,linea,agente").in_("id",ids))
     if ints:
         di=pd.DataFrame(ints).rename(columns={"id":"intervento_id"})
         df=df.merge(di,on="intervento_id",how="left")
@@ -69,10 +83,10 @@ else:
 
 st.divider()
 st.subheader("📦 Anomalie Giacenza")
-stock=sb().table("anomalie_giacenza").select("*").eq("stato","DA_VERIFICARE").order("id",desc=True).execute().data or []
+stock=load_rows(lambda client: client.table("anomalie_giacenza").select("*").eq("stato","DA_VERIFICARE").order("id",desc=True))
 stock_ids = sorted({int(a["intervento_id"]) for a in stock if a.get("intervento_id") is not None})
-headers = (sb().table("interventi").select("id,codice_cliente,cliente,cartella_clinica").in_("id",stock_ids).execute().data or []) if stock_ids else []
-materials = (sb().table("righe_intervento").select("intervento_id,codice,lotto,origine").in_("intervento_id",stock_ids).execute().data or []) if stock_ids else []
+headers = (load_rows(lambda client: client.table("interventi").select("id,codice_cliente,cliente,cartella_clinica").in_("id",stock_ids))) if stock_ids else []
+materials = (load_rows(lambda client: client.table("righe_intervento").select("intervento_id,codice,lotto,origine").in_("intervento_id",stock_ids))) if stock_ids else []
 stock, unlinked_stock, structure_stock = split_stock_anomalies(stock, headers, materials)
 if unlinked_stock:
     with st.expander(f"Segnalazioni senza intervento collegato: {len(unlinked_stock)}"):
