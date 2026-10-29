@@ -114,7 +114,7 @@ if closures:
   presidio=st.selectbox('Filtra presidio',['Tutti']+sorted(frame['Presidio'].unique().tolist()))
   if presidio!='Tutti':frame=frame[frame['Presidio']==presidio]
   if len(frame)>1000:st.warning('Molti abbinamenti possibili: filtra per presidio. Sono mostrate le prime 1.000 proposte.');frame=frame.head(1000)
-  visible=['Conferma','Fattura','PO','REF','Presidio','Ordine','Documento impianto','Riferimento intervento','Data intervento','Lotto impianto','quantity','Metodo','Univoco','Differenza prezzo']
+  visible=['Conferma','Fattura','PO','REF','Presidio','Ordine','Documento impianto','Riferimento intervento','Data intervento','Lotto impianto','quantity','Riscontro documento','Metodo','Univoco','Differenza prezzo']
   with st.form('confirm_proposals'):
    edited=st.data_editor(frame,column_order=visible,disabled=[c for c in frame.columns if c not in ('Conferma','quantity')],
      column_config={'quantity':st.column_config.NumberColumn('Quantità da collegare',min_value=1,step=1)},hide_index=True,use_container_width=True,

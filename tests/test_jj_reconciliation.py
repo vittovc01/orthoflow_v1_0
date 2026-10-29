@@ -3,7 +3,7 @@ from jj_reconciliation import prepare_tab,prepare_orders,prepare_month,proposals
 
 def record(kind,id,quantity=2,**extra):
  line={'key':'line','ref':'413.016S','lot':'L1' if kind=='IMPIANTO' else '', 'quantity':quantity,'cac':'100','customer':'Sapri','po':'PO1','invoice':'F1','date':'2026-10-10','price':'10','total':str(10*quantity)}
- return {'id':id,'kind':kind,'division':'TRAUMA','source_key':str(id),'payload':{'lines':[line],'event_date':'2026-09-01','reference':'cc 1 del 01/09/2026',**extra}}
+ return {'id':id,'kind':kind,'division':'TRAUMA','source_key':str(id),'payload':{'cac':'100','lines':[line],'event_date':'2026-09-01','reference':'cc 1 del 01/09/2026',**extra}}
 
 def test_orders_without_lot_accept_repeated_headers_and_sum_duplicate_rows():
  closing=record('CHIUSURA',1)
@@ -13,6 +13,9 @@ def test_orders_without_lot_accept_repeated_headers_and_sum_duplicate_rows():
  assert r[0]['payload']['lines'][0]['quantity']==2
  assert r[0]['payload']['lines'][0]['lot']==''
  assert r[0]['payload']['number']=='' and r[0]['payload']['po']=='PO1'
+ previous={'id':9,'kind':'ORDINE','division':'TRAUMA',**r[0]}
+ with_number=csv.replace('ordine;codice;','Numero ordine J&J;ordine;codice;').replace('PO1;','184000-KO;PO1;')
+ assert prepare_orders(with_number.encode(),'n.csv','TRAUMA',[closing,previous])[0]['source_key']==r[0]['source_key']
 
 def test_ambiguous_po_requires_presidio_and_quantity_is_validated():
  a=record('CHIUSURA',1);b=record('CHIUSURA',2);b['payload']['lines'][0]['cac']='200'
@@ -63,3 +66,11 @@ def test_closure_period_not_guessed_from_invoice_date():
  csv='Product[P. Bravo Franchise];Product[P. Code];[Invoiced_Sales__IS_];[Volumes_Primary];Calendar[D. Year];Calendar[D. Month Code];C Account[C. Account Code (CAC)];Order Transactions[O. Customer PO];Order Transactions[O. Invoice Number];Calendar[Date];Order Type[O. Sub Type]\nTrauma;413.016S;10;1;2026;10;100;PO1;F1;30/09/2026;Consignment Sale\n'
  assert prepare_month(csv.encode(),'c.csv','TRAUMA','2026-10-01')[0]['payload']['month']=='2026-10'
  with pytest.raises(ValueError,match='mese'):prepare_month(csv.encode(),'c.csv','TRAUMA','2026-11-01')
+
+def test_complete_order_composition_prioritizes_one_document_over_common_single_ref():
+ records=[record('CHIUSURA',1,quantity=1),record('ORDINE',2,quantity=1),record('IMPIANTO',3,quantity=1),record('IMPIANTO',4,quantity=1)]
+ for r in records[:3]:r['payload']['lines'].append({**r['payload']['lines'][0],'key':'second','ref':'413.020S'})
+ result=proposals(records,[])
+ assert len(result)==2
+ assert all(r['implant_id']==3 for r in result)
+ assert all('Composizione completa' in r['Riscontro documento'] for r in result)

@@ -146,6 +146,12 @@ def prepare_orders(content,filename,division,records=()):
         if not cac:raise ValueError(f'Riga {index+2}, PO {po}: presidio non univoco. Compila Presidio o CAC')
         invoice=text(row.get('NUMERO FATTURA'))
         key=cac+'|'+('JJ|'+number if number else 'PO|'+po)
+        prior=[r for r in records if r['kind']=='ORDINE' and r['division']==division and r['payload'].get('cac')==cac]
+        same_number=[r for r in prior if number and r['payload'].get('number')==number]
+        same_po=[r for r in prior if r['payload'].get('po')==po and (not number or not r['payload'].get('number') or r['payload'].get('number')==number)]
+        previous=same_number or same_po
+        if len(previous)>1:raise ValueError(f'PO {po}: più ordini esistenti, compila il numero ordine J&J')
+        if previous:key=previous[0]['source_key']
         q=positive_quantity(row['QUANTITA']);price=money(row['PREZZO UNITARIO']) if text(row.get('PREZZO UNITARIO')) else None
         total=money(row['TOTALE RIGA']) if text(row.get('TOTALE RIGA')) else (money(decimal(price)*q) if price is not None else None)
         if price is not None and total is not None and abs(decimal(price)*q-decimal(total))>Decimal('.02'):raise ValueError(f'Riga {index+2}: prezzo × quantità diverso dal totale')
@@ -153,6 +159,7 @@ def prepare_orders(content,filename,division,records=()):
               'cac':cac,'customer':customer or accounts(records).get(cac,cac),'invoice':invoice,'po':po,
               'description':text(row.get('DESCRIZIONE')),'source_rows':[int(index)+2]}
         payload={'customer':line['customer'],'cac':cac,'po':po,'number':number,'invoice':invoice,'reference':text(row.get('RIFERIMENTO INTERVENTO')),'lines':[]}
+        if key in documents and documents[key]['number']!=number:raise ValueError(f'PO {po} riutilizzato: aggiorna prima il numero J&J dell’ordine già presente')
         if key in documents and documents[key]['invoice']!=invoice:raise ValueError(f'PO {po} su più fatture: usa il numero ordine J&J per distinguere gli ordini')
         documents.setdefault(key,payload)['lines'].append(line)
     result=[]
@@ -202,7 +209,18 @@ def proposals(records,links,closure_id=None):
             if a.get('invoice') and b.get('invoice') and a['invoice'].split('-')[0]!=b['invoice'].split('-')[0]:continue
             ordr=b['quantity']-allocated(links,order['id'],b['key'],'ORDINE')
             if ordr<=0:continue
-            for implant,c in line_rows([r for r in active if r['kind']=='IMPIANTO' and r['division']==closing['division']]):
+            impl_records=[r for r in active if r['kind']=='IMPIANTO' and r['division']==closing['division']]
+            order_signature=Counter()
+            for ol in order['payload']['lines']:order_signature[ol['ref']]+=ol['quantity']
+            full=[]
+            for doc in impl_records:
+                if doc['payload'].get('cac')!=a['cac']:continue
+                if a.get('date') and doc['payload'].get('event_date') and doc['payload']['event_date']>a['date']:continue
+                signature=Counter()
+                for il in doc['payload']['lines']:signature[il['ref']]+=il['quantity']
+                if signature==order_signature:full.append(doc)
+            if len(full)==1:impl_records=full
+            for implant,c in line_rows(impl_records):
                 if a['ref']!=c['ref'] or a['cac']!=c.get('cac'):continue
                 if b.get('lot') and c.get('lot') and b['lot']!=c['lot']:continue
                 if a.get('date') and implant['payload'].get('event_date') and implant['payload']['event_date']>a['date']:continue
@@ -213,6 +231,7 @@ def proposals(records,links,closure_id=None):
                   'Fattura':a.get('invoice',''),'PO':a.get('po',''),'REF':a['ref'],'Presidio':a.get('customer') or a['cac'],
                   'Ordine':order['payload'].get('number') or order['payload'].get('po'),
                   'Documento impianto':implant['source_key'],'Riferimento intervento':implant['payload'].get('reference',''),
+                  'Riscontro documento':'Composizione completa ordine coincidente' if len(full)==1 else 'Candidato per riga; verificare intervento',
                   'Data intervento':implant['payload'].get('event_date',''),'Lotto impianto':c.get('lot',''),
                   'Metodo':'REF e quantità, lotto ordine non disponibile' if not b.get('lot') else 'REF e lotto',
                   'Differenza prezzo':float(decimal(a['price'])-decimal(b['price'])) if a.get('price') is not None and b.get('price') is not None else None})

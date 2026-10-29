@@ -62,6 +62,10 @@ begin
  perform pg_advisory_xact_lock(hashtext('jj-guided-reconciliation'));
  for r in select value from jsonb_array_elements(p_records) loop
   if p_kind='CHIUSURA' and r->>'source_key' is distinct from r->'payload'->>'month' then raise exception 'Periodo e chiave della chiusura discordanti'; end if;
+  if p_kind='ORDINE' and coalesce(r->'payload'->>'number','')<>'' and exists(
+    select 1 from public.jj_recon_records where kind='ORDINE' and division=p_division
+    and payload->>'number'=r->'payload'->>'number' and payload->>'cac'=r->'payload'->>'cac'
+    and source_key<>r->>'source_key') then raise exception 'Numero ordine J&J già acquisito con un’altra chiave'; end if;
   if coalesce(r->>'source_key','')='' or (r->>'source_key')=any(seen) then raise exception 'Chiave documento assente o duplicata'; end if;
   seen:=array_append(seen,r->>'source_key');perform public.jj_validate_payload(p_kind,r->'payload');
   select * into old from public.jj_recon_records where kind=p_kind and division=p_division and source_key=r->>'source_key' for update;
