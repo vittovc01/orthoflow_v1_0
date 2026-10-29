@@ -10,6 +10,7 @@ import pandas as pd
 from jj_closures import decimal, prepare_closure
 
 DIVISIONS=('TRAUMA','PROTESICA')
+BASE_ACCOUNTS={'6977429':'H- CIVILE SAPRI','7533619':'FARM.P.O.UMBERTO I NOCERA INFERIORE','6977437':'H- CIVILE BATTIPAGLIA'}
 ORDER_COLUMNS=['Presidio','CAC','PO cliente','Numero ordine J&J','Numero fattura','REF','Descrizione','Quantità','Prezzo unitario','Totale riga','Riferimento intervento']
 
 def text(value):
@@ -53,7 +54,7 @@ def select_frame(content,filename,required):
     return found[0]
 
 def accounts(records):
-    result={}
+    result=dict(BASE_ACCOUNTS)
     for r in records:
         if r['kind']=='CHIUSURA':
             for line in r['payload']['lines']:
@@ -66,6 +67,8 @@ def resolve_cac(cac,customer,po,records):
         if not value.isdigit():raise ValueError('CAC deve contenere solo cifre')
         return value
     matches=set()
+    if customer:
+        matches.update(c for c,name in BASE_ACCOUNTS.items() if normalized(customer)==normalized(name))
     for r in records:
         for line in r['payload'].get('lines',[]):
             if not line.get('cac'):continue

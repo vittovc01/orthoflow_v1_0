@@ -1,5 +1,5 @@
 import pytest
-from jj_reconciliation import prepare_tab,prepare_orders,prepare_month,proposals,residuals
+from jj_reconciliation import prepare_tab,prepare_orders,prepare_month,proposals,residuals,accounts
 
 def record(kind,id,quantity=2,**extra):
  line={'key':'line','ref':'413.016S','lot':'L1' if kind=='IMPIANTO' else '', 'quantity':quantity,'cac':'100','customer':'Sapri','po':'PO1','invoice':'F1','date':'2026-10-10','price':'10','total':str(10*quantity)}
@@ -30,6 +30,7 @@ def test_tab_document_identity_stable_and_asl_not_mapped_globally():
  r=prepare_tab(csv.encode(),'TAB.csv','TRAUMA')
  assert r[0]['source_key']=='2026|DDT|T|1'
  assert r[0]['payload']['cac']==''
+ assert {'6977429','7533619','6977437'}.issubset(accounts([]))
  assert r[0]['payload']['event_date']=='2026-09-01'
  assert r[0]['payload']['document_date']=='2026-09-02'
  assert r[0]['payload']['encounter']=='007'

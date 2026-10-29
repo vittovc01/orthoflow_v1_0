@@ -97,7 +97,7 @@ if editable:
   if st.button('Salva presidio e data verificati'):
    try:
     if not cac:raise ValueError('Scegliere il presidio')
-    pd.Timestamp(event)
+    if pd.isna(pd.to_datetime(event,errors='coerce')):raise ValueError('Inserisci una data intervento valida')
     payload={**record['payload'],'cac':cac,'event_date':str(pd.Timestamp(event).date()),'lines':[{**l,'cac':cac} for l in record['payload']['lines']]}
     backend().rpc('jj_review_record',{'p_id':selected,'p_action':'EDIT','p_payload':payload,'p_note':note,'p_actor':actor}).execute();load_data.clear();st.rerun()
    except Exception as exc:st.error(str(exc))
