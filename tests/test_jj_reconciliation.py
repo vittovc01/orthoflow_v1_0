@@ -1,5 +1,5 @@
 import pytest
-from jj_reconciliation import prepare_tab,prepare_orders,prepare_month,proposals,residuals,accounts
+from jj_reconciliation import prepare_tab,prepare_orders,prepare_month,proposals,residuals,accounts,closing_orders
 
 def record(kind,id,quantity=2,**extra):
  line={'key':'line','ref':'413.016S','lot':'L1' if kind=='IMPIANTO' else '', 'quantity':quantity,'cac':'100','customer':'Sapri','po':'PO1','invoice':'F1','date':'2026-10-10','price':'10','total':str(10*quantity)}
@@ -75,3 +75,18 @@ def test_complete_order_composition_prioritizes_one_document_over_common_single_
  assert len(result)==2
  assert all(r['implant_id']==3 for r in result)
  assert all('Composizione completa' in r['Riscontro documento'] for r in result)
+
+def test_closure_order_list_keeps_po_separate_from_supplier_number():
+ records=[record('CHIUSURA',1),record('ORDINE',2,po='PO1',number='JJ-123',cac='100')]
+ rows=closing_orders(records,1)
+ assert rows[0]['PO cliente']=='PO1'
+ assert rows[0]['Fattura']=='F1'
+ assert rows[0]['Ordini presenti']=='JJ-123'
+
+def test_known_order_can_have_two_invoices_without_dropping_line_identity():
+ csv='CAC;PO cliente;Numero ordine J&J;Numero fattura;REF;Quantità\n100;PO1;JJ1;F1;413.016S;1\n100;PO1;JJ1;F2;413.016S;1\n'
+ result=prepare_orders(csv.encode(),'o.csv','TRAUMA')
+ assert len(result)==1
+ assert len(result[0]['payload']['lines'])==2
+ assert {l['invoice'] for l in result[0]['payload']['lines']}=={'F1','F2'}
+ assert result[0]['payload']['invoice']==''

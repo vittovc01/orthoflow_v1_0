@@ -154,7 +154,10 @@ def prepare_orders(content,filename,division,records=()):
         same_po=[r for r in prior if r['payload'].get('po')==po and (not number or not r['payload'].get('number') or r['payload'].get('number')==number)]
         previous=same_number or same_po
         if len(previous)>1:raise ValueError(f'PO {po}: più ordini esistenti, compila il numero ordine J&J')
-        if previous:key=previous[0]['source_key']
+        if previous:
+            key=previous[0]['source_key']
+            if not number:number=previous[0]['payload'].get('number','')
+            if not invoice:invoice=previous[0]['payload'].get('invoice','')
         q=positive_quantity(row['QUANTITA']);price=money(row['PREZZO UNITARIO']) if text(row.get('PREZZO UNITARIO')) else None
         total=money(row['TOTALE RIGA']) if text(row.get('TOTALE RIGA')) else (money(decimal(price)*q) if price is not None else None)
         if price is not None and total is not None and abs(decimal(price)*q-decimal(total))>Decimal('.02'):raise ValueError(f'Riga {index+2}: prezzo × quantità diverso dal totale')
@@ -163,7 +166,9 @@ def prepare_orders(content,filename,division,records=()):
               'description':text(row.get('DESCRIZIONE')),'source_rows':[int(index)+2]}
         payload={'customer':line['customer'],'cac':cac,'po':po,'number':number,'invoice':invoice,'reference':text(row.get('RIFERIMENTO INTERVENTO')),'lines':[]}
         if key in documents and documents[key]['number']!=number:raise ValueError(f'PO {po} riutilizzato: aggiorna prima il numero J&J dell’ordine già presente')
-        if key in documents and documents[key]['invoice']!=invoice:raise ValueError(f'PO {po} su più fatture: usa il numero ordine J&J per distinguere gli ordini')
+        if key in documents and documents[key]['invoice']!=invoice:
+            if not number:raise ValueError(f'PO {po} su più fatture: usa il numero ordine J&J per distinguere gli ordini')
+            documents[key]['invoice']=''
         documents.setdefault(key,payload)['lines'].append(line)
     result=[]
     for key,payload in documents.items():payload['lines']=group_lines(payload['lines'],'ORDINE');result.append({'source_key':key,'payload':payload})
@@ -248,5 +253,19 @@ def residuals(records,links):
         kind=record['kind'];rid=record['id'];q=line['quantity'];used=allocated(links,rid,line['key'],kind)
         result.append({'Tipo':kind,'Documento':record['source_key'],'REF':line['ref'],'Presidio':line.get('customer',''),
           'Quantità':q,'Quantità riconciliata':used,'Residuo':q-used,'Valore riga':float(line['total']) if line.get('total') is not None else None,
-          'Stato':'REVISIONE DA VERIFICARE' if record.get('pending_payload') else ('RESO DA VERIFICARE' if q<0 else ('NON RISCONTRATO CON LE FONTI CARICATE' if used<q else 'QUANTITÀ RICONCILIATA'))})
+          'Stato':'REVISIONE DA VERIFICARE' if record.get('pending_payload') else (('RESO VERIFICATO IN CHIUSURA' if record.get('closed_at') else 'RESO DA VERIFICARE') if q<0 else ('NON RISCONTRATO CON LE FONTI CARICATE' if used<q else 'QUANTITÀ RICONCILIATA'))})
     return result
+
+def closing_orders(records,closure_id):
+    closing=next(r for r in records if r['id']==closure_id)
+    grouped={}
+    for line in closing['payload']['lines']:
+        key=(line['cac'],line.get('po',''),line.get('invoice',''),line.get('type','VENDITA'))
+        if key not in grouped:
+            present=[r['payload'].get('number') or 'PO '+r['payload'].get('po','') for r in records if r['kind']=='ORDINE' and r['division']==closing['division'] and r['payload'].get('cac')==key[0] and r['payload'].get('po')==key[1]]
+            grouped[key]={'Presidio':line.get('customer',''),'CAC':key[0],'PO cliente':key[1],'Fattura':key[2],
+              'Tipo':key[3],'Righe prodotto':0,'Totale EUR':0.0,'Ordini presenti':', '.join(present),
+              'Da acquisire':'Documento di reso' if line['quantity']<0 else ('Righe ordine presenti: verificare completezza' if present else 'Distinta ordine')}
+        grouped[key]['Righe prodotto']+=1
+        grouped[key]['Totale EUR']+=float(line.get('total') or 0)
+    return list(grouped.values())

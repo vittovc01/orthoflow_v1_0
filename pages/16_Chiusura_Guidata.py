@@ -5,7 +5,7 @@ import streamlit as st
 from supabase import create_client
 from orthoflow_branding import configure_page
 from jj_closures import read_all
-from jj_reconciliation import prepare_tab,prepare_orders,prepare_month,accounts,proposals,residuals,digest
+from jj_reconciliation import prepare_tab,prepare_orders,prepare_month,accounts,proposals,residuals,closing_orders,digest
 
 configure_page(page_title='Chiusura guidata · P.M. Medical',page_icon='📋',layout='wide')
 if not st.session_state.get('user'):st.switch_page('pages/99_Login.py');st.stop()
@@ -22,6 +22,24 @@ def backend():
 @st.cache_data(ttl=30)
 def load_data():
  return (read_all(backend(),'jj_recon_records').to_dict('records'),read_all(backend(),'jj_recon_links').to_dict('records'))
+
+@st.cache_data(ttl=300)
+def prepare_uploaded(kind,content,filename,division,month,context):
+ if kind=='IMPIANTO':return prepare_tab(content,filename,division,context)
+ if kind=='ORDINE':return prepare_orders(content,filename,division,context)
+ return prepare_month(content,filename,division,month)
+
+def parsing_context(rows):
+ result=[]
+ for r in rows:
+  payload={k:v for k,v in r['payload'].items() if k not in ('lines','economic_rows')}
+  unique={}
+  for l in r['payload']['lines']:
+   key=(l.get('cac'),l.get('customer'),l.get('po'))
+   unique[key]={k:l.get(k) for k in ('cac','customer','po','aliases') if l.get(k) is not None}
+  payload['lines']=list(unique.values())
+  result.append({'id':r['id'],'kind':r['kind'],'division':r['division'],'source_key':r['source_key'],'payload':payload})
+ return result
 
 user=st.session_state.get('user')
 actor=str(user.get('email') or user.get('username') or user.get('id') or 'utente') if isinstance(user,dict) else str(user)
@@ -45,9 +63,7 @@ for kind,title,uploadkey in [('IMPIANTO','1. Impianti dal gestionale (TAB)','tab
   if uploaded:
    try:
     content=uploaded.getvalue()
-    if kind=='IMPIANTO':prepared=prepare_tab(content,uploaded.name,division,records)
-    elif kind=='ORDINE':prepared=prepare_orders(content,uploaded.name,division,records)
-    else:prepared=prepare_month(content,uploaded.name,division,str(month))
+    prepared=prepare_uploaded(kind,content,uploaded.name,division,str(month),parsing_context(records))
     old={r['source_key']:r for r in records if r['kind']==kind}
     preview=[]
     for r in prepared:
@@ -58,7 +74,9 @@ for kind,title,uploadkey in [('IMPIANTO','1. Impianti dal gestionale (TAB)','tab
       'Presidio mancante':sum(not x.get('cac') for x in p['lines']),'Esito':status})
     st.dataframe(pd.DataFrame(preview),hide_index=True,use_container_width=True)
     if kind=='IMPIANTO':st.caption('Documenti già presenti aggiornati per tipo, serie, numero e anno. Ripetizioni dello stesso REF e lotto aumentano la quantità. La data intervento è distinta dalla data documento.')
-    if kind=='CHIUSURA':st.write('Fatturato del file: € '+f"{float(prepared[0]['payload']['invoiced_sales']):,.2f}")
+    if kind=='CHIUSURA':
+     st.write('Fatturato del file: € '+f"{float(prepared[0]['payload']['invoiced_sales']):,.2f}")
+     st.caption(f"Righe fonte: {prepared[0]['payload']['source_row_count']}. Rettifiche economiche conservate: {len(prepared[0]['payload']['economic_rows'])}. Le righe prodotto ripetute sono raggruppate mantenendo tutte le quantità.")
     if st.button('Salva '+title[3:],key='save_'+kind,type='primary'):
      response=backend().rpc('jj_import_records',{'p_kind':kind,'p_division':division,'p_file':uploaded.name,'p_records':prepared,'p_actor':actor}).execute().data
      st.session_state['recon_message']=str(response);load_data.clear();st.rerun()
@@ -107,6 +125,11 @@ closures=[r for r in records if r['kind']=='CHIUSURA']
 if closures:
  selected_closure=st.selectbox('Chiusura da riconciliare',[r['id'] for r in closures],format_func=lambda i:next(r['source_key'] for r in closures if r['id']==i),key='active_closure')
  closing=next(r for r in closures if r['id']==selected_closure)
+ st.subheader('Ordini e fatture della chiusura')
+ st.caption('Cerca questi PO nel Customer e compila le relative distinte nel modello Excel. Il PO della chiusura non viene trasformato in un numero ordine J&J.')
+ order_list=pd.DataFrame(closing_orders(records,selected_closure))
+ st.dataframe(order_list,hide_index=True,use_container_width=True)
+ st.download_button('Scarica elenco PO e fatture da controllare',order_list.to_csv(index=False).encode('utf-8-sig'),'Elenco_PO_fatture_'+division+'_'+closing['source_key']+'.csv','text/csv')
  st.subheader('5. Abbinamenti da confermare')
  candidates=proposals(records,links,selected_closure)
  if candidates and not closing.get('closed_at'):
