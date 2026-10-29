@@ -13,6 +13,7 @@ def sb():
  return create_client(str(st.secrets.get("SUPABASE_URL")).rstrip("/"),str(st.secrets.get("SUPABASE_SERVICE_KEY") or st.secrets.get("SUPABASE_ANON_KEY") or st.secrets.get("SUPABASE_KEY")))
 def get(t): return read_all(sb(),t)
 st.title("🔎 Controllo Ordini J&J")
+st.markdown("[Apri Chiusura guidata: TAB, chiusura e ordini](./chiusura-guidata)")
 st.caption("Riconcilia consumi/interventi P.M. Medical con ordini, fatture e chiusure J&J. Residui e anomalie restano aperti e passano al mese successivo.")
 up=st.file_uploader("⬆️ Importa dataset J&J consolidato (CSV/Excel)",type=["xlsx","xls","csv"])
 if up and st.button("Importa / aggiorna J&J",type="primary"):
