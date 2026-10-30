@@ -51,13 +51,20 @@ try:
 except Exception:
  st.error('Procedura non disponibile: verificare la configurazione server del modulo chiusure.');st.stop()
 records=[r for r in records if r['division']==division]
+counts={kind:sum(r['kind']==kind for r in records) for kind in ('IMPIANTO','CHIUSURA','ORDINE')}
+for col,kind,label in zip(st.columns(3),counts,('Documenti TAB','Chiusure mensili','Ordini acquisiti')):
+ col.metric(label,counts[kind])
+if not records:
+ st.info('Nessun dato caricato per questa divisione. Inizia dal TAB aggiornato, poi carica la chiusura mensile e le distinte degli ordini. Gli abbinamenti saranno proposti solo dopo il caricamento delle tre fonti.')
+else:
+ st.caption('Un unico controllo: TAB → chiusura mensile → ordini → verifica presidi e abbinamenti → conferma del mese.')
 catalog=accounts(records)
 template=Path(__file__).resolve().parents[1]/'templates/modello_ordini_chiusura.b64'
 if template.exists():st.download_button('Scarica modello Excel ordini',base64.b64decode(template.read_text()),'Modello_Ordini_Chiusura.xlsx','application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
 st.info('Il PO cliente non è il numero ordine J&J. Negli ordini senza lotto il collegamento viene proposto per presidio, REF e quantità e richiede la tua conferma.')
 
 for kind,title,uploadkey in [('IMPIANTO','1. Impianti dal gestionale (TAB)','tab'),('CHIUSURA','2. Chiusura ufficiale J&J','closure'),('ORDINE','3. Distinte degli ordini','orders')]:
- with st.expander(title,expanded=True):
+ with st.expander(title,expanded=not counts[kind]):
   uploaded=st.file_uploader('Carica Excel o CSV',type=['xlsx','xls','csv'],key='recon_'+uploadkey)
   month=st.date_input('Mese di fatturazione',value=pd.Timestamp.today().replace(day=1).date(),key='recon_month') if kind=='CHIUSURA' else None
   if uploaded:
@@ -83,8 +90,9 @@ for kind,title,uploadkey in [('IMPIANTO','1. Impianti dal gestionale (TAB)','tab
    except Exception as exc:st.error('File non acquisito: '+str(exc))
 if st.session_state.get('recon_message'):st.success(st.session_state.pop('recon_message'))
 
-st.subheader('4. Verifica presidi e revisioni')
-st.caption('ASL Salerno comprende Sapri, Nocera e Battipaglia: assegnare il presidio al singolo documento. Non viene creata una corrispondenza unica per tutta ASL Salerno.')
+if records:
+ st.subheader('4. Verifica presidi e revisioni')
+ st.caption('ASL Salerno comprende Sapri, Nocera e Battipaglia: assegnare il presidio al singolo documento. Non viene creata una corrispondenza unica per tutta ASL Salerno.')
 unmapped_customers=sorted({r['payload'].get('customer','') for r in records if r['kind']=='IMPIANTO' and not r['payload'].get('cac') and r['payload'].get('customer','').strip().upper()!='ASL SALERNO'})
 if unmapped_customers and catalog:
  with st.expander('Assegna il presidio ai clienti: una volta sola'):
@@ -119,7 +127,7 @@ if editable:
     payload={**record['payload'],'cac':cac,'event_date':str(pd.Timestamp(event).date()),'lines':[{**l,'cac':cac} for l in record['payload']['lines']]}
     backend().rpc('jj_review_record',{'p_id':selected,'p_action':'EDIT','p_payload':payload,'p_note':note,'p_actor':actor}).execute();load_data.clear();st.rerun()
    except Exception as exc:st.error(str(exc))
-else:st.caption('Nessuna revisione o presidio mancante nei documenti acquisiti.')
+elif records:st.caption('Nessuna revisione o presidio mancante nei documenti acquisiti.')
 
 closures=[r for r in records if r['kind']=='CHIUSURA']
 if closures:
