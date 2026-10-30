@@ -47,6 +47,7 @@ jobs:
           node tools/gtin-staging/test-review.mjs
           node tools/gtin-staging/test-jj-closures.mjs
           node tools/gtin-staging/test-jj-guided.mjs
+          node tools/gtin-staging/test-jj-restart.mjs
       - name: Test scarico e filtro produttori
         run: python tests/test_scarico_form.py
       - name: Smoke test delle pagine reali

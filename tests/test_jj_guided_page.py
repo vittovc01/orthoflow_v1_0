@@ -22,6 +22,9 @@ def test_guided_page_renders_three_uploads_without_writes(monkeypatch):
  assert not at.exception
  assert any('Chiusura guidata' in t.value for t in at.title)
  assert len(at.get('file_uploader'))==3
+ assert len(at.metric)==3 and all(m.value=='0' for m in at.metric)
+ assert any('Nessun dato caricato' in item.value for item in at.info)
+ assert not at.subheader
  assert not any('Conferma collegamenti' in b.label for b in at.button)
  st.cache_resource.clear();st.cache_data.clear()
 

@@ -35,7 +35,6 @@ MODULES = [
     ('work-implant', 'Work Implant', 'AMMINISTRAZIONE', 'Amministrazione', 'Documenti degli impianti'),
     ('customer-connect', 'Customer Connect', 'AMMINISTRAZIONE', 'Amministrazione', 'Reintegri e rapporti con J&J'),
     ('chiusura-guidata', 'Chiusura guidata', 'AMMINISTRAZIONE', 'Amministrazione', 'Incrocia TAB, ordini e chiusura mensile'),
-    ('controllo-ordini-jj', 'Controllo ordini J&J', 'AMMINISTRAZIONE', 'Amministrazione', 'Verifica ordini e fatturazione'),
     ('documenti-logistica', 'Documenti logistica', 'LOGISTICA', 'Logistica', 'Foto e certificazioni archiviate'),
     ('corrieri', 'Organizzazione corrieri', 'LOGISTICA', 'Logistica', 'Pianifica missioni, consegne e ritiri'),
     ('gestionale', 'Controlli di gestione', 'DIREZIONE', 'Direzione', 'Fatturato, inventario, offerte e anagrafiche'),
