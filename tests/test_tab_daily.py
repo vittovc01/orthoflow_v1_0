@@ -43,6 +43,17 @@ def test_verified_cc_date_and_presidio_survive_cumulative_reload():
  result=prepare_tab(sample(),'updated.csv','PROTESICA',[old])[0]['payload']
  assert result['encounter']=='VERIFICATA/1' and result['event_date']=='2025-11-09' and result['cac']=='100'
 
+def test_verified_structure_and_internal_code_survive_original_erp_customer_name():
+ first=prepare_tab(sample(),'x.csv','PROTESICA')[0]
+ old={'id':1,'kind':'IMPIANTO','division':'PROTESICA',**first}
+ old['payload'].update(source_customer='Clinica',customer='Presidio verificato',customer_code='001',cac='100')
+ rows=prepare_tab(sample(),'updated.csv','PROTESICA',[old],customers=[{'codice_cliente':'999','descrizione':'Clinica'}])
+ p=rows[0]['payload']
+ assert p['customer']=='Presidio verificato' and p['customer_code']=='001' and p['cac']=='100'
+ assert p['source_customer']=='Clinica' and p['lines'][0]['customer']=='Presidio verificato'
+ changed=prepare_tab(sample().replace(b';Clinica;',b';Altro cliente;'),'updated.csv','PROTESICA',[old])[0]['payload']
+ assert changed['customer']=='Altro cliente' and changed['cac']=='' and 'customer_code' not in changed
+
 @pytest.mark.parametrize('code,name',[
  ('1','PM Medical'),('2','Maurizio Guarino'),('3','Cristiano'),('4','Mariano Borrelli'),
  ('5','Mariano Gargiulo'),('6','Assunta Mastrota'),('7','Francesco De Lisi'),

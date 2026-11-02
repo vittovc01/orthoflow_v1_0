@@ -3,6 +3,7 @@ import streamlit as st
 from supabase import create_client
 from orthoflow_branding import configure_page
 from jj_closures import read_all
+from jj_data import read_ledger
 from jj_report_runtime import current_reports
 from jj_runtime import current_reconciliation
 from jj_order_template import order_template
@@ -24,9 +25,8 @@ def backend():
  if not key:raise RuntimeError('Configurare la connessione server prima di usare la chiusura guidata')
  return create_client(str(st.secrets['SUPABASE_URL']).rstrip('/'),str(key))
 
-@st.cache_data(ttl=30)
 def load_data():
- return (read_all(backend(),'jj_recon_records').to_dict('records'),read_all(backend(),'jj_recon_links').to_dict('records'))
+ return read_ledger(backend())
 
 @st.cache_data(ttl=300)
 def prepare_uploaded(kind,content,filename,division,month,context,customers):
@@ -55,7 +55,7 @@ def export_report(content):
  return _reports.excel_report(content)
 
 st.title('Chiusura guidata')
-st.caption('Carica i tre file, controlla il risultato e conferma il mese. Gli impianti del TAB sono usati per il controllo amministrativo.')
+st.caption('I TAB vengono caricati una volta in Gestione Interventi → Interventi TAB. Qui aggiungi chiusura e ordini, controlla il risultato e conferma il mese.')
 division=st.radio('Area di chiusura',['TRAUMA','PROTESICA'],format_func=lambda d:'Chiusura Trauma' if d=='TRAUMA' else 'Chiusura Protesica',horizontal=True,key='recon_division')
 st.caption('File, associazioni e conferme del mese sono separati per divisione.')
 try:
@@ -73,7 +73,7 @@ except Exception:
 st.header('1. Carica i file')
 for col,kind,label in zip(st.columns(3),counts,('Documenti TAB','Chiusure mensili','Ordini acquisiti')):
  col.metric(label,counts[kind])
-if not records:st.info('Nessun dato caricato. Inizia dal TAB aggiornato, poi carica chiusura mensile e ordini.')
+if not records:st.info('Nessun dato caricato. Importa il TAB aggiornato in Gestione Interventi, poi carica qui chiusura mensile e ordini.')
 if customers:
  try:
   st.download_button('Scarica modello ordini '+division.title(),order_template(customers,records,division),'Modello_Ordini_'+division.title()+'.xlsx','application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
@@ -82,7 +82,8 @@ if customers:
 st.caption('Il PO cliente della chiusura resta distinto dal numero ordine J&J. Il lotto non è richiesto nel file ordini.')
 st.caption('Puoi riutilizzare un file ordini cumulativo per divisione. Aggiungi i nuovi ordini mantenendo tutte le righe di quelli già presenti; le modifiche agli ordini collegati richiedono una revisione.')
 
-for kind,title,uploadkey in [('IMPIANTO','TAB del gestionale','tab'),('CHIUSURA','Chiusura ufficiale J&J','closure'),('ORDINE','Distinte ordini','orders')]:
+st.caption('Documenti TAB già disponibili per questa linea: '+str(counts['IMPIANTO'])+'. Per aggiungerli o aggiornarli usa Gestione Interventi; non occorre importarli di nuovo qui.')
+for kind,title,uploadkey in [('CHIUSURA','Chiusura ufficiale J&J','closure'),('ORDINE','Distinte ordini','orders')]:
  with st.expander(title,expanded=not counts[kind]):
   uploaded=st.file_uploader('Carica '+title+' '+division.title()+' (Excel o CSV)',type=['xlsx','xls','csv'],key='recon_'+uploadkey+'_'+division)
   month=st.date_input('Mese di fatturazione',value=pd.Timestamp.today().replace(day=1).date(),key='recon_month_'+division) if kind=='CHIUSURA' else None

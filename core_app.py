@@ -77,6 +77,12 @@ _original_radio = DeltaGenerator.radio
 
 def _route_legacy_menu(value):
     selected = str(value).strip()
+    if selected in ('Dashboard','KPI e Fatturato') and (_director or 'AMMINISTRAZIONE' in _p):
+        quick=st.session_state.get('quick_menu')
+        if not quick or quick in ('Dashboard','KPI e Fatturato'):
+            from tab_management_ui import render_tab_management
+            render_tab_management(analytics=True)
+            st.stop()
     if selected == "DDT carico / Loan":
         st.switch_page(DDT_PAGE)
         st.stop()

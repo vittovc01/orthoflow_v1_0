@@ -219,7 +219,8 @@ def warehouse_codes():
 
 
 st.title("🛠️ Gestione Interventi")
-st.caption("Controllo completo post-intervento: puoi correggere dati clinici, codice, lotto, scadenza, quantità, descrizione e prezzo. Le correzioni che cambiano il materiale generano movimenti di rettifica del magazzino, così la giacenza resta coerente.")
+from tab_management_ui import intervention_source
+intervention_source(sb())
 
 try:
     interventions = (sb().table("interventi").select("*")
