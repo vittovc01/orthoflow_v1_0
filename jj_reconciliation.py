@@ -8,6 +8,7 @@ from collections import Counter, defaultdict
 from decimal import Decimal
 import pandas as pd
 from jj_closures import decimal, prepare_closure
+from tab_agents import agent_name, payload_agent
 
 DIVISIONS=('TRAUMA','PROTESICA')
 BASE_ACCOUNTS={'6977429':'H- CIVILE SAPRI','7533619':'FARM.P.O.UMBERTO I NOCERA INFERIORE','6977437':'H- CIVILE BATTIPAGLIA'}
@@ -136,8 +137,11 @@ def prepare_tab(content,filename,division,records=(),mapping=None,customers=()):
               'expiry':date(row.get('SCADENZA')),'description':text(row.get('DESCRIZIONE')),'source_rows':[int(index)+2]}
         payload={'customer':customer,'cac':cac,'reference':reference,'encounter':encounter,'event_date':event,'source_ref_date':source_event,'document_date':docdate,'lines':[]}
         agent=text(row.get('AGENTE')).removesuffix('.0')
+        if agent.isdigit():agent=str(int(agent))
         if agent and agent!='0':
-            if agent.isdigit():payload['agent_code']=agent
+            if agent.isdigit():
+                payload['agent_code']=agent
+                payload['agent']=agent_name(agent)
             else:payload['agent']=agent
         matched_codes=customer_codes[normalized(customer)]
         if len(matched_codes)==1:payload['customer_code']=next(iter(matched_codes))
@@ -359,6 +363,7 @@ def confirmed_associations(records,links,closure_id):
         result.append({'Ordine':order['payload'].get('number') or order['payload'].get('po') or o.get('po'),
           'PO':c.get('po'),'Fattura':c.get('invoice'),'Presidio':c.get('customer') or c.get('cac'),'CAC':c.get('cac'),
           'Cartella clinica':text(implant['payload'].get('encounter')),'Riferimento intervento':implant['payload'].get('reference',''),
+          'Agente':payload_agent(implant['payload']),
           'Data intervento':implant['payload'].get('event_date',''),'Documento impianto':implant['source_key'],
           'REF':c['ref'],'Descrizione':o.get('description') or i.get('description',''),'Lotto impianto':i.get('lot',''),
           'Quantità':link['quantity'],'Prezzo ordine':o.get('price'),'Prezzo chiusura':c.get('price'),'Differenza unit.':difference,
