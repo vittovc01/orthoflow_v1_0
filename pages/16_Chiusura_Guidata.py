@@ -5,7 +5,7 @@ import streamlit as st
 from supabase import create_client
 from orthoflow_branding import configure_page
 from jj_closures import read_all
-from jj_reconciliation import prepare_tab,prepare_orders,prepare_month,accounts,proposals,residuals,closing_orders,confirmed_associations,digest
+from jj_reconciliation import prepare_tab,prepare_orders,prepare_month,accounts,proposals,residuals,closing_orders,confirmed_associations,allocation_plan,digest
 
 configure_page(page_title='Chiusura guidata · P.M. Medical',page_icon='📋',layout='wide')
 if not st.session_state.get('user'):st.switch_page('pages/99_Login.py');st.stop()
@@ -139,7 +139,7 @@ if closures:
  st.dataframe(order_list,hide_index=True,use_container_width=True)
  st.download_button('Scarica elenco PO e fatture da controllare',order_list.to_csv(index=False).encode('utf-8-sig'),'Elenco_PO_fatture_'+division+'_'+closing['source_key']+'.csv','text/csv')
  st.subheader('5. Abbinamenti ordine e cartelle cliniche')
- st.caption('Un ordine può comprendere più cartelle cliniche dello stesso presidio. Ogni REF viene cercato in tutte le CC compatibili e può essere ripartito tra più CC per le quantità disponibili. Nessuna scelta automatica tra CC alternative: seleziona e conferma quelle corrette.')
+ st.caption('La proposta complessiva ripartisce i REF fra più CC dello stesso presidio. Puoi confermarla in blocco, escludere le eccezioni oppure passare alla scelta manuale.')
  candidates=proposals(records,links,selected_closure)
  if candidates and not closing.get('closed_at'):
   frame=pd.DataFrame(candidates);frame.insert(0,'Conferma',False)
@@ -149,23 +149,43 @@ if closures:
   order_labels={r['order_id']:str(r['Ordine'])+' · PO '+str(r['PO']) for r in frame.to_dict('records')}
   selected_order=st.selectbox('Filtra ordine / PO',['Tutti']+order_ids,format_func=lambda x:'Tutti' if x=='Tutti' else order_labels[x])
   if selected_order!='Tutti':frame=frame[frame['order_id']==selected_order]
+  mode=st.radio('Modalità di abbinamento',['Proposta automatica','Scelta manuale'],horizontal=True)
+  automatic=mode=='Proposta automatica'
+  if automatic:
+   planned=allocation_plan(records,links,selected_closure,frame.to_dict('records'))
+   st.info('Criterio della proposta: prima le CC meno recenti dello stesso presidio. Il server controlla le quantità disponibili su chiusura, ordine e impianto. Nulla viene salvato prima della tua conferma.')
+   if not planned:
+    st.warning('Nessuna ripartizione automatica disponibile: verificare CC/date mancanti o usare Scelta manuale.')
+   else:
+    frame=pd.DataFrame(planned)
+    st.write(f"Proposta: {len(frame)} collegamenti · {frame['order_id'].nunique()} ordini · {frame['implant_id'].nunique()} documenti CC · {int(frame['quantity'].sum())} pezzi.")
+    uncovered=sum(max(0,r['Residuo']) for r in residuals([closing],links) if r['Quantità']>0)-int(frame['quantity'].sum())
+    if uncovered>0:st.caption(f'Nel mese resterebbero {uncovered} pezzi fatturati da riconciliare dopo questa proposta, compresi gli ordini fuori dal filtro. Il dettaglio resta nei residui.')
+    if any(not r['Univoco'] for r in planned):
+     st.warning('Sono presenti alternative compatibili. La ripartizione per data è una proposta da verificare e non dimostra a quale CC sia stato fatturato il lotto. Escludi o correggi le righe non corrette.')
+    st.download_button('Scarica proposta completa prima della conferma',frame[[c for c in ('Ordine','PO','Fattura','Presidio','Cartella clinica','REF','Lotto impianto','quantity','Criterio proposta') if c in frame]].to_csv(index=False).encode('utf-8-sig'),'Proposta_ordini_CC_'+division+'.csv','text/csv')
   page=1
-  if len(frame)>1000:
+  if not automatic and len(frame)>1000:
    page=st.number_input('Pagina delle proposte',min_value=1,max_value=(len(frame)+999)//1000,value=1,step=1,key='candidate_page_'+digest([selected_closure,presidio,selected_order,len(frame)]))
-   st.caption('Sono mostrate 1.000 proposte per pagina. Conferma le selezioni della pagina corrente prima di passare alla successiva.')
+   st.caption('Sono mostrate 1.000 alternative per pagina. Conferma le selezioni della pagina corrente prima di passare alla successiva.')
    frame=frame.iloc[(page-1)*1000:page*1000]
-  visible=['Conferma','Fattura','PO','REF','Presidio','Ordine','Cartella clinica','Documento impianto','Riferimento intervento','Data intervento','Lotto impianto','quantity','Riscontro documento','Metodo','Univoco','Differenza prezzo']
-  with st.form('confirm_proposals'):
-   edited=st.data_editor(frame,column_order=visible,disabled=[c for c in frame.columns if c not in ('Conferma','quantity')],
-     column_config={'quantity':st.column_config.NumberColumn('Quantità da collegare',min_value=1,step=1)},hide_index=True,use_container_width=True,
-     key='proposals_'+digest([r.get('updated_at') for r in records]+[len(links),selected_closure,presidio,selected_order,page]))
-   checked=st.checkbox('Ho controllato i collegamenti selezionati. Il lotto dell’ordine può non essere disponibile.')
-   if st.form_submit_button('Conferma collegamenti selezionati',type='primary'):
-    if not checked:st.error('Conferma il controllo dei collegamenti selezionati.');st.stop()
-    chosen=edited[edited['Conferma']].to_dict('records')
-    payload=[{k:r[k] for k in ('closure_id','closure_line','order_id','order_line','implant_id','implant_line','quantity')} for r in chosen]
-    try:backend().rpc('jj_confirm_links',{'p_links':payload,'p_actor':actor}).execute();load_data.clear();st.rerun()
-    except Exception as exc:st.error('Abbinamenti non salvati: '+str(exc))
+  if not automatic or planned:
+   selection='Escludi' if automatic else 'Conferma'
+   frame=frame.drop(columns=['Conferma'],errors='ignore');frame.insert(0,selection,False)
+   visible=[selection,'Fattura','PO','REF','Presidio','Ordine','Cartella clinica','Documento impianto','Riferimento intervento','Data intervento','Lotto impianto','quantity','Criterio proposta','Alternative compatibili','Riscontro documento','Metodo','Univoco','Differenza prezzo']
+   visible=[c for c in visible if c in frame]
+   with st.form('confirm_proposals'):
+    edited=st.data_editor(frame,column_order=visible,disabled=[c for c in frame.columns if c not in (selection,'quantity')],
+      column_config={'quantity':st.column_config.NumberColumn('Quantità da collegare',min_value=1,step=1)},hide_index=True,use_container_width=True,
+      key='proposals_'+digest([r.get('updated_at') for r in records]+[len(links),selected_closure,presidio,selected_order,page,mode]))
+    checked=st.checkbox('Ho verificato la proposta complessiva e accetto il criterio delle CC meno recenti dove vi sono alternative.' if automatic else 'Ho controllato i collegamenti selezionati. Il lotto dell’ordine può non essere disponibile.')
+    if st.form_submit_button('Conferma tutta la proposta' if automatic else 'Conferma collegamenti selezionati',type='primary'):
+     if not checked:st.error('Conferma di aver verificato la proposta prima del salvataggio.');st.stop()
+     chosen=edited[~edited['Escludi'] if automatic else edited['Conferma']].to_dict('records')
+     if not chosen:st.warning('Nessun collegamento da salvare. In modalità manuale seleziona almeno una riga; nella proposta automatica lascia incluse le righe da confermare.');st.stop()
+     payload=[{k:r[k] for k in ('closure_id','closure_line','order_id','order_line','implant_id','implant_line','quantity','proposal_criterion') if k in r} for r in chosen]
+     try:backend().rpc('jj_confirm_links',{'p_links':payload,'p_actor':actor}).execute();load_data.clear();st.rerun()
+     except Exception as exc:st.error('Abbinamenti non salvati: '+str(getattr(exc,'message',None) or exc))
  else:st.caption('Nessuna proposta residua, oppure mese già confermato. Consultare i residui: mancanza di proposte non significa riconciliazione completa.')
 
  st.subheader('Residui e abbinamenti confermati')

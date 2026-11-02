@@ -117,3 +117,36 @@ def test_mixed_order_splits_same_ref_across_cc_only_within_presidio_and_remainin
  assert {r['CAC'] for r in exported}=={'100'}
  links[0]['revoked_at']='2026-11-03'
  assert len(confirmed_associations(records,links,1))==2
+
+
+def test_bulk_fifo_draft_consumes_each_source_once_and_is_stable():
+ from jj_reconciliation import allocation_plan
+ records=[record('CHIUSURA',1,quantity=3),record('ORDINE',2,quantity=3),
+          record('IMPIANTO',3,quantity=2,encounter='OLD'),record('IMPIANTO',4,quantity=2,encounter='NEW')]
+ records[2]['payload']['event_date']='2026-01-01'
+ records[3]['payload']['event_date']='2026-09-01'
+ draft=allocation_plan(records,[],1)
+ assert [(r['Cartella clinica'],r['quantity']) for r in draft]==[('OLD',2),('NEW',1)]
+ assert all(r['proposal_criterion']=='FIFO_CC_DATE_DRAFT' for r in draft)
+ assert allocation_plan(list(reversed(records)),[],1)==draft
+ # Another order competes for the same physical pieces; one draft cannot overspend.
+ other=record('ORDINE',5,quantity=3)
+ result=allocation_plan(records+[other],[],1)
+ assert sum(r['quantity'] for r in result)==3
+ assert sum(r['quantity'] for r in result if r['implant_id']==3)<=2
+ # Existing saved links consume capacities before preparing the next draft.
+ link={k:draft[0][k] for k in ('closure_id','closure_line','order_id','order_line','implant_id','implant_line','quantity')}
+ result=allocation_plan(records,[link],1)
+ assert len(result)==1 and result[0]['Cartella clinica']=='NEW' and result[0]['quantity']==1
+
+
+def test_bulk_draft_does_not_arbitrarily_choose_undated_or_unidentified_cc():
+ from jj_reconciliation import allocation_plan
+ records=[record('CHIUSURA',1,quantity=1),record('ORDINE',2,quantity=1),record('IMPIANTO',3,quantity=1,encounter='001'),record('IMPIANTO',4,quantity=1,encounter='002')]
+ for r in records[2:]:r['payload']['event_date']=''
+ assert allocation_plan(records,[],1)==[]
+ records.pop()
+ draft=allocation_plan(records,[],1)
+ assert len(draft)==1 and draft[0]['proposal_criterion']=='UNIQUE_CANDIDATE'
+ records[2]['payload']['encounter']=''
+ assert allocation_plan(records,[],1)==[]
