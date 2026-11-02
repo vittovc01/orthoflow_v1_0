@@ -129,8 +129,18 @@ def prepare_tab(content,filename,division,records=(),mapping=None):
     if not result:raise ValueError('TAB senza righe utilizzabili')
     return result
 
-def prepare_orders(content,filename,division,records=()):
+def prepare_orders(content,filename,division,records=(),customers=()):
+    if division not in DIVISIONS:raise ValueError('Divisione non valida')
+    records=[r for r in records if r['division']==division]
     allframes=frames(content,filename)
+    settings=allframes.get('Impostazioni')
+    if settings is not None and {'Campo','Valore'}.issubset(settings.columns):
+        declared=[text(r['Valore']).upper() for _,r in settings.iterrows() if text(r['Campo'])=='Divisione']
+        if declared and (len(set(declared))!=1 or declared[0]!=division):raise ValueError('Questo file ordini appartiene a una divisione diversa: caricalo nella chiusura '+(declared[0] or 'corretta'))
+    from jj_order_template import structure_catalog
+    catalog=structure_catalog(customers,records)
+    by_code={r['Codice struttura']:r for r in catalog}
+    by_label={r['Scelta struttura']:r for r in catalog}
     preferred={'Ordini':allframes['Ordini']} if 'Ordini' in allframes else allframes
     candidates=[]
     aliases={'ORDINE':'PO CLIENTE','CODICE':'REF','CODICE PRODOTTO':'REF','TOTALE':'TOTALE RIGA'}
@@ -144,9 +154,18 @@ def prepare_orders(content,filename,division,records=()):
         # Customer's copy/paste can repeat the table header between orders.
         if normalized(row['REF']) in ('CODICE PRODOTTO','REF','CODICE') and normalized(row['QUANTITA'])=='QUANTITA':continue
         po=text(row['PO CLIENTE']);customer=text(row.get('PRESIDIO'));number=text(row.get('NUMERO ORDINE J J'))
+        internal_code=text(row.get('CODICE STRUTTURA')).removesuffix('.0')
+        selected=by_label.get(customer) or by_code.get(internal_code)
+        if internal_code and not selected:raise ValueError(f'Riga {index+2}: codice struttura non presente nell’anagrafica OrthoFlow')
+        if selected:
+            if internal_code and internal_code!=selected['Codice struttura']:raise ValueError(f'Riga {index+2}: codice struttura discordante dalla selezione')
+            if customer and customer!=selected['Scelta struttura'] and normalized(customer)!=normalized(selected['Struttura']):raise ValueError(f'Riga {index+2}: struttura e codice cliente discordanti')
+            internal_code=selected['Codice struttura'];customer=selected['Struttura']
         if not po:raise ValueError(f'Riga {index+2}: PO cliente mancante')
-        cac=resolve_cac(row.get('CAC'),customer,po,records)
-        if not cac:raise ValueError(f'Riga {index+2}, PO {po}: presidio non univoco. Compila Presidio o CAC')
+        cac=resolve_cac(row.get('CAC'),'','',records) if text(row.get('CAC')) else (selected['CAC J&J'] if selected else resolve_cac('',customer,po,records))
+        if selected and selected['CAC J&J'] and cac!=selected['CAC J&J']:raise ValueError(f'Riga {index+2}: CAC diverso dalla corrispondenza verificata della struttura')
+        if internal_code and cac==internal_code:raise ValueError(f'Riga {index+2}: il codice struttura interno non è il CAC J&J')
+        if not cac:raise ValueError(f'Riga {index+2}, PO {po}: presidio non univoco. Verifica la corrispondenza cliente/presidio negli strumenti avanzati oppure compila il CAC J&J corretto')
         invoice=text(row.get('NUMERO FATTURA'))
         key=cac+'|'+('JJ|'+number if number else 'PO|'+po)
         prior=[r for r in records if r['kind']=='ORDINE' and r['division']==division and r['payload'].get('cac')==cac]
@@ -165,6 +184,9 @@ def prepare_orders(content,filename,division,records=()):
               'cac':cac,'customer':customer or accounts(records).get(cac,cac),'invoice':invoice,'po':po,
               'description':text(row.get('DESCRIZIONE')),'source_rows':[int(index)+2]}
         payload={'customer':line['customer'],'cac':cac,'po':po,'number':number,'invoice':invoice,'reference':text(row.get('RIFERIMENTO INTERVENTO')),'lines':[]}
+        if internal_code:
+            line['customer_code']=internal_code;payload['customer_code']=internal_code
+        if key in documents and documents[key].get('customer_code')!=payload.get('customer_code'):raise ValueError(f'PO {po}: codici struttura discordanti nello stesso ordine')
         if key in documents and documents[key]['number']!=number:raise ValueError(f'PO {po} riutilizzato: aggiorna prima il numero J&J dell’ordine già presente')
         if key in documents and documents[key]['invoice']!=invoice:
             if not number:raise ValueError(f'PO {po} su più fatture: usa il numero ordine J&J per distinguere gli ordini')

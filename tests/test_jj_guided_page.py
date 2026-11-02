@@ -5,6 +5,39 @@ import streamlit as st
 import supabase
 from streamlit.testing.v1 import AppTest
 
+def test_division_switch_separates_uploads_templates_and_final_acceptance(monkeypatch):
+ from copy import deepcopy
+ from tests.test_jj_reconciliation import record
+ records=[record(kind,i) for kind,i in [('CHIUSURA',1),('ORDINE',2),('IMPIANTO',3)]]
+ other=deepcopy(records)
+ for r in other:r['id']+=3;r['division']='PROTESICA'
+ records+=other
+ links=[{'id':n,'closure_id':1+d,'order_id':2+d,'implant_id':3+d,'closure_line':'line','order_line':'line','implant_line':'line','quantity':2,'revoked_at':None,'method':'MANUALE','actor':'test','created_at':'2026-11-02'} for n,d in [(1,0),(2,3)]]
+ class Backend:
+  def table(self,name):self.name=name;return self
+  def select(self,*a):return self
+  def order(self,*a):return self
+  def range(self,*a):return self
+  def execute(self):return SimpleNamespace(data=records if self.name=='jj_recon_records' else links if self.name=='jj_recon_links' else [{'codice_cliente':'00901','descrizione':'Sapri'}])
+  def rpc(self,*a):raise AssertionError('No writes while changing division')
+ st.cache_resource.clear();st.cache_data.clear()
+ monkeypatch.setattr(supabase,'create_client',lambda *a,**kw:Backend())
+ at=AppTest.from_file(str(Path(__file__).resolve().parents[1]/'pages/16_Chiusura_Guidata.py'),default_timeout=30)
+ at.secrets['SUPABASE_URL']='http://127.0.0.1:1';at.secrets['SUPABASE_SERVICE_KEY']='fake'
+ at.session_state['user']={'id':'test'};at.session_state['ruolo']='Admin';at.run()
+ assert not at.exception
+ assert any(x.proto.label=='Scarica modello ordini Trauma' for x in at.get('download_button'))
+ assert all(x.key.endswith('_TRAUMA') for x in at.get('file_uploader'))
+ at.checkbox[0].check().run()
+ next(r for r in at.radio if r.label=='Area di chiusura').set_value('PROTESICA').run()
+ assert not at.exception
+ assert all(x.key.endswith('_PROTESICA') for x in at.get('file_uploader'))
+ assert any(x.proto.label=='Scarica modello ordini Protesica' for x in at.get('download_button'))
+ assert not at.checkbox[0].value
+ assert next(b for b in at.button if b.label=='Conferma chiusura del mese').disabled
+ assert all(m.value=='1' for m in list(at.metric)[:3])
+ st.cache_resource.clear();st.cache_data.clear()
+
 def test_guided_page_renders_three_uploads_without_writes(monkeypatch):
  class Backend:
   def table(self,*a):return self
