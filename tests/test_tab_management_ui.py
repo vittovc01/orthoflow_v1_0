@@ -80,7 +80,7 @@ def test_tab_upload_uses_only_accounting_rpc_and_becomes_visible_immediately(mon
 def test_management_dashboard_uses_tab_and_has_no_surgeon_analysis(monkeypatch):
  backend=Backend();at=app(monkeypatch,backend,'core_app.py').run()
  assert not at.exception
- assert any('Controllo di Gestione' in x.value for x in at.title)
+ assert any(x.value=='Controllo di Gestione' for x in at.title)
  assert [m.value for m in at.metric][:2]==['1','2']
  assert not any('chirurgo' in x.value.lower() for x in at.subheader)
  assert not backend.writes

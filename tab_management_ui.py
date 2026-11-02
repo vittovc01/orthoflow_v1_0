@@ -95,7 +95,7 @@ def render_tab_management(client=None,analytics=False,records=None):
         customers,headers,connections,prices=tab_catalogs(client)
     except Exception:
         st.error('Dati TAB o anagrafiche non disponibili. Riprova: non vengono mostrati totali parziali.');st.stop()
-    if analytics:st.title('Controllo di Gestione · TAB')
+    if analytics:st.title('Controllo di Gestione')
     else:st.header('Interventi dal gestionale')
     st.caption('Fonte principale: TAB del gestionale. Gli scarichi storici sono consultabili separatamente e non vengono sommati a questi dati. Nessun movimento di magazzino viene generato.')
     if st.button('Aggiorna dati TAB',key='refresh_tab_'+str(analytics)):
