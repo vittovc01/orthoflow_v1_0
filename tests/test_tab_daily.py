@@ -77,6 +77,21 @@ def test_agent_mapping_refreshes_in_a_warm_worker_without_reimporting_records(mo
  jj_runtime.current_reconciliation()
  assert cached_prepare(sample(),'x.csv','PROTESICA')[0]['payload']['agent']=='Mariano Borrelli'
 
+def test_status_runtime_recovers_stale_helper_in_existing_cloud_session(monkeypatch):
+ import jj_status_runtime,jj_intervention_status
+ monkeypatch.delattr(jj_intervention_status,'build_status')
+ jj_status_runtime._signature=None
+ assert callable(jj_status_runtime.current_status().build_status)
+
+def test_monthly_report_resolves_current_association_export_function(monkeypatch):
+ import jj_report,jj_reconciliation
+ from tests.test_jj_intervention_status import sources
+ calls=[]
+ def fresh(*args):calls.append(True);return []
+ monkeypatch.setattr(jj_reconciliation,'confirmed_associations',fresh)
+ jj_report.build_report(sources(),[],1)
+ assert calls==[True]
+
 @pytest.mark.parametrize('value,expected',[(0,'Non assegnato'),('00','Non assegnato'),('4.0','Mariano Borrelli'),('10','Codice agente 10'),('Nome esplicito','Nome esplicito')])
 def test_zero_unknown_and_named_agents_are_not_guessed(value,expected):
  from tab_agents import agent_name

@@ -3,7 +3,7 @@ import streamlit as st
 from supabase import create_client
 from orthoflow_branding import configure_page
 from jj_closures import read_all
-from jj_intervention_status import build_status
+from jj_status_runtime import current_status
 from jj_report_runtime import current_reports
 
 configure_page(page_title='Stato interventi · P.M. Medical',page_icon='📊',layout='wide')
@@ -41,7 +41,7 @@ cols=st.columns(2)
 structure=cols[0].selectbox('Struttura',['Tutte']+sorted({r['payload'].get('customer') or r['payload'].get('cac') or 'Presidio da assegnare' for r in implants}),key='status_structure_'+division)
 years=sorted({str(r['payload'].get('event_date'))[:4] for r in implants if r['payload'].get('event_date')},reverse=True)
 year=cols[1].selectbox('Anno intervento',['Tutti']+years,key='status_year_'+division)
-report=build_status(records,links,None if division=='Tutte' else division,None if structure=='Tutte' else structure,None if year=='Tutti' else year)
+report=current_status().build_status(records,links,None if division=='Tutte' else division,None if structure=='Tutte' else structure,None if year=='Tutti' else year)
 state=report['status']
 for col,label,value in zip(st.columns(4),('Interventi chiusi','Da chiudere / verificare','Pezzi da chiudere','Differenze prezzo'),(state['closed'],state['open'],state['remaining_quantity'],state['price_differences'])):
  col.metric(label,value)

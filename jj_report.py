@@ -118,7 +118,8 @@ def build_report(records,links,closure_id):
       {'Voce':'Ambito Non associati','Valore':'TAB e ordini: residui su tutte le fonti caricate, anche di altri mesi. Non equivalgono a materiale non fatturato.'},
       {'Voce':'Prezzi','Valore':'Confronto fra chiusura e distinta ordine. Prezzi ricavati dal totale / quantità quando necessario. Le differenze sono avvisi da verificare.'},
       {'Voce':'Regole di chiusura','Valore':'Tutte le quantità positive della chiusura associate; nessuna revisione pendente su fonti collegate; conferma finale di prezzi, resi e rettifiche.'}]
-    associations=confirmed_associations(records,links,closure_id)
+    import jj_reconciliation
+    associations=jj_reconciliation.confirmed_associations(records,links,closure_id)
     link_by_id={l['id']:l for l in active}
     for row in associations:
         link=link_by_id[row['Collegamento']]
