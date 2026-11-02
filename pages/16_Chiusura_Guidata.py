@@ -6,6 +6,7 @@ from jj_closures import read_all
 from jj_report_runtime import current_reports
 from jj_runtime import current_reconciliation
 from jj_order_template import order_template
+from tab_agents import payload_agent
 
 _reconciliation = current_reconciliation()
 prepare_tab,prepare_orders,prepare_month,accounts,proposals,residuals,closing_orders,confirmed_associations,allocation_plan,digest = (
@@ -103,9 +104,9 @@ for kind,title,uploadkey in [('IMPIANTO','TAB del gestionale','tab'),('CHIUSURA'
     if kind=='IMPIANTO':
      incomplete=[{'Documento':r['source_key'],'Cliente':r['payload']['customer'],'Riferimento':r['payload']['reference'],
        'CC da verificare':not bool(r['payload']['encounter']),'Data da verificare':not bool(r['payload']['event_date']),
-       'Agente':r['payload'].get('agent') or ('Codice agente '+r['payload']['agent_code'] if r['payload'].get('agent_code') else 'Non assegnato')}
+       'Agente':payload_agent(r['payload'])}
        for r in prepared if not r['payload']['encounter'] or not r['payload']['event_date']]
-     st.caption('La colonna agente viene acquisita; 0 significa non assegnato. I codici numerici non vengono convertiti in nomi senza una corrispondenza verificata.')
+     st.caption('I codici agente da 1 a 9 sono associati ai nomi confermati. 0 significa non assegnato; i codici nuovi restano da identificare.')
      if incomplete:
       st.warning(f'{len(incomplete)} documenti con CC o data da verificare: restano acquisibili, ma non saranno dichiarati chiusi finché incompleti.')
       st.dataframe(pd.DataFrame(incomplete),hide_index=True,use_container_width=True)

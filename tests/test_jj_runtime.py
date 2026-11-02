@@ -22,7 +22,7 @@ def test_dependencies_reload_only_on_first_load_or_source_change(monkeypatch):
     monkeypatch.setattr(jj_runtime.importlib, 'reload', tracked)
     jj_runtime._signatures.clear()
     jj_runtime.current_reconciliation()
-    assert calls == ['jj_closures', 'jj_reconciliation']
+    assert calls == ['tab_agents', 'jj_closures', 'jj_reconciliation']
     calls.clear()
     jj_runtime.current_reconciliation()
     assert calls == []

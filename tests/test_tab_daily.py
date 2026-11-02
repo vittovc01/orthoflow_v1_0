@@ -23,7 +23,7 @@ def test_generic_agency_cause_requires_explicit_protesica_and_preserves_agent_co
  p=rows[0]['payload']
  assert rows[0]['source_key']=='2026|DDT|A|1'
  assert p['event_date']=='2025-11-08' and p['encounter']=='0007'
- assert p['agent_code']=='4' and 'agent' not in p and p['customer_code']=='00901'
+ assert p['agent_code']=='4' and p['agent']=='Mariano Borrelli' and p['customer_code']=='00901'
  assert prepare_tab(sample(),'again.csv','PROTESICA',customers=[{'codice_cliente':'00901','descrizione':'Clinica'}])==rows
  with pytest.raises(ValueError,match='causale diversa'):prepare_tab(sample(),'x.csv','TRAUMA')
  with pytest.raises(ValueError,match='causale diversa'):prepare_tab(sample(cause='AVVENUTO IMPIANTO TRAUMA'),'x.csv','PROTESICA')
@@ -42,4 +42,43 @@ def test_verified_cc_date_and_presidio_survive_cumulative_reload():
  old['payload'].update(encounter='VERIFICATA/1',event_date='2025-11-09',cac='100')
  result=prepare_tab(sample(),'updated.csv','PROTESICA',[old])[0]['payload']
  assert result['encounter']=='VERIFICATA/1' and result['event_date']=='2025-11-09' and result['cac']=='100'
+
+@pytest.mark.parametrize('code,name',[
+ ('1','PM Medical'),('2','Maurizio Guarino'),('3','Cristiano'),('4','Mariano Borrelli'),
+ ('5','Mariano Gargiulo'),('6','Assunta Mastrota'),('7','Francesco De Lisi'),
+ ('8','Francesco Cirillo'),('9','Giampiero')])
+def test_confirmed_source_agent_codes_are_imported_with_the_correct_name(code,name):
+ payload=prepare_tab(sample(agent=code),'x.csv','PROTESICA')[0]['payload']
+ assert payload['agent_code']==code and payload['agent']==name
+
+def test_existing_numeric_agent_codes_are_displayed_without_reimporting():
+ from tab_agents import payload_agent
+ from jj_intervention_status import build_status
+ from tests.test_jj_reconciliation import record
+ assert payload_agent({'agent_code':'4','agent':'Vecchio nome'})=='Mariano Borrelli'
+ row=record('IMPIANTO',1,agent_code='6',encounter='001')
+ report=build_status([row],[])
+ assert report['Interventi da chiudere'][0]['Agente']=='Assunta Mastrota'
+
+def test_confirmed_association_export_includes_agent_name():
+ from jj_reconciliation import confirmed_associations
+ from tests.test_jj_intervention_status import sources
+ from tests.test_jj_report import link
+ records=sources();records[2]['payload']['agent_code']='8'
+ rows=confirmed_associations(records,[link(2)],1)
+ assert rows[0]['Agente']=='Francesco Cirillo'
+
+def test_agent_mapping_refreshes_in_a_warm_worker_without_reimporting_records(monkeypatch):
+ import tab_agents,jj_runtime
+ from jj_reconciliation import prepare_tab as cached_prepare
+ jj_runtime.current_reconciliation()
+ monkeypatch.setitem(tab_agents.AGENT_NAMES,'4','Obsoleto')
+ jj_runtime._signatures['tab_agents']=None
+ jj_runtime.current_reconciliation()
+ assert cached_prepare(sample(),'x.csv','PROTESICA')[0]['payload']['agent']=='Mariano Borrelli'
+
+@pytest.mark.parametrize('value,expected',[(0,'Non assegnato'),('00','Non assegnato'),('4.0','Mariano Borrelli'),('10','Codice agente 10'),('Nome esplicito','Nome esplicito')])
+def test_zero_unknown_and_named_agents_are_not_guessed(value,expected):
+ from tab_agents import agent_name
+ assert agent_name(value)==expected
 
