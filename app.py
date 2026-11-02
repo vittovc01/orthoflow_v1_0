@@ -102,6 +102,7 @@ courier_page = page("pages/09_Corrieri.py", title="Corrieri", icon="🚐", url_p
 documents_page = page("pages/10_Documenti_Logistica.py", title="Documenti Logistica", icon="📑", url_path="documenti-logistica")
 
 guided_closure_page = page("pages/16_Chiusura_Guidata.py", title="Chiusura guidata", icon="📋", url_path="chiusura-guidata")
+intervention_status_page = page("pages/17_Stato_Interventi.py", title="Stato interventi", icon="📊", url_path="stato-interventi")
 
 users_page = page("pages/11_Gestione_Utenti.py", title="Utenti & Permessi", icon="👥", url_path="utenti-permessi")
 courier_data_page = page("pages/12_Gestione_Dati_Corrieri.py", title="Gestione Dati Corrieri", icon="🗂️", url_path="gestione-dati-corrieri")
@@ -127,7 +128,7 @@ else:
     elif "AGENTE" in permissions:
         pages["OPERATIVITÀ"] = [scarico_sala_ai_page, customer_connect_page]
     if is_director or "AMMINISTRAZIONE" in permissions:
-        pages["AMMINISTRAZIONE"] = [interventions_page, work_implant_page, customer_connect_page, guided_closure_page]
+        pages["AMMINISTRAZIONE"] = [interventions_page, work_implant_page, customer_connect_page, guided_closure_page, intervention_status_page]
     if is_director or "LOGISTICA" in permissions:
         pages["LOGISTICA & MAGAZZINO"] = [ddt_mobile_page, wms_page, shelf_page, qr_page, courier_page, documents_page]
     elif "CORRIERE" in permissions:
