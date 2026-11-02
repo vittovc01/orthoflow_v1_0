@@ -1,5 +1,5 @@
 import pytest
-from jj_reconciliation import prepare_tab,prepare_orders,prepare_month,proposals,residuals,accounts,closing_orders
+from jj_reconciliation import prepare_tab,prepare_orders,prepare_month,proposals,residuals,accounts,closing_orders,confirmed_associations
 
 def record(kind,id,quantity=2,**extra):
  line={'key':'line','ref':'413.016S','lot':'L1' if kind=='IMPIANTO' else '', 'quantity':quantity,'cac':'100','customer':'Sapri','po':'PO1','invoice':'F1','date':'2026-10-10','price':'10','total':str(10*quantity)}
@@ -68,13 +68,13 @@ def test_closure_period_not_guessed_from_invoice_date():
  assert prepare_month(csv.encode(),'c.csv','TRAUMA','2026-10-01')[0]['payload']['month']=='2026-10'
  with pytest.raises(ValueError,match='mese'):prepare_month(csv.encode(),'c.csv','TRAUMA','2026-11-01')
 
-def test_complete_order_composition_prioritizes_one_document_over_common_single_ref():
+def test_complete_composition_does_not_hide_other_clinical_records():
  records=[record('CHIUSURA',1,quantity=1),record('ORDINE',2,quantity=1),record('IMPIANTO',3,quantity=1),record('IMPIANTO',4,quantity=1)]
  for r in records[:3]:r['payload']['lines'].append({**r['payload']['lines'][0],'key':'second','ref':'413.020S'})
  result=proposals(records,[])
- assert len(result)==2
- assert all(r['implant_id']==3 for r in result)
- assert all('Composizione completa' in r['Riscontro documento'] for r in result)
+ assert len(result)==3
+ assert {r['implant_id'] for r in result}=={3,4}
+ assert not any(r['Univoco'] for r in result if r['REF']=='413.016S')
 
 def test_closure_order_list_keeps_po_separate_from_supplier_number():
  records=[record('CHIUSURA',1),record('ORDINE',2,po='PO1',number='JJ-123',cac='100')]
@@ -90,3 +90,30 @@ def test_known_order_can_have_two_invoices_without_dropping_line_identity():
  assert len(result[0]['payload']['lines'])==2
  assert {l['invoice'] for l in result[0]['payload']['lines']}=={'F1','F2'}
  assert result[0]['payload']['invoice']==''
+
+
+def test_mixed_order_splits_same_ref_across_cc_only_within_presidio_and_remaining_quantities():
+ records=[record('CHIUSURA',1,quantity=3),record('ORDINE',2,quantity=3),
+          record('IMPIANTO',3,quantity=2,encounter='001'),record('IMPIANTO',4,quantity=1,encounter='002'),
+          record('IMPIANTO',5,quantity=1,encounter='003'),record('IMPIANTO',6,quantity=3,encounter='OTHER')]
+ for r in records[:2]:r['payload']['lines'].append({**r['payload']['lines'][0],'key':'B','ref':'413.020S','quantity':1,'total':'10'})
+ records[4]['payload']['lines'][0].update(ref='413.020S',key='B')
+ records[5]['payload'].update(cac='200');records[5]['payload']['lines'][0]['cac']='200'
+ result=proposals(records,[])
+ assert {(r['Cartella clinica'],r['REF'],r['quantity']) for r in result}=={('001','413.016S',2),('002','413.016S',1),('003','413.020S',1)}
+ assert not any(r['implant_id']==6 for r in result)
+ # A prior allocation consumes all three residuals, not the entire clinical record.
+ link={k:result[0][k] for k in ('closure_id','closure_line','order_id','order_line','implant_id','implant_line')}
+ link.update(quantity=1,revoked_at=None)
+ result=proposals(records,[link])
+ assert next(r for r in result if r['Cartella clinica']=='001')['quantity']==1
+ # The confirmed export preserves which CC supplied each part of the same order.
+ links=[]
+ for n,r in enumerate(proposals(records,[])):
+  links.append({**{k:r[k] for k in ('closure_id','closure_line','order_id','order_line','implant_id','implant_line','quantity')},'id':n,'method':'MANUALE','actor':'reviewer','created_at':'2026-11-02','revoked_at':None})
+ exported=confirmed_associations(records,links,1)
+ assert {r['Cartella clinica'] for r in exported}=={'001','002','003'}
+ assert sum(r['Quantità'] for r in exported)==4
+ assert {r['CAC'] for r in exported}=={'100'}
+ links[0]['revoked_at']='2026-11-03'
+ assert len(confirmed_associations(records,links,1))==2

@@ -5,7 +5,7 @@ import streamlit as st
 from supabase import create_client
 from orthoflow_branding import configure_page
 from jj_closures import read_all
-from jj_reconciliation import prepare_tab,prepare_orders,prepare_month,accounts,proposals,residuals,closing_orders,digest
+from jj_reconciliation import prepare_tab,prepare_orders,prepare_month,accounts,proposals,residuals,closing_orders,confirmed_associations,digest
 
 configure_page(page_title='Chiusura guidata · P.M. Medical',page_icon='📋',layout='wide')
 if not st.session_state.get('user'):st.switch_page('pages/99_Login.py');st.stop()
@@ -138,18 +138,27 @@ if closures:
  order_list=pd.DataFrame(closing_orders(records,selected_closure))
  st.dataframe(order_list,hide_index=True,use_container_width=True)
  st.download_button('Scarica elenco PO e fatture da controllare',order_list.to_csv(index=False).encode('utf-8-sig'),'Elenco_PO_fatture_'+division+'_'+closing['source_key']+'.csv','text/csv')
- st.subheader('5. Abbinamenti da confermare')
+ st.subheader('5. Abbinamenti ordine e cartelle cliniche')
+ st.caption('Un ordine può comprendere più cartelle cliniche dello stesso presidio. Ogni REF viene cercato in tutte le CC compatibili e può essere ripartito tra più CC per le quantità disponibili. Nessuna scelta automatica tra CC alternative: seleziona e conferma quelle corrette.')
  candidates=proposals(records,links,selected_closure)
  if candidates and not closing.get('closed_at'):
   frame=pd.DataFrame(candidates);frame.insert(0,'Conferma',False)
   presidio=st.selectbox('Filtra presidio',['Tutti']+sorted(frame['Presidio'].unique().tolist()))
   if presidio!='Tutti':frame=frame[frame['Presidio']==presidio]
-  if len(frame)>1000:st.warning('Molti abbinamenti possibili: filtra per presidio. Sono mostrate le prime 1.000 proposte.');frame=frame.head(1000)
-  visible=['Conferma','Fattura','PO','REF','Presidio','Ordine','Documento impianto','Riferimento intervento','Data intervento','Lotto impianto','quantity','Riscontro documento','Metodo','Univoco','Differenza prezzo']
+  order_ids=frame['order_id'].drop_duplicates().tolist()
+  order_labels={r['order_id']:str(r['Ordine'])+' · PO '+str(r['PO']) for r in frame.to_dict('records')}
+  selected_order=st.selectbox('Filtra ordine / PO',['Tutti']+order_ids,format_func=lambda x:'Tutti' if x=='Tutti' else order_labels[x])
+  if selected_order!='Tutti':frame=frame[frame['order_id']==selected_order]
+  page=1
+  if len(frame)>1000:
+   page=st.number_input('Pagina delle proposte',min_value=1,max_value=(len(frame)+999)//1000,value=1,step=1,key='candidate_page_'+digest([selected_closure,presidio,selected_order,len(frame)]))
+   st.caption('Sono mostrate 1.000 proposte per pagina. Conferma le selezioni della pagina corrente prima di passare alla successiva.')
+   frame=frame.iloc[(page-1)*1000:page*1000]
+  visible=['Conferma','Fattura','PO','REF','Presidio','Ordine','Cartella clinica','Documento impianto','Riferimento intervento','Data intervento','Lotto impianto','quantity','Riscontro documento','Metodo','Univoco','Differenza prezzo']
   with st.form('confirm_proposals'):
    edited=st.data_editor(frame,column_order=visible,disabled=[c for c in frame.columns if c not in ('Conferma','quantity')],
      column_config={'quantity':st.column_config.NumberColumn('Quantità da collegare',min_value=1,step=1)},hide_index=True,use_container_width=True,
-     key='proposals_'+digest([r.get('updated_at') for r in records]+[len(links),selected_closure,presidio]))
+     key='proposals_'+digest([r.get('updated_at') for r in records]+[len(links),selected_closure,presidio,selected_order,page]))
    checked=st.checkbox('Ho controllato i collegamenti selezionati. Il lotto dell’ordine può non essere disponibile.')
    if st.form_submit_button('Conferma collegamenti selezionati',type='primary'):
     if not checked:st.error('Conferma il controllo dei collegamenti selezionati.');st.stop()
@@ -167,14 +176,9 @@ if closures:
  st.caption('Un impianto non riscontrato nelle fonti caricate non viene dichiarato non fatturato. Può riferirsi a un altro mese. Resi e rettifiche economiche sono conservati separatamente e richiedono verifica.')
  active=[l for l in links if not l.get('revoked_at') and l['closure_id']==selected_closure]
  if active:
-  by_id={r['id']:r for r in records}
-  confirmed=[]
-  for l in active:
-   c=next(x for x in by_id[l['closure_id']]['payload']['lines'] if x['key']==l['closure_line'])
-   o=next(x for x in by_id[l['order_id']]['payload']['lines'] if x['key']==l['order_line'])
-   difference=float(c['price'])-float(o['price']) if c.get('price') is not None and o.get('price') is not None else None
-   confirmed.append({'Prezzo ordine':o.get('price'),'Prezzo chiusura':c.get('price'),'Differenza unit.':difference,'Collegamento':l['id'],'Fattura':c.get('invoice'),'PO':c.get('po'),'REF':c['ref'],'Documento impianto':by_id[l['implant_id']]['source_key'],'Quantità':l['quantity'],'Metodo':l['method'],'Utente':l['actor'],'Data':l['created_at']})
-  st.dataframe(pd.DataFrame(confirmed),hide_index=True,use_container_width=True)
+  confirmed=pd.DataFrame(confirmed_associations(records,links,selected_closure))
+  st.dataframe(confirmed,hide_index=True,use_container_width=True)
+  st.download_button('Esporta associazioni ordini e cartelle cliniche',confirmed.to_csv(index=False).encode('utf-8-sig'),'Ordini_CC_'+division+'_'+closing['source_key']+'.csv','text/csv')
   undo=st.selectbox('Collegamento da annullare',[l['id'] for l in active])
   reason=st.text_input('Motivo annullamento')
   if st.button('Annulla collegamento'):
