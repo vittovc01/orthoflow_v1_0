@@ -1,5 +1,3 @@
-import base64
-from pathlib import Path
 import pandas as pd
 import streamlit as st
 from supabase import create_client
@@ -7,6 +5,7 @@ from orthoflow_branding import configure_page
 from jj_closures import read_all
 from jj_report_runtime import current_reports
 from jj_runtime import current_reconciliation
+from jj_order_template import order_template
 
 _reconciliation = current_reconciliation()
 prepare_tab,prepare_orders,prepare_month,accounts,proposals,residuals,closing_orders,confirmed_associations,allocation_plan,digest = (
@@ -29,9 +28,9 @@ def load_data():
  return (read_all(backend(),'jj_recon_records').to_dict('records'),read_all(backend(),'jj_recon_links').to_dict('records'))
 
 @st.cache_data(ttl=300)
-def prepare_uploaded(kind,content,filename,division,month,context):
+def prepare_uploaded(kind,content,filename,division,month,context,customers):
  if kind=='IMPIANTO':return prepare_tab(content,filename,division,context)
- if kind=='ORDINE':return prepare_orders(content,filename,division,context)
+ if kind=='ORDINE':return prepare_orders(content,filename,division,context,customers)
  return prepare_month(content,filename,division,month)
 
 def parsing_context(rows):
@@ -56,7 +55,8 @@ def export_report(content):
 
 st.title('Chiusura guidata')
 st.caption('Carica i tre file, controlla il risultato e conferma il mese. Gli impianti del TAB sono usati per il controllo amministrativo.')
-division=st.selectbox('Divisione',['TRAUMA','PROTESICA'],key='recon_division')
+division=st.radio('Area di chiusura',['TRAUMA','PROTESICA'],format_func=lambda d:'Chiusura Trauma' if d=='TRAUMA' else 'Chiusura Protesica',horizontal=True,key='recon_division')
+st.caption('File, associazioni e conferme del mese sono separati per divisione.')
 try:
  records,links=load_data()
 except Exception:
@@ -64,22 +64,31 @@ except Exception:
 records=[r for r in records if r['division']==division]
 counts={kind:sum(r['kind']==kind for r in records) for kind in ('IMPIANTO','CHIUSURA','ORDINE')}
 catalog=accounts(records)
+try:
+ customers=read_all(backend(),'clienti').to_dict('records')
+except Exception:
+ customers=[]
+ st.warning('Anagrafica strutture non disponibile: riprova prima di scaricare il modello aggiornato.')
 st.header('1. Carica i file')
 for col,kind,label in zip(st.columns(3),counts,('Documenti TAB','Chiusure mensili','Ordini acquisiti')):
  col.metric(label,counts[kind])
 if not records:st.info('Nessun dato caricato. Inizia dal TAB aggiornato, poi carica chiusura mensile e ordini.')
-template=Path(__file__).resolve().parents[1]/'templates/modello_ordini_chiusura.b64'
-if template.exists():st.download_button('Scarica modello Excel ordini',base64.b64decode(template.read_text()),'Modello_Ordini_Chiusura.xlsx','application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+if customers:
+ try:
+  st.download_button('Scarica modello ordini '+division.title(),order_template(customers,records,division),'Modello_Ordini_'+division.title()+'.xlsx','application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+  st.caption('Anagrafica completa OrthoFlow: scegli Presidio nel file Excel; il codice struttura è automatico. CAC e codice struttura restano distinti.')
+ except ValueError as exc:st.warning(str(exc))
 st.caption('Il PO cliente della chiusura resta distinto dal numero ordine J&J. Il lotto non è richiesto nel file ordini.')
+st.caption('Puoi riutilizzare un file ordini cumulativo per divisione. Aggiungi i nuovi ordini mantenendo tutte le righe di quelli già presenti; le modifiche agli ordini collegati richiedono una revisione.')
 
 for kind,title,uploadkey in [('IMPIANTO','TAB del gestionale','tab'),('CHIUSURA','Chiusura ufficiale J&J','closure'),('ORDINE','Distinte ordini','orders')]:
  with st.expander(title,expanded=not counts[kind]):
-  uploaded=st.file_uploader('Carica Excel o CSV',type=['xlsx','xls','csv'],key='recon_'+uploadkey)
-  month=st.date_input('Mese di fatturazione',value=pd.Timestamp.today().replace(day=1).date(),key='recon_month') if kind=='CHIUSURA' else None
+  uploaded=st.file_uploader('Carica '+title+' '+division.title()+' (Excel o CSV)',type=['xlsx','xls','csv'],key='recon_'+uploadkey+'_'+division)
+  month=st.date_input('Mese di fatturazione',value=pd.Timestamp.today().replace(day=1).date(),key='recon_month_'+division) if kind=='CHIUSURA' else None
   if uploaded:
    try:
     content=uploaded.getvalue()
-    prepared=prepare_uploaded(kind,content,uploaded.name,division,str(month),parsing_context(records))
+    prepared=prepare_uploaded(kind,content,uploaded.name,division,str(month),parsing_context(records),customers)
     old={r['source_key']:r for r in records if r['kind']==kind}
     preview=[]
     for r in prepared:
@@ -103,7 +112,7 @@ if st.session_state.get('recon_message'):st.success(st.session_state.pop('recon_
 closures=[r for r in records if r['kind']=='CHIUSURA']
 if not closures:
  st.info('Carica e salva la chiusura mensile per vedere il risultato dei controlli.');st.stop()
-selected_closure=st.selectbox('Mese da controllare',[r['id'] for r in closures],format_func=lambda i:next(r['source_key'] for r in closures if r['id']==i),key='active_closure')
+selected_closure=st.selectbox('Mese da controllare',[r['id'] for r in closures],format_func=lambda i:next(r['source_key'] for r in closures if r['id']==i),key='active_closure_'+division)
 closing=next(r for r in closures if r['id']==selected_closure)
 report=_reports.build_report(records,links,selected_closure)
 state=report['status']
@@ -165,7 +174,7 @@ with proposal_tab:
    frame=frame.drop(columns=['Conferma'],errors='ignore');frame.insert(0,selection,False)
    visible=[selection,'Fattura','PO','REF','Presidio','Ordine','Cartella clinica','Documento impianto','Riferimento intervento','Data intervento','Lotto impianto','quantity','Criterio proposta','Alternative compatibili','Riscontro documento','Metodo','Univoco','Differenza prezzo']
    visible=[c for c in visible if c in frame]
-   with st.form('confirm_proposals'):
+   with st.form('confirm_proposals_'+division+'_'+str(selected_closure)):
     edited=st.data_editor(frame,column_order=visible,disabled=[c for c in frame.columns if c not in (selection,'quantity')],
       column_config={'quantity':st.column_config.NumberColumn('Quantità da collegare',min_value=1,step=1)},hide_index=True,use_container_width=True,
       key='proposals_'+digest([r.get('updated_at') for r in records]+[len(links),selected_closure,presidio,selected_order,page,mode]))
@@ -247,9 +256,9 @@ else:
   st.error('Prima della conferma risolvi questi punti:')
   st.dataframe(pd.DataFrame(state['blockers']),hide_index=True,use_container_width=True)
  if state['price_differences'] or state['price_unverified']:st.caption('Gli avvisi di prezzo sono inclusi nel report e richiedono la tua verifica; non impediscono da soli la chiusura.')
- accepted=st.checkbox('Ho controllato associazioni, prezzi, resi e rettifiche del mese.',disabled=not state['can_close'])
+ accepted=st.checkbox('Ho controllato associazioni, prezzi, resi e rettifiche del mese.',disabled=not state['can_close'],key='final_accept_'+division+'_'+str(selected_closure))
  with st.expander('Aggiungi una nota facoltativa'):
-  final_note=st.text_area('Note di chiusura')
+  final_note=st.text_area('Note di chiusura',key='final_note_'+division+'_'+str(selected_closure))
  if st.button('Conferma chiusura del mese',disabled=not (accepted and state['can_close']),type='primary'):
   note=f"Verifica finale confermata: associazioni complete; {state['price_differences']} confronti con differenze prezzo; {state['price_unverified']} prezzi non confrontabili; resi e rettifiche controllati."
   if final_note.strip():note+=' '+final_note.strip()
