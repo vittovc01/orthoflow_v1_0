@@ -70,3 +70,15 @@ def test_unknown_invoice_value_is_visible_and_not_reported_as_zero():
  assert r['Prodotti TAB'][0]['Valore fatturato associato'] is None
  assert r['Per struttura'][0]['Valore fatturato associato'] is None
  assert any(x['Esito']=='PREZZO FATTURA MANCANTE' for x in r['Prezzi da verificare'])
+
+def test_large_tab_prices_do_not_reparse_offer_dates_for_every_product(monkeypatch):
+ import tab_management
+ parse=tab_management.date;calls=[]
+ def tracked(value):calls.append(value);return parse(value)
+ monkeypatch.setattr(tab_management,'date',tracked)
+ records=[sources()[2]];base=records[0]['payload']['lines'][0]
+ records[0]['payload']['lines']=[{**base,'key':str(i),'ref':'SKU'+str(i),'quantity':1} for i in range(2000)]
+ cats=list(catalogs());cats[3]=[{'offerta_id':1,'codice':'SKU'+str(i),'prezzo':'8'} for i in range(2000)]
+ r=report(records,[],cats)
+ assert len(r['Prodotti TAB'])==2000 and r['Per struttura'][0]['Valore atteso valorizzato']==16000
+ assert len(calls)==2

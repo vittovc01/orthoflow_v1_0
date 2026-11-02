@@ -16,32 +16,35 @@ def customer_code(payload,customers):
     return '', 'Struttura non univoca in anagrafica' if matches else 'Struttura non trovata in anagrafica'
 
 def price_index(headers,connections,prices):
-    heads={h['id']:h for h in headers if text(h.get('stato_record')).upper() in ('','ATTIVO','ACTIVE')}
+    heads={}
+    for h in headers:
+        if text(h.get('stato_record')).upper() not in ('','ATTIVO','ACTIVE'):continue
+        start,end=date(h.get('data_inizio')),date(h.get('data_fine'))
+        if (text(h.get('data_inizio')) and not start) or (text(h.get('data_fine')) and not end):continue
+        heads[h['id']]=(h,start,end)
     clients=defaultdict(set)
     for c in connections:clients[c['offerta_id']].add(text(c.get('codice_cliente')))
-    result=defaultdict(list)
+    exact=defaultdict(list);canonical=defaultdict(list)
     for p in prices:
-        h=heads.get(p.get('offerta_id'))
-        if not h or p.get('prezzo') is None or not text(p.get('prezzo')):continue
+        header=heads.get(p.get('offerta_id'))
+        if not header or p.get('prezzo') is None or not text(p.get('prezzo')):continue
+        h,start,end=header
         try:value=decimal(p['prezzo'])
         except ValueError:continue
         if value<0:continue
         for code in clients[h['id']]:
-            result[(code,text(h.get('linea')).upper())].append((text(p.get('codice')).upper(),value,h))
-    return result
+            product=text(p.get('codice')).upper();entry=(product,value,h['id'],start,end)
+            prefix=(code,text(h.get('linea')).upper())
+            exact[(*prefix,product)].append(entry)
+            canonical[(*prefix,re.sub(r'[^A-Z0-9]','',product))].append(entry)
+    return exact,canonical
 
 def offered_price(index,code,division,ref,event):
-    eligible=[]
-    for product,price,h in index.get((code,division),[]):
-        start,end=date(h.get('data_inizio')),date(h.get('data_fine'))
-        if (text(h.get('data_inizio')) and not start) or (text(h.get('data_fine')) and not end):continue
-        if (start or end) and not event:continue
-        if event and ((start and event<start) or (end and event>end)):continue
-        eligible.append((product,price,h['id']))
-    target=text(ref).upper();matches=[x for x in eligible if x[0]==target]
+    exact,canonical=index
+    valid=lambda x: not ((x[3] or x[4]) and not event) and not (event and ((x[3] and event<x[3]) or (x[4] and event>x[4])))
+    target=text(ref).upper();matches=[x for x in exact.get((code,division,target),[]) if valid(x)]
     if not matches:
-        canonical=lambda s:re.sub(r'[^A-Z0-9]','',s)
-        matches=[x for x in eligible if canonical(x[0])==canonical(target)]
+        matches=[x for x in canonical.get((code,division,re.sub(r'[^A-Z0-9]','',target)),[]) if valid(x)]
         if len({x[0] for x in matches})>1:return None,[], 'REF ambiguo nelle offerte'
     if not matches:return None,[],'Prezzo offerta mancante o offerta non valida alla data intervento'
     if len({x[1] for x in matches})!=1:return None,[],'Più offerte valide con prezzi diversi'

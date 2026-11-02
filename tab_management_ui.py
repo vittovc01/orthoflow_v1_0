@@ -117,16 +117,18 @@ def render_tab_management(client=None,analytics=False,records=None):
     for col,label,data in zip(st.columns(4),('Interventi TAB','Pezzi','Valore atteso valorizzato','Righe senza prezzo'),(len(heads),sum(r['Quantità impiantata'] for r in rows),f'€ {value:,.2f}',missing)):
         col.metric(label,data)
     if missing:st.warning(f'{missing} righe non valorizzate: mancano struttura/offerta/prezzo univoci o una data valida. Il valore mostrato riguarda solo le righe valorizzate.')
-    st.download_button('Scarica Excel gestione TAB',current_reports().excel_report(report),'Gestione_TAB_'+division+'.xlsx','application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',type='primary')
+    exportable={name:[{key:value for key,value in row.items() if key!='ID intervento TAB'} for row in entries] for name,entries in report.items()}
+    st.download_button('Scarica Excel gestione TAB',current_reports().excel_report(exportable),'Gestione_TAB_'+division+'.xlsx','application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',type='primary')
     if analytics:
         for title in ('Per struttura','Per agente','Per periodo'):
             st.subheader(title)
             st.dataframe(pd.DataFrame(report[title]),hide_index=True,use_container_width=True)
     else:
-        st.dataframe(pd.DataFrame(heads),hide_index=True,use_container_width=True)
+        visible=['Divisione','Stato','Stato intervento completo','Struttura','Cartella clinica','Data intervento','Agente','Pezzi impiantati','Pezzi da chiudere','Valore atteso valorizzato','Righe senza prezzo']
+        st.dataframe(pd.DataFrame(heads)[[c for c in visible if any(c in h for h in heads)]],hide_index=True,use_container_width=True)
         if heads:
             selected=st.selectbox('Apri intervento TAB',[h['ID intervento TAB'] for h in heads],format_func=lambda key:next(f"{h['Struttura']} · CC {h['Cartella clinica'] or 'da verificare'} · {h['Data intervento'] or 'data mancante'}" for h in heads if h['ID intervento TAB']==key))
-            st.dataframe(pd.DataFrame([r for r in rows if r['ID intervento TAB']==selected]),hide_index=True,use_container_width=True)
+            st.dataframe(pd.DataFrame([r for r in rows if r['ID intervento TAB']==selected]).drop(columns=['ID intervento TAB']),hide_index=True,use_container_width=True)
             selected_header=next(h for h in heads if h['ID intervento TAB']==selected)
             verify_tab_metadata(client,records,links,customers,selected_header['Documenti TAB'].split(', '),selected_header['Divisione'])
             st.caption('REF, lotto e quantità provengono dal gestionale: correggili lì e ricarica il TAB. Le verifiche di struttura, CC e data restano conservate se il riferimento del documento non cambia.')
