@@ -218,16 +218,6 @@ def proposals(records,links,closure_id=None):
             ordr=b['quantity']-allocated(links,order['id'],b['key'],'ORDINE')
             if ordr<=0:continue
             impl_records=[r for r in active if r['kind']=='IMPIANTO' and r['division']==closing['division']]
-            order_signature=Counter()
-            for ol in order['payload']['lines']:order_signature[ol['ref']]+=ol['quantity']
-            full=[]
-            for doc in impl_records:
-                if doc['payload'].get('cac')!=a['cac']:continue
-                if a.get('date') and doc['payload'].get('event_date') and doc['payload']['event_date']>a['date']:continue
-                signature=Counter()
-                for il in doc['payload']['lines']:signature[il['ref']]+=il['quantity']
-                if signature==order_signature:full.append(doc)
-            if len(full)==1:impl_records=full
             for implant,c in line_rows(impl_records):
                 if a['ref']!=c['ref'] or a['cac']!=c.get('cac'):continue
                 if b.get('lot') and c.get('lot') and b['lot']!=c['lot']:continue
@@ -239,7 +229,8 @@ def proposals(records,links,closure_id=None):
                   'Fattura':a.get('invoice',''),'PO':a.get('po',''),'REF':a['ref'],'Presidio':a.get('customer') or a['cac'],
                   'Ordine':order['payload'].get('number') or order['payload'].get('po'),
                   'Documento impianto':implant['source_key'],'Riferimento intervento':implant['payload'].get('reference',''),
-                  'Riscontro documento':'Composizione completa ordine coincidente' if len(full)==1 else 'Candidato per riga; verificare intervento',
+                  'Cartella clinica':text(implant['payload'].get('encounter')),
+                  'Riscontro documento':'Candidato per riga dello stesso presidio; verificare CC',
                   'Data intervento':implant['payload'].get('event_date',''),'Lotto impianto':c.get('lot',''),
                   'Metodo':'REF e quantità, lotto ordine non disponibile' if not b.get('lot') else 'REF e lotto',
                   'Differenza prezzo':float(decimal(a['price'])-decimal(b['price'])) if a.get('price') is not None and b.get('price') is not None else None})
@@ -269,3 +260,24 @@ def closing_orders(records,closure_id):
         grouped[key]['Righe prodotto']+=1
         grouped[key]['Totale EUR']+=float(line.get('total') or 0)
     return list(grouped.values())
+
+
+def confirmed_associations(records,links,closure_id):
+    """One row per confirmed allocation: an order may span several clinical records."""
+    by_id={r['id']:r for r in records}
+    result=[]
+    for link in links:
+        if link.get('revoked_at') or link['closure_id']!=closure_id:continue
+        closing,order,implant=[by_id[link[side+'_id']] for side in ('closure','order','implant')]
+        c=next(x for x in closing['payload']['lines'] if x['key']==link['closure_line'])
+        o=next(x for x in order['payload']['lines'] if x['key']==link['order_line'])
+        i=next(x for x in implant['payload']['lines'] if x['key']==link['implant_line'])
+        difference=float(decimal(c['price'])-decimal(o['price'])) if c.get('price') is not None and o.get('price') is not None else None
+        result.append({'Ordine':order['payload'].get('number') or order['payload'].get('po') or o.get('po'),
+          'PO':c.get('po'),'Fattura':c.get('invoice'),'Presidio':c.get('customer') or c.get('cac'),'CAC':c.get('cac'),
+          'Cartella clinica':text(implant['payload'].get('encounter')),'Riferimento intervento':implant['payload'].get('reference',''),
+          'Data intervento':implant['payload'].get('event_date',''),'Documento impianto':implant['source_key'],
+          'REF':c['ref'],'Descrizione':o.get('description') or i.get('description',''),'Lotto impianto':i.get('lot',''),
+          'Quantità':link['quantity'],'Prezzo ordine':o.get('price'),'Prezzo chiusura':c.get('price'),'Differenza unit.':difference,
+          'Collegamento':link['id'],'Metodo':link['method'],'Utente':link['actor'],'Data':link['created_at']})
+    return result

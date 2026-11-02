@@ -57,5 +57,26 @@ try {
  await db.query('select jj_map_customer($1,$2,$3,$4)',['Clinica A','100','TRAUMA','reviewer']);
  const mapped=(await db.query("select payload from jj_recon_records where source_key='DDT2'")).rows[0].payload;
  assert.equal(mapped.cac,'100');assert.equal(mapped.lines[0].cac,'100');
+ // A mixed order can consume the same REF from two CCs and another REF from a third CC.
+ const a={...line,key:'A',po:'MIXED',quantity:3,total:'30'};
+ const b={...a,key:'B',ref:'413.020S',quantity:1,total:'10'};
+ await imp('CHIUSURA','2027-01',[a,b]);await imp('ORDINE','MIXED',[a,b]);
+ await imp('IMPIANTO','CC101',[{...a,quantity:2,total:'20'}],{encounter:'101'});
+ await imp('IMPIANTO','CC102',[{...a,quantity:1,total:'10'}],{encounter:'102'});
+ await imp('IMPIANTO','CC103',[b],{encounter:'103'});
+ await imp('IMPIANTO','CC_OTHER',[{...b,cac:'200'}],{encounter:'999'});
+ const mixC=await id('CHIUSURA','2027-01'),mixO=await id('ORDINE','MIXED');
+ const mixed=[{key:'A',cc:'CC101',quantity:2},{key:'A',cc:'CC102',quantity:1},{key:'B',cc:'CC103',quantity:1}];
+ const mixedLinks=[];
+ for(const r of mixed)mixedLinks.push({closure_id:mixC,closure_line:r.key,order_id:mixO,order_line:r.key,implant_id:await id('IMPIANTO',r.cc),implant_line:r.key,quantity:r.quantity});
+ const otherCC=await id('IMPIANTO','CC_OTHER');
+ await assert.rejects(()=>confirm([{...mixedLinks[2],implant_id:otherCC}]),/presidio/);
+ assert.equal(await confirm(mixedLinks),3);
+ assert.equal(await confirm(mixedLinks),0);
+ assert.equal((await db.query('select count(distinct implant_id)::int n from jj_recon_links where order_id=$1 and revoked_at is null',[mixO])).rows[0].n,3);
+ await review('CLOSE',mixC);
+ await imp('CHIUSURA','2027-02',[{...a,quantity:1,total:'10'}]);
+ const nextClosing=await id('CHIUSURA','2027-02');
+ await assert.rejects(()=>confirm([{...mixedLinks[0],closure_id:nextClosing,quantity:1}]),/già utilizzata/);
  console.log('Guided reconciliation: replay, partials, cross-month caps, revisions, server validation and audit: PASS');
 }finally{await db.close();}

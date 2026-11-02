@@ -1,3 +1,4 @@
+import pytest
 from pathlib import Path
 from types import SimpleNamespace
 import streamlit as st
@@ -29,17 +30,18 @@ def test_guided_page_renders_three_uploads_without_writes(monkeypatch):
  st.cache_resource.clear();st.cache_data.clear()
 
 
-def test_guided_page_renders_real_proposals_and_month_review(monkeypatch):
+@pytest.mark.parametrize('has_links',[False,True])
+def test_guided_page_renders_real_proposals_and_month_review(monkeypatch,has_links):
  line={'key':'L','ref':'413.016S','quantity':1,'cac':'100','customer':'Sapri','po':'PO1','invoice':'F1','date':'2026-10-01','price':'10','total':'10','lot':''}
  records=[{'id':i,'kind':kind,'division':'TRAUMA','source_key':str(i),'pending_payload':None,'closed_at':None,
-  'payload':{'cac':'100','customer':'Sapri','event_date':'2026-09-01','reference':'cc 1 del 01/09/2026','lines':[dict(line)]}}
+  'payload':{'cac':'100','customer':'Sapri','encounter':'003','event_date':'2026-09-01','reference':'cc 1 del 01/09/2026','lines':[dict(line)]}}
   for i,kind in [(1,'CHIUSURA'),(2,'ORDINE'),(3,'IMPIANTO')]]
  class Backend:
   def table(self,name):self.name=name;return self
   def select(self,*a):return self
   def order(self,*a):return self
   def range(self,*a):return self
-  def execute(self):return SimpleNamespace(data=records if self.name=='jj_recon_records' else [])
+  def execute(self):return SimpleNamespace(data=records if self.name=='jj_recon_records' else ([{'id':1,'closure_id':1,'closure_line':'L','order_id':2,'order_line':'L','implant_id':3,'implant_line':'L','quantity':1,'method':'MANUALE','actor':'reviewer','created_at':'2026-11-02','revoked_at':None}] if has_links else []))
   def rpc(self,*a):raise AssertionError('No automatic confirmation')
  st.cache_resource.clear();st.cache_data.clear()
  monkeypatch.setattr(supabase,'create_client',lambda *a,**kw:Backend())
@@ -47,7 +49,11 @@ def test_guided_page_renders_real_proposals_and_month_review(monkeypatch):
  at.secrets['SUPABASE_URL']='http://127.0.0.1:1';at.secrets['SUPABASE_SERVICE_KEY']='fake'
  at.session_state['user']={'id':'test'};at.session_state['ruolo']='Admin';at.run()
  assert not at.exception
- assert any(b.label=='Conferma collegamenti selezionati' for b in at.button)
+ assert any(b.label=='Conferma collegamenti selezionati' for b in at.button)==(not has_links)
+ assert any('Cartella clinica' in d.value.columns for d in at.dataframe)
+ if has_links:
+  confirmed=next(d.value for d in at.dataframe if 'Cartella clinica' in d.value.columns)
+  assert confirmed.iloc[0]['Cartella clinica']=='003'
  assert any(b.label=='Conferma chiusura del mese' for b in at.button)
- assert len(at.checkbox)==2 and not any(c.value for c in at.checkbox)
+ assert len(at.checkbox)==(1 if has_links else 2) and not any(c.value for c in at.checkbox)
  st.cache_resource.clear();st.cache_data.clear()
