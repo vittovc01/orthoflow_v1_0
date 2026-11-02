@@ -8,7 +8,7 @@ from jj_runtime import current_reconciliation
 from jj_status_runtime import current_status
 from jj_report_runtime import current_reports
 from tab_agents import payload_agent
-from tab_management import management_report,customer_code
+from tab_management import management_report,customer_code,structure_label
 
 @st.cache_resource
 def tab_backend():
@@ -107,14 +107,16 @@ def render_tab_management(client=None,analytics=False,records=None):
     scope=[r for r in records if r['kind']=='IMPIANTO' and (division=='Tutte' or r['division']==division)]
     if not scope:st.info('Nessun TAB caricato per questa linea. Caricalo da Gestione Interventi → Interventi TAB.');return
     cols=st.columns(3)
-    structure=cols[0].selectbox('Struttura TAB',['Tutte']+sorted({r['payload'].get('customer','') for r in scope}),key='tab_structure_'+str(analytics)+division)
+    account_names=current_reconciliation().accounts(records)
+    structure=cols[0].selectbox('Struttura TAB',['Tutte']+sorted({structure_label(r['payload'],customers,account_names) for r in scope}),key='tab_structure_'+str(analytics)+division)
     year=cols[1].selectbox('Anno TAB',['Tutti']+sorted({r['payload']['event_date'][:4] for r in scope if r['payload'].get('event_date')},reverse=True),key='tab_year_'+str(analytics)+division)
     agent=cols[2].selectbox('Agente TAB',['Tutti']+sorted({payload_agent(r['payload']) for r in scope}),key='tab_agent_'+str(analytics)+division)
     report=management_report(records,links,customers,headers,connections,prices,current_status().build_status,
       None if division=='Tutte' else division,None if structure=='Tutte' else structure,None if year=='Tutti' else year,None if agent=='Tutti' else agent)
     rows=report['Prodotti TAB'];heads=report['Interventi TAB']
     value=sum(r['Valore atteso'] for r in rows if r['Valore atteso'] is not None);missing=sum(r['Valore atteso'] is None for r in rows)
-    for col,label,data in zip(st.columns(4),('Interventi TAB','Pezzi','Valore atteso valorizzato','Righe senza prezzo'),(len(heads),sum(r['Quantità impiantata'] for r in rows),f'€ {value:,.2f}',missing)):
+    value_label='—' if rows and missing==len(rows) else f'€ {value:,.2f}'
+    for col,label,data in zip(st.columns(4),('Interventi TAB','Pezzi','Valore atteso valorizzato','Righe senza prezzo'),(len(heads),sum(r['Quantità impiantata'] for r in rows),value_label,missing)):
         col.metric(label,data)
     if missing:st.warning(f'{missing} righe non valorizzate: mancano struttura/offerta/prezzo univoci o una data valida. Il valore mostrato riguarda solo le righe valorizzate.')
     exportable={name:[{key:value for key,value in row.items() if key!='ID intervento TAB'} for row in entries] for name,entries in report.items()}

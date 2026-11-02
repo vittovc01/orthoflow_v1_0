@@ -2,7 +2,7 @@
 from collections import defaultdict
 from decimal import Decimal
 import re
-from jj_reconciliation import date,decimal,digest,normalized,text
+from jj_reconciliation import accounts,date,decimal,digest,normalized,text
 from tab_agents import payload_agent
 
 def customer_code(payload,customers):
@@ -14,6 +14,15 @@ def customer_code(payload,customers):
     matches={text(c.get('codice_cliente')) for c in customers if text(c.get('codice_cliente')) and normalized(text(c.get('descrizione')) or text(c.get('descrizione_cliente')))==normalized(name)}
     if len(matches)==1:return next(iter(matches)),''
     return '', 'Struttura non univoca in anagrafica' if matches else 'Struttura non trovata in anagrafica'
+
+def structure_label(payload,customers,account_names):
+    cac=text(payload.get('cac'))
+    if cac in account_names and account_names[cac]!=cac:return account_names[cac]
+    code,_=customer_code(payload,customers)
+    if code:
+        c=next(c for c in customers if text(c.get('codice_cliente'))==code)
+        return text(c.get('descrizione')) or text(c.get('descrizione_cliente')) or code
+    return text(payload.get('customer')) or cac or 'Presidio da assegnare'
 
 def price_index(headers,connections,prices):
     heads={}
@@ -51,7 +60,8 @@ def offered_price(index,code,division,ref,event):
     return matches[0][1],sorted({x[2] for x in matches}),''
 
 def management_report(records,links,customers,headers,connections,prices,status_builder,division=None,structure=None,year=None,agent=None):
-    status=status_builder(records,links,division,structure,year)
+    status=status_builder(records,links,division,None,year)
+    account_names=accounts(records)
     source={(r['division'],r['source_key']):r for r in records if r['kind']=='IMPIANTO'}
     index=price_index(headers,connections,prices)
     grouping={};interventions=[]
@@ -68,11 +78,13 @@ def management_report(records,links,customers,headers,connections,prices,status_
     for d in status['Dettaglio prodotti']:
         r=source[(d['Divisione'],d['Documento TAB'])];p=r['payload'];name=payload_agent(p)
         if agent and name!=agent:continue
+        label=structure_label(p,customers,account_names)
+        if structure and label!=structure:continue
         code,reason=customer_code(p,customers)
         price,offers,price_reason=offered_price(index,code,d['Divisione'],d['REF'],d['Data intervento']) if code else (None,[],reason)
         reason=reason or price_reason
         key=(d['Divisione'],d['Documento TAB'],d['REF'],d['Lotto'])
-        row={'ID intervento TAB':grouping[(d['Divisione'],d['Documento TAB'])],**d,'Codice struttura':code,'Agente':name,
+        row={'ID intervento TAB':grouping[(d['Divisione'],d['Documento TAB'])],**d,'Struttura':label,'Codice struttura':code,'Agente':name,
           'Periodo':d['Data intervento'][:7] if d['Data intervento'] else 'Data mancante',
           'Prezzo offerta':float(price) if price is not None else None,'Valore atteso':float(price*d['Quantità impiantata']) if price is not None else None,
           'Valore fatturato associato':None if key in missing_amount else float(associated[key]),'Offerte':', '.join(map(str,offers)),'Motivo / azione':reason}
@@ -83,8 +95,9 @@ def management_report(records,links,customers,headers,connections,prices,status_
         if h['ID intervento TAB'] not in selected_ids:continue
         own=by_intervention[h['ID intervento TAB']]
         h['Righe senza prezzo']=sum(r['Valore atteso'] is None for r in own)
-        h['Valore atteso valorizzato']=float(sum((decimal(r['Valore atteso']) for r in own if r['Valore atteso'] is not None),Decimal(0)))
+        h['Valore atteso valorizzato']=None if h['Righe senza prezzo']==len(own) else float(sum((decimal(r['Valore atteso']) for r in own if r['Valore atteso'] is not None),Decimal(0)))
         h['Agente']=', '.join(sorted({r['Agente'] for r in own}))
+        h['Struttura']=own[0]['Struttura']
         if agent:
             h['Pezzi impiantati']=sum(r['Quantità impiantata'] for r in own)
             h['Pezzi associati']=sum(r['Quantità associata'] for r in own)
@@ -113,14 +126,15 @@ def management_report(records,links,customers,headers,connections,prices,status_
     def aggregate(dimension):
         groups={}
         for r in rows:
-            key=(r['Divisione'],r[dimension]);g=groups.setdefault(key,{'Divisione':r['Divisione'],dimension:r[dimension],
-              '_ids':set(),'_missing_actual':False,'Pezzi':0,'Valore atteso valorizzato':Decimal(0),'Valore fatturato associato':Decimal(0),'Righe senza prezzo':0})
+            identity=(r.get('CAC') or r.get('Codice struttura') or r[dimension]) if dimension=='Struttura' else r[dimension]
+            key=(r['Divisione'],identity);g=groups.setdefault(key,{'Divisione':r['Divisione'],dimension:r[dimension],
+              '_ids':set(),'_missing_actual':False,'_priced_rows':0,'Pezzi':0,'Valore atteso valorizzato':Decimal(0),'Valore fatturato associato':Decimal(0),'Righe senza prezzo':0})
             g['_ids'].add(r['ID intervento TAB']);g['Pezzi']+=r['Quantità impiantata']
             if r['Valore atteso'] is None:g['Righe senza prezzo']+=1
-            else:g['Valore atteso valorizzato']+=decimal(r['Valore atteso'])
+            else:g['Valore atteso valorizzato']+=decimal(r['Valore atteso']);g['_priced_rows']+=1
             if r['Valore fatturato associato'] is not None:g['Valore fatturato associato']+=decimal(r['Valore fatturato associato'])
             else:g['_missing_actual']=True
-        return [{k:float(v) if isinstance(v,Decimal) else v for k,v in g.items() if not k.startswith('_')}|{'Interventi distinti':len(g['_ids']),'Valore fatturato associato':None if g['_missing_actual'] else float(g['Valore fatturato associato'])} for g in groups.values()]
+        return [{k:float(v) if isinstance(v,Decimal) else v for k,v in g.items() if not k.startswith('_')}|{'Interventi distinti':len(g['_ids']),'Valore atteso valorizzato':float(g['Valore atteso valorizzato']) if g['_priced_rows'] else None,'Valore fatturato associato':None if g['_missing_actual'] else float(g['Valore fatturato associato'])} for g in groups.values()]
     by_structure=aggregate('Struttura');by_agent=aggregate('Agente')
     by_period=aggregate('Periodo')
     summary=[{'Voce':'Report generato il (Italia)','Valore':status['status']['read_at']},
@@ -128,7 +142,7 @@ def management_report(records,links,customers,headers,connections,prices,status_
       {'Voce':'Divisione','Valore':division or 'Tutte'},{'Voce':'Struttura','Valore':structure or 'Tutte'},{'Voce':'Anno intervento','Valore':year or 'Tutti'},
       {'Voce':'Agente','Valore':agent or 'Tutti'},{'Voce':'Interventi','Valore':len(interventions)},
       {'Voce':'Pezzi','Valore':sum(r['Quantità impiantata'] for r in rows)},
-      {'Voce':'Valore atteso valorizzato','Valore':float(sum((decimal(r['Valore atteso']) for r in rows if r['Valore atteso'] is not None),Decimal(0)))},
+      {'Voce':'Valore atteso valorizzato','Valore':None if rows and all(r['Valore atteso'] is None for r in rows) else float(sum((decimal(r['Valore atteso']) for r in rows if r['Valore atteso'] is not None),Decimal(0)))},
       {'Voce':'Righe senza prezzo','Valore':sum(r['Valore atteso'] is None for r in rows)},
       {'Voce':'Valorizzazione','Valore':'Offerte della struttura, della divisione e valide alla data clinica. Valori attesi e fatturato associato sono misure distinte. Le righe senza prezzo non sono valorizzate a zero.'},
       {'Voce':'Conteggi','Valore':'Interventi distinti per struttura/CC/data; documenti con identificativi mancanti restano separati. Con più agenti, lo stesso intervento può comparire in più gruppi agente.'},

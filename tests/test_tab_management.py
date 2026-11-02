@@ -82,3 +82,23 @@ def test_large_tab_prices_do_not_reparse_offer_dates_for_every_product(monkeypat
  r=report(records,[],cats)
  assert len(r['Prodotti TAB'])==2000 and r['Per struttura'][0]['Valore atteso valorizzato']==16000
  assert len(calls)==2
+
+def test_same_asl_name_is_separated_by_verified_presidio_and_filter():
+ records=sources();records[2]['payload']['customer']='ASL SALERNO'
+ other=deepcopy(records[2]);other['id']=4;other['source_key']='other';other['payload']['cac']='200';other['payload']['lines'][0]['cac']='200';records.append(other)
+ bill=deepcopy(records[0]);bill['id']=5;bill['payload']['lines'][0].update(cac='200',customer='Nocera');records.append(bill)
+ r=report(records,[])
+ assert {x['Struttura'] for x in r['Per struttura']}=={'Sapri','Nocera'}
+ r=report(records,[],structure='Nocera')
+ assert len(r['Interventi TAB'])==1 and r['Prodotti TAB'][0]['CAC']=='200'
+
+def test_absent_price_is_unavailable_but_explicit_zero_offer_remains_zero():
+ cats=list(catalogs());cats[3]=[]
+ r=report(cats=cats)
+ assert r['Interventi TAB'][0]['Valore atteso valorizzato'] is None
+ assert r['Per struttura'][0]['Valore atteso valorizzato'] is None
+ assert next(x['Valore'] for x in r['Riepilogo'] if x['Voce']=='Valore atteso valorizzato') is None
+ cats=catalogs();cats[3][0]['prezzo']='0'
+ r=report(cats=cats)
+ assert r['Per struttura'][0]['Valore atteso valorizzato']==0
+ assert r['Per struttura'][0]['Righe senza prezzo']==0
