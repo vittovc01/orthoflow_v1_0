@@ -5,7 +5,11 @@ import streamlit as st
 from supabase import create_client
 from orthoflow_branding import configure_page
 from jj_closures import read_all
-from jj_reconciliation import prepare_tab,prepare_orders,prepare_month,accounts,proposals,residuals,closing_orders,confirmed_associations,allocation_plan,digest
+from jj_runtime import current_reconciliation
+
+_reconciliation = current_reconciliation()
+prepare_tab,prepare_orders,prepare_month,accounts,proposals,residuals,closing_orders,confirmed_associations,allocation_plan,digest = (
+ getattr(_reconciliation,name) for name in ('prepare_tab','prepare_orders','prepare_month','accounts','proposals','residuals','closing_orders','confirmed_associations','allocation_plan','digest'))
 
 configure_page(page_title='Chiusura guidata · P.M. Medical',page_icon='📋',layout='wide')
 if not st.session_state.get('user'):st.switch_page('pages/99_Login.py');st.stop()
