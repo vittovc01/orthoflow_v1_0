@@ -14,6 +14,10 @@ def test_guided_page_renders_three_uploads_without_writes(monkeypatch):
   def execute(self):return SimpleNamespace(data=[])
   def rpc(self,*a):raise AssertionError('No writes during page render')
  st.cache_resource.clear();st.cache_data.clear()
+ # Simulate the live worker's old cached module before opening the new page.
+ import jj_reconciliation, jj_runtime
+ monkeypatch.delattr(jj_reconciliation,'allocation_plan',raising=False)
+ jj_runtime._signatures.clear()
  monkeypatch.setattr(supabase,'create_client',lambda *a,**kw:Backend())
  page=Path(__file__).resolve().parents[1]/'pages/16_Chiusura_Guidata.py'
  at=AppTest.from_file(str(page),default_timeout=30)
