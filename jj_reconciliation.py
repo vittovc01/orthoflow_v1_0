@@ -126,7 +126,8 @@ def prepare_tab(content,filename,division,records=(),mapping=None,customers=()):
         if customer not in cac_cache:cac_cache[customer]='' if normalized(customer)=='ASL SALERNO' else (mapping.get(customer,'') or resolve_cac('',customer,'',records))
         cac=cac_cache[customer]
         previous=prior.get(key,{})
-        if normalized(previous.get('customer'))==normalized(customer):
+        same_source_customer=normalized(previous.get('source_customer') or previous.get('customer'))==normalized(customer)
+        if same_source_customer:
             cac=previous.get('cac') or cac
             if previous.get('reference')==reference and previous.get('document_date')==docdate:
                 event=previous.get('event_date') or event
@@ -136,6 +137,9 @@ def prepare_tab(content,filename,division,records=(),mapping=None,customers=()):
         line={'ref':ref(row['ARTICOLO']),'lot':text(row['LOTTO']).upper(),'quantity':quantity,
               'expiry':date(row.get('SCADENZA')),'description':text(row.get('DESCRIZIONE')),'source_rows':[int(index)+2]}
         payload={'customer':customer,'cac':cac,'reference':reference,'encounter':encounter,'event_date':event,'source_ref_date':source_event,'document_date':docdate,'lines':[]}
+        if same_source_customer and previous.get('source_customer'):
+            payload['source_customer']=customer
+            payload['customer']=previous['customer']
         agent=text(row.get('AGENTE')).removesuffix('.0')
         if agent.isdigit():agent=str(int(agent))
         if agent and agent!='0':
@@ -144,8 +148,9 @@ def prepare_tab(content,filename,division,records=(),mapping=None,customers=()):
                 payload['agent']=agent_name(agent)
             else:payload['agent']=agent
         matched_codes=customer_codes[normalized(customer)]
-        if len(matched_codes)==1:payload['customer_code']=next(iter(matched_codes))
-        elif previous.get('customer_code') and normalized(previous.get('customer'))==normalized(customer):payload['customer_code']=previous['customer_code']
+        if same_source_customer and previous.get('source_customer') and previous.get('customer_code'):payload['customer_code']=previous['customer_code']
+        elif len(matched_codes)==1:payload['customer_code']=next(iter(matched_codes))
+        elif previous.get('customer_code') and same_source_customer:payload['customer_code']=previous['customer_code']
         if key in documents and any(documents[key][k]!=payload[k] for k in ['customer','reference','document_date']):raise ValueError(f'Documento {key} con intestazioni discordanti')
         if key in documents and any(documents[key].get(k)!=payload.get(k) for k in ('agent_code','agent')):raise ValueError(f'Documento {key} con agenti diversi nelle righe: verificare il gestionale')
         documents.setdefault(key,payload)['lines'].append(line)

@@ -3,6 +3,7 @@ import streamlit as st
 from supabase import create_client
 from orthoflow_branding import configure_page
 from jj_closures import read_all
+from jj_data import read_ledger
 from jj_status_runtime import current_status
 from jj_report_runtime import current_reports
 
@@ -18,10 +19,8 @@ def status_backend():
  if not key:raise RuntimeError('Connessione server del modulo chiusure non configurata')
  return create_client(str(st.secrets['SUPABASE_URL']).rstrip('/'),str(key))
 
-@st.cache_data(ttl=30,max_entries=2)
 def status_data():
- client=status_backend()
- return read_all(client,'jj_recon_records').to_dict('records'),read_all(client,'jj_recon_links').to_dict('records')
+ return read_ledger(status_backend())
 
 @st.cache_data(ttl=30,max_entries=6)
 def status_excel(report):
@@ -30,7 +29,7 @@ def status_excel(report):
 st.title('Stato interventi')
 st.caption('Interventi dai TAB caricati, associati a ordini e fatture di tutti i mesi. I dati non riscontrati restano da verificare.')
 if st.button('Aggiorna dati',type='secondary'):
- status_data.clear();status_excel.clear()
+ read_ledger.clear();status_excel.clear()
 try:records,links=status_data()
 except Exception:
  st.error('Impossibile leggere i dati. Verificare la connessione server del modulo chiusure.');st.stop()
