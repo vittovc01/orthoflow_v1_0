@@ -1,6 +1,12 @@
 import pytest
 from jj_reconciliation import prepare_tab,prepare_orders,prepare_month,proposals,residuals,accounts,closing_orders,confirmed_associations
 
+def test_order_unit_price_is_derived_from_total_when_formula_cache_is_empty():
+ csv='CAC;PO cliente;REF;Quantità;Totale riga;Prezzo unitario\n100;PO1;413.016S;3;29,97;\n'
+ line=prepare_orders(csv.encode(),'o.csv','TRAUMA')[0]['payload']['lines'][0]
+ assert float(line['price'])==9.99
+ assert float(line['total'])==29.97
+
 def record(kind,id,quantity=2,**extra):
  line={'key':'line','ref':'413.016S','lot':'L1' if kind=='IMPIANTO' else '', 'quantity':quantity,'cac':'100','customer':'Sapri','po':'PO1','invoice':'F1','date':'2026-10-10','price':'10','total':str(10*quantity)}
  return {'id':id,'kind':kind,'division':'TRAUMA','source_key':str(id),'payload':{'cac':'100','lines':[line],'event_date':'2026-09-01','reference':'cc 1 del 01/09/2026',**extra}}

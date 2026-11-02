@@ -158,7 +158,7 @@ def prepare_orders(content,filename,division,records=()):
             key=previous[0]['source_key']
             if not number:number=previous[0]['payload'].get('number','')
             if not invoice:invoice=previous[0]['payload'].get('invoice','')
-        q=positive_quantity(row['QUANTITA']);price=money(row['PREZZO UNITARIO']) if text(row.get('PREZZO UNITARIO')) else None
+        q=positive_quantity(row['QUANTITA']);price=money(row['PREZZO UNITARIO']) if text(row.get('PREZZO UNITARIO')) else (money(decimal(row['TOTALE RIGA'])/q) if text(row.get('TOTALE RIGA')) else None)
         total=money(row['TOTALE RIGA']) if text(row.get('TOTALE RIGA')) else (money(decimal(price)*q) if price is not None else None)
         if price is not None and total is not None and abs(decimal(price)*q-decimal(total))>Decimal('.02'):raise ValueError(f'Riga {index+2}: prezzo × quantità diverso dal totale')
         line={'ref':ref(row['REF']),'lot':text(row.get('LOTTO')).upper(),'quantity':q,'price':price,'total':total,
