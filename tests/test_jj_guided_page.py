@@ -68,6 +68,13 @@ def test_guided_page_renders_real_proposals_and_month_review(monkeypatch,has_lin
  assert any(b.label=='Conferma chiusura del mese' for b in at.button)
  assert len(at.checkbox)==(1 if has_links else 2) and not any(c.value for c in at.checkbox)
  assert calls==[]
+ if has_links:
+  at.checkbox[0].check().run()
+  next(b for b in at.button if b.label=='Conferma chiusura del mese').click().run()
+  assert not at.exception and len(calls)==1
+  assert calls[0][1]['p_action']=='CLOSE' and calls[0][1]['p_note']
+ else:
+  assert next(b for b in at.button if b.label=='Conferma chiusura del mese').disabled
  if not has_links:
   next(b for b in at.button if b.label=='Conferma tutta la proposta').click().run()
   assert calls==[] and any('Conferma di aver verificato' in e.value for e in at.error)
