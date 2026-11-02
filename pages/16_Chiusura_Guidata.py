@@ -29,7 +29,7 @@ def load_data():
 
 @st.cache_data(ttl=300)
 def prepare_uploaded(kind,content,filename,division,month,context,customers):
- if kind=='IMPIANTO':return prepare_tab(content,filename,division,context)
+ if kind=='IMPIANTO':return prepare_tab(content,filename,division,context,customers=customers)
  if kind=='ORDINE':return prepare_orders(content,filename,division,context,customers)
  return prepare_month(content,filename,division,month)
 
@@ -100,6 +100,15 @@ for kind,title,uploadkey in [('IMPIANTO','TAB del gestionale','tab'),('CHIUSURA'
     st.dataframe(pd.DataFrame(preview).head(10),hide_index=True,use_container_width=True)
     if len(preview)>10:st.caption(f'Anteprima: 10 documenti su {len(preview)}; il salvataggio acquisisce tutti i documenti.')
     if kind=='IMPIANTO':st.caption('Documenti già presenti aggiornati per tipo, serie, numero e anno. Ripetizioni dello stesso REF e lotto aumentano la quantità. La data intervento è distinta dalla data documento.')
+    if kind=='IMPIANTO':
+     incomplete=[{'Documento':r['source_key'],'Cliente':r['payload']['customer'],'Riferimento':r['payload']['reference'],
+       'CC da verificare':not bool(r['payload']['encounter']),'Data da verificare':not bool(r['payload']['event_date']),
+       'Agente':r['payload'].get('agent') or ('Codice agente '+r['payload']['agent_code'] if r['payload'].get('agent_code') else 'Non assegnato')}
+       for r in prepared if not r['payload']['encounter'] or not r['payload']['event_date']]
+     st.caption('La colonna agente viene acquisita; 0 significa non assegnato. I codici numerici non vengono convertiti in nomi senza una corrispondenza verificata.')
+     if incomplete:
+      st.warning(f'{len(incomplete)} documenti con CC o data da verificare: restano acquisibili, ma non saranno dichiarati chiusi finché incompleti.')
+      st.dataframe(pd.DataFrame(incomplete),hide_index=True,use_container_width=True)
     if kind=='CHIUSURA':
      st.write('Fatturato del file: € '+f"{float(prepared[0]['payload']['invoiced_sales']):,.2f}")
      st.caption(f"Righe fonte: {prepared[0]['payload']['source_row_count']}. Rettifiche economiche conservate: {len(prepared[0]['payload']['economic_rows'])}. Le righe prodotto ripetute sono raggruppate mantenendo tutte le quantità.")
@@ -203,7 +212,7 @@ with st.expander('Strumenti avanzati: presidi, revisioni e documenti',expanded=F
    if st.button('Conferma corrispondenza cliente e presidio',disabled=not selected_presidio):
     try:backend().rpc('jj_map_customer',{'p_customer':customer,'p_cac':choices[selected_presidio],'p_division':division,'p_actor':actor}).execute();load_data.clear();st.rerun()
     except Exception as exc:st.error(str(exc))
- editable=[r for r in records if r['kind']=='IMPIANTO' and (not r['payload'].get('cac') or not r['payload'].get('event_date')) or r.get('pending_payload')]
+ editable=[r for r in records if r['kind']=='IMPIANTO' and (not r['payload'].get('cac') or not r['payload'].get('event_date') or not r['payload'].get('encounter')) or r.get('pending_payload')]
  if editable:
   labels={r['id']:r['kind']+' · '+r['source_key']+' · '+str(r['payload'].get('customer',''))+' · '+str(r['payload'].get('reference','')) for r in editable}
   selected=st.selectbox('Documento da verificare',list(labels),format_func=lambda i:labels[i],key='review_doc')
@@ -220,11 +229,13 @@ with st.expander('Strumenti avanzati: presidi, revisioni e documenti',expanded=F
   elif record['kind']=='IMPIANTO' and catalog:
    cac=st.selectbox('Presidio corretto',list(catalog),format_func=lambda c:catalog[c]+' · '+c,key='review_cac',index=None)
    event=st.text_input('Data intervento (AAAA-MM-GG)',value=record['payload'].get('event_date',''),key='review_date_'+str(selected)+digest(record['payload']))
+   encounter=st.text_input('Cartella clinica verificata',value=record['payload'].get('encounter',''),key='review_cc_'+str(selected)+digest(record['payload']))
    if st.button('Salva presidio e data verificati'):
     try:
      if not cac:raise ValueError('Scegliere il presidio')
      if pd.isna(pd.to_datetime(event,errors='coerce')):raise ValueError('Inserisci una data intervento valida')
-     payload={**record['payload'],'cac':cac,'event_date':str(pd.Timestamp(event).date()),'lines':[{**l,'cac':cac} for l in record['payload']['lines']]}
+     if not encounter.strip():raise ValueError('Inserisci la cartella clinica verificata')
+     payload={**record['payload'],'cac':cac,'encounter':encounter.strip(),'event_date':str(pd.Timestamp(event).date()),'lines':[{**l,'cac':cac} for l in record['payload']['lines']]}
      backend().rpc('jj_review_record',{'p_id':selected,'p_action':'EDIT','p_payload':payload,'p_note':note,'p_actor':actor}).execute();load_data.clear();st.rerun()
     except Exception as exc:st.error(str(exc))
  elif records:st.caption('Nessuna revisione o presidio mancante nei documenti acquisiti.')

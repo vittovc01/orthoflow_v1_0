@@ -27,7 +27,7 @@ def build_status(records,links,division=None,structure=None,year=None):
           'Pezzi impiantati':0,'Pezzi associati':0,'Pezzi chiusi':0})
         group['_documents'].add(r['source_key'])
         group['_names'].add(customer)
-        group['_agents'].add(text(p.get('agent')) or text(p.get('agente')) or 'Non assegnato')
+        group['_agents'].add(text(p.get('agent')) or text(p.get('agente')) or ('Codice agente '+text(p['agent_code']) if text(p.get('agent_code')) else 'Non assegnato'))
         if r.get('pending_payload'):group['_reasons'].add('Revisione del TAB da verificare')
         if not p.get('cac'):group['_reasons'].add('Presidio da assegnare')
         if not cc:group['_reasons'].add('Cartella clinica mancante')

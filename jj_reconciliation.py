@@ -40,6 +40,13 @@ def date(value):
     parsed=pd.to_datetime(value,dayfirst=not bool(re.match(r'^\d{4}-\d{2}-\d{2}',str(value))),errors='coerce')
     return parsed.date().isoformat() if pd.notna(parsed) else ''
 
+def clinical_reference(value):
+    """Keep CC suffixes/leading zeroes; never infer an absent CC or mistyped year."""
+    value=text(value)
+    cc=re.search(r'(?i)\bCC\s*[:.n°]*\s*(\d+(?:/\d+)?)\s+DEL',value)
+    when=re.search(r'(?i)\bDEL\s*(\d{1,2}[/-]\d{1,2}[/-](?:\d{4}|\d{2}))\b',value)
+    return (cc[1] if cc else '',date(when[1]) if when else '')
+
 def frames(content,filename):
     if filename.lower().endswith('.csv'):
         return {'CSV':pd.read_csv(io.BytesIO(content),sep=None,engine='python',dtype=object)}
@@ -88,9 +95,14 @@ def group_lines(lines,kind):
         if line.get('total') is not None:g['total']=money(decimal(g['total'])+decimal(line['total']))
     return sorted(groups.values(),key=lambda r:r['key'])
 
-def prepare_tab(content,filename,division,records=(),mapping=None):
+def prepare_tab(content,filename,division,records=(),mapping=None,customers=()):
+    if division not in DIVISIONS:raise ValueError('Divisione non valida')
+    records=[r for r in records if r['division']==division]
     _,frame=select_frame(content,filename,['TIPO','NUMERO','CLIENTE','ARTICOLO','LOTTO','RIFERIMENTO','DATA','QUANTITA','SERIE','CAUSALE'])
     documents={};mapping=dict(mapping or {});cac_cache={}
+    customer_codes=defaultdict(set)
+    for c in customers:
+        if text(c.get('codice_cliente')):customer_codes[normalized(text(c.get('descrizione')) or text(c.get('descrizione_cliente')))].add(text(c['codice_cliente']))
     prior={r['source_key']:r['payload'] for r in records if r['kind']=='IMPIANTO'}
     for customer in frame['CLIENTE'].dropna().map(text).unique():
         if normalized(customer)=='ASL SALERNO':
@@ -100,12 +112,13 @@ def prepare_tab(content,filename,division,records=(),mapping=None):
         if len(previous)==1:mapping.setdefault(customer,next(iter(previous)))
     for index,row in frame.iterrows():
         if all(not text(v) for v in row):continue
-        if division not in normalized(row['CAUSALE']):raise ValueError(f'Riga {index+2}: causale diversa da {division}')
+        cause=normalized(row['CAUSALE'])
+        if (division=='TRAUMA' and ('TRAUMA' not in cause or 'PROTESICA' in cause)) or (division=='PROTESICA' and ('TRAUMA' in cause or ('PROTESICA' not in cause and cause!='AVVENUTO IMPIANTO'))):raise ValueError(f'Riga {index+2}: causale diversa da {division}')
         docdate=date(row['DATA'])
         if not docdate:raise ValueError(f'Riga {index+2}: data documento non valida')
         customer=text(row['CLIENTE']);reference=text(row['RIFERIMENTO'])
-        match=re.search(r'(?i)\bCC\s*[:.n°]*\s*(\d+)\s+DEL\s+(\d{1,2}/\d{1,2}/\d{4})',reference)
-        encounter=match[1] if match else '';event=date(match[2]) if match else ''
+        encounter,event=clinical_reference(reference)
+        source_event=event
         number=text(row['NUMERO']).removesuffix('.0')
         if not number or not text(row['TIPO']):raise ValueError(f'Riga {index+2}: documento incompleto')
         key='|'.join([docdate[:4],text(row['TIPO']),text(row['SERIE']),number])
@@ -116,10 +129,21 @@ def prepare_tab(content,filename,division,records=(),mapping=None):
             cac=previous.get('cac') or cac
             if previous.get('reference')==reference and previous.get('document_date')==docdate:
                 event=previous.get('event_date') or event
-        line={'ref':ref(row['ARTICOLO']),'lot':text(row['LOTTO']).upper(),'quantity':positive_quantity(row['QUANTITA']),
+                encounter=previous.get('encounter') or encounter
+        try:quantity=positive_quantity(row['QUANTITA'])
+        except ValueError as exc:raise ValueError(f'Riga {index+2}, documento {key}, REF {text(row["ARTICOLO"])}: {exc}') from exc
+        line={'ref':ref(row['ARTICOLO']),'lot':text(row['LOTTO']).upper(),'quantity':quantity,
               'expiry':date(row.get('SCADENZA')),'description':text(row.get('DESCRIZIONE')),'source_rows':[int(index)+2]}
-        payload={'customer':customer,'cac':cac,'reference':reference,'encounter':encounter,'event_date':event,'source_ref_date':date(match[2]) if match else '','document_date':docdate,'lines':[]}
+        payload={'customer':customer,'cac':cac,'reference':reference,'encounter':encounter,'event_date':event,'source_ref_date':source_event,'document_date':docdate,'lines':[]}
+        agent=text(row.get('AGENTE')).removesuffix('.0')
+        if agent and agent!='0':
+            if agent.isdigit():payload['agent_code']=agent
+            else:payload['agent']=agent
+        matched_codes=customer_codes[normalized(customer)]
+        if len(matched_codes)==1:payload['customer_code']=next(iter(matched_codes))
+        elif previous.get('customer_code') and normalized(previous.get('customer'))==normalized(customer):payload['customer_code']=previous['customer_code']
         if key in documents and any(documents[key][k]!=payload[k] for k in ['customer','reference','document_date']):raise ValueError(f'Documento {key} con intestazioni discordanti')
+        if key in documents and any(documents[key].get(k)!=payload.get(k) for k in ('agent_code','agent')):raise ValueError(f'Documento {key} con agenti diversi nelle righe: verificare il gestionale')
         documents.setdefault(key,payload)['lines'].append(line)
     result=[]
     for key,payload in documents.items():
