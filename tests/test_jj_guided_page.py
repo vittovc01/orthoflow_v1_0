@@ -49,7 +49,11 @@ def test_guided_page_renders_real_proposals_and_month_review(monkeypatch,has_lin
  at.secrets['SUPABASE_URL']='http://127.0.0.1:1';at.secrets['SUPABASE_SERVICE_KEY']='fake'
  at.session_state['user']={'id':'test'};at.session_state['ruolo']='Admin';at.run()
  assert not at.exception
- assert any(b.label=='Conferma collegamenti selezionati' for b in at.button)==(not has_links)
+ assert any(b.label=='Conferma tutta la proposta' for b in at.button)==(not has_links)
+ if not has_links:
+  draft=next(d.value for d in at.dataframe if 'Escludi' in d.value.columns)
+  assert not draft['Escludi'].any()
+  assert 'Conferma' not in draft.columns
  assert any('Cartella clinica' in d.value.columns for d in at.dataframe)
  if has_links:
   confirmed=next(d.value for d in at.dataframe if 'Cartella clinica' in d.value.columns)

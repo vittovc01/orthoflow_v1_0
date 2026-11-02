@@ -238,6 +238,43 @@ def proposals(records,links,closure_id=None):
     for r in result:r['Univoco']=all(sides[side][(r[side+'_id'],r[side+'_line'])]==1 for side in sides)
     return result
 
+def allocation_plan(records,links,closure_id,candidates=None):
+    """Reviewable FIFO draft, never a saved or proven clinical attribution.
+
+    Consume capacities on all three sources globally. Sorting is stable, with
+    earlier invoice deadlines first and older eligible CCs first. Ambiguous
+    undated/unidentified CCs require manual review instead of arbitrary ranking.
+    """
+    candidates=proposals(records,links,closure_id) if candidates is None else candidates
+    by_id={r['id']:r for r in records}
+    capacity={}
+    for record,line in line_rows(records):
+        side={'CHIUSURA':'closure','ORDINE':'order','IMPIANTO':'implant'}[record['kind']]
+        capacity[(side,record['id'],line['key'])]=max(0,line['quantity']-allocated(links,record['id'],line['key'],record['kind']))
+    alternatives=defaultdict(set)
+    for row in candidates:
+        alternatives[(row['closure_id'],row['closure_line'],row['order_id'],row['order_line'])].add((row['implant_id'],row['implant_line']))
+    def sort_key(row):
+        closing=by_id[row['closure_id']]
+        line=next(l for l in closing['payload']['lines'] if l['key']==row['closure_line'])
+        return (line.get('date') or '9999-12-31',row['closure_id'],row['closure_line'],
+          len(alternatives[(row['closure_id'],row['closure_line'],row['order_id'],row['order_line'])]),
+          row['order_id'],row['order_line'],row.get('Data intervento') or '9999-12-31',row['implant_id'],row['implant_line'])
+    result=[]
+    for row in sorted(candidates,key=sort_key):
+        if row['closure_id']!=closure_id or not row.get('Cartella clinica'):continue
+        if not row.get('Univoco') and not row.get('Data intervento'):continue
+        keys=[(side,row[side+'_id'],row[side+'_line']) for side in ('closure','order','implant')]
+        quantity=min([int(row['quantity'])]+[capacity.get(k,0) for k in keys])
+        if quantity<=0:continue
+        for key in keys:capacity[key]-=quantity
+        count=len(alternatives[(row['closure_id'],row['closure_line'],row['order_id'],row['order_line'])])
+        result.append({**row,'quantity':quantity,'Alternative compatibili':count,
+          'Criterio proposta':'Corrispondenza senza alternative' if row.get('Univoco') else 'CC meno recente prima (FIFO): da verificare',
+          'proposal_criterion':'UNIQUE_CANDIDATE' if row.get('Univoco') else 'FIFO_CC_DATE_DRAFT'})
+    return result
+
+
 def residuals(records,links):
     result=[]
     for record,line in line_rows(records):

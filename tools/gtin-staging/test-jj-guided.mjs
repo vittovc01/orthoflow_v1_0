@@ -68,10 +68,11 @@ try {
  const mixC=await id('CHIUSURA','2027-01'),mixO=await id('ORDINE','MIXED');
  const mixed=[{key:'A',cc:'CC101',quantity:2},{key:'A',cc:'CC102',quantity:1},{key:'B',cc:'CC103',quantity:1}];
  const mixedLinks=[];
- for(const r of mixed)mixedLinks.push({closure_id:mixC,closure_line:r.key,order_id:mixO,order_line:r.key,implant_id:await id('IMPIANTO',r.cc),implant_line:r.key,quantity:r.quantity});
+ for(const r of mixed)mixedLinks.push({closure_id:mixC,closure_line:r.key,order_id:mixO,order_line:r.key,implant_id:await id('IMPIANTO',r.cc),implant_line:r.key,quantity:r.quantity,proposal_criterion:'FIFO_CC_DATE_DRAFT'});
  const otherCC=await id('IMPIANTO','CC_OTHER');
  await assert.rejects(()=>confirm([{...mixedLinks[2],implant_id:otherCC}]),/presidio/);
  assert.equal(await confirm(mixedLinks),3);
+ assert.equal((await db.query("select count(*)::int n from jj_recon_audit where action='CONFIRM_LINK' and after_value->>'proposal_criterion'='FIFO_CC_DATE_DRAFT'")).rows[0].n,3);
  assert.equal(await confirm(mixedLinks),0);
  assert.equal((await db.query('select count(distinct implant_id)::int n from jj_recon_links where order_id=$1 and revoked_at is null',[mixO])).rows[0].n,3);
  await review('CLOSE',mixC);
