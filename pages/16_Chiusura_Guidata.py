@@ -159,6 +159,8 @@ if closures:
    else:
     frame=pd.DataFrame(planned)
     st.write(f"Proposta: {len(frame)} collegamenti · {frame['order_id'].nunique()} ordini · {frame['implant_id'].nunique()} documenti CC · {int(frame['quantity'].sum())} pezzi.")
+    uncovered=sum(max(0,r['Residuo']) for r in residuals([closing],links) if r['Quantità']>0)-int(frame['quantity'].sum())
+    if uncovered>0:st.caption(f'Nel mese resterebbero {uncovered} pezzi fatturati da riconciliare dopo questa proposta, compresi gli ordini fuori dal filtro. Il dettaglio resta nei residui.')
     if any(not r['Univoco'] for r in planned):
      st.warning('Sono presenti alternative compatibili. La ripartizione per data è una proposta da verificare e non dimostra a quale CC sia stato fatturato il lotto. Escludi o correggi le righe non corrette.')
     st.download_button('Scarica proposta completa prima della conferma',frame[[c for c in ('Ordine','PO','Fattura','Presidio','Cartella clinica','REF','Lotto impianto','quantity','Criterio proposta') if c in frame]].to_csv(index=False).encode('utf-8-sig'),'Proposta_ordini_CC_'+division+'.csv','text/csv')
