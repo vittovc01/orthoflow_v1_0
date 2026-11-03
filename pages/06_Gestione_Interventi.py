@@ -219,8 +219,8 @@ def warehouse_codes():
 
 
 st.title("🛠️ Gestione Interventi")
-from tab_management_ui import intervention_source
-intervention_source(sb())
+from tab_runtime import current_management
+current_management().intervention_source(sb())
 
 try:
     interventions = (sb().table("interventi").select("*")

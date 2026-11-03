@@ -41,8 +41,8 @@ st.title("⚠️ Anomalie Prezzi e Giacenze")
 st.caption("Prezzi TAB, prezzi degli scarichi storici e giacenze: tre sezioni distinte.")
 
 rows=load_rows(lambda client: client.table("righe_intervento").select("id,intervento_id,codice,descrizione,lotto,quantita,prezzo,prezzo_source").eq("prezzo_source","DA_VERIFICARE_DIREZIONE").order("id",desc=True))
-from tab_price_anomalies import render_tab_price_anomalies
-render_tab_price_anomalies(sb,sb.clear)
+from tab_runtime import current_tab
+current_tab().render_tab_price_anomalies(sb,sb.clear)
 
 with st.expander("Prezzi degli scarichi storici",expanded=bool(rows)):
     if not rows:
