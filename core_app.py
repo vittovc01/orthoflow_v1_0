@@ -89,8 +89,8 @@ def _route_legacy_menu(value):
     if selected in ('Dashboard','KPI e Fatturato') and (_director or 'AMMINISTRAZIONE' in _p):
         quick=st.session_state.get('quick_menu')
         if not quick or quick in ('Dashboard','KPI e Fatturato'):
-            from tab_management_ui import render_tab_management
-            render_tab_management(analytics=True)
+            from tab_runtime import current_management
+            current_management().render_tab_management(analytics=True)
             st.stop()
     if selected == "DDT carico / Loan":
         st.switch_page(DDT_PAGE)
