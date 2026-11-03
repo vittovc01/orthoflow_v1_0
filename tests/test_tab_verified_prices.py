@@ -93,7 +93,7 @@ def test_validation_blocks_nonfinite_negative_and_unknown_scope():
  b=PricesBackend();scope={'Codice struttura':'00901','CAC':'100','Divisione':'TRAUMA','REF':'413.016S'}
  for value in [None,'nan','inf','-1','0']:
   with pytest.raises(ValueError):save_verified_price(b,scope,value,date(2026,1,1),date(2026,12,31),'user','Customer')
- with pytest.raises(ValueError):save_verified_price(b,{**scope,'CAC':''},10,date(2026,1,1),date(2026,12,31),'user','Customer')
+ with pytest.raises(ValueError):save_verified_price(b,{**scope,'Codice struttura':''},10,date(2026,1,1),date(2026,12,31),'user','Customer')
  assert b.writes==[]
 
 
@@ -112,3 +112,13 @@ def test_save_keeps_remaining_refs_of_same_clinic_ready(monkeypatch):
  assert len(ref.options)==1 and 'Z2' in ref.options[0]
  assert next(x for x in at.number_input if x.label=='Prezzo unitario verificato (€)').value is None
  st.cache_resource.clear();st.cache_data.clear()
+
+
+def test_erp_structure_without_customer_cac_can_be_priced_but_not_mixed_with_known_presidio():
+ b=Backend();b.data['jj_recon_records'][2]['payload']['cac']=''
+ b.data['jj_recon_links']=[]
+ assert report(b,[verified(cac='')])['Prodotti TAB'][0]['Prezzo offerta']==10
+ assert report(b,[verified(cac='100')])['Prodotti TAB'][0]['Prezzo offerta']==8
+ scope={'Codice struttura':'00901','CAC':'','Divisione':'PROTESICA','REF':'R1'}
+ backend=PricesBackend();save_verified_price(backend,scope,10,date(2026,1,1),date(2026,12,31),'user','Customer')
+ assert backend.writes[0][1]['p_cac']==''

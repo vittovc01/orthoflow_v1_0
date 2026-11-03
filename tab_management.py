@@ -50,7 +50,7 @@ def price_index(headers,connections,prices):
 
 def offered_price(index,code,division,ref,event,cac=''):
     exact,canonical=index
-    valid=lambda x: (not x[5] or (cac and x[6]==cac)) and not ((x[3] or x[4]) and not event) and not (event and ((x[3] and event<x[3]) or (x[4] and event>x[4])))
+    valid=lambda x: (not x[5] or x[6]==cac) and not ((x[3] or x[4]) and not event) and not (event and ((x[3] and event<x[3]) or (x[4] and event>x[4])))
     target=text(ref).upper();matches=[x for x in exact.get((code,division,target),[]) if valid(x)]
     if not matches:
         matches=[x for x in canonical.get((code,division,re.sub(r'[^A-Z0-9]','',target)),[]) if valid(x)]

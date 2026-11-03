@@ -19,11 +19,11 @@ def save_verified_price(client,scope,price,start,end,actor,note,discount=False):
         value=Decimal(str(price))
         if not value.is_finite() or (discount and value!=0) or (not discount and value<=0):raise ValueError
         if not isinstance(start,date) or not isinstance(end,date) or start>end:raise ValueError
-        if not all(str(scope.get(k) or '').strip() for k in ('Codice struttura','CAC','Divisione','REF')):raise ValueError
+        if not all(str(scope.get(k) or '').strip() for k in ('Codice struttura','Divisione','REF')):raise ValueError
         if scope['Divisione'] not in ('TRAUMA','PROTESICA') or not actor or not str(note).strip():raise ValueError
     except (ValueError,InvalidOperation):raise ValueError('Inserisci struttura, REF, prezzo, periodo e riferimento della verifica validi.') from None
     return client.rpc('tab_salva_prezzo_verificato',{'p_cliente':scope['Codice struttura'],
-      'p_cac':scope['CAC'],'p_linea':scope['Divisione'],'p_ref':scope['REF'].strip().upper(),
+      'p_cac':str(scope.get('CAC') or ''),'p_linea':scope['Divisione'],'p_ref':scope['REF'].strip().upper(),
       'p_prezzo':str(value),'p_dal':start.isoformat(),'p_al':end.isoformat(),
       'p_utente':str(actor),'p_nota':str(note).strip(),'p_sconto':discount}).execute().data
 
@@ -31,7 +31,7 @@ def save_verified_price(client,scope,price,start,end,actor,note,discount=False):
 def worklist(rows):
     groups={}
     for row in rows:
-        if not row.get('Codice struttura') or not row.get('CAC') or not row.get('Data intervento'):continue
+        if not row.get('Codice struttura') or not row.get('Data intervento'):continue
         key=tuple(row.get(k) for k in ('Divisione','Codice struttura','CAC','REF'))
         g=groups.setdefault(key,{**{k:row.get(k,'') for k in ('Divisione','Codice struttura','CAC','REF','Struttura','Descrizione')},'Documenti':set(),'Date':set(),'Motivi':set()})
         g['Documenti'].add(row.get('Documento TAB'));g['Date'].add(row['Data intervento']);g['Motivi'].add(row['Categoria'])

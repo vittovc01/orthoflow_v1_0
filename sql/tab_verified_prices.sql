@@ -17,7 +17,7 @@ CREATE OR REPLACE FUNCTION public.tab_salva_prezzo_verificato(
 ) RETURNS jsonb LANGUAGE plpgsql SECURITY INVOKER SET search_path='' AS $$
 DECLARE old_row public.tab_prezzi_verificati; new_row public.tab_prezzi_verificati;
 BEGIN
- IF nullif(btrim(p_cliente),'') IS NULL OR nullif(btrim(p_cac),'') IS NULL
+ IF nullif(btrim(p_cliente),'') IS NULL OR p_cac IS NULL
  OR p_linea IS NULL OR p_linea NOT IN ('TRAUMA','PROTESICA')
  OR nullif(btrim(p_ref),'') IS NULL OR p_ref<>upper(btrim(p_ref))
  OR p_prezzo IS NULL OR p_prezzo::text IN ('NaN','Infinity','-Infinity')
