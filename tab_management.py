@@ -42,22 +42,24 @@ def price_index(headers,connections,prices):
         except ValueError:continue
         if value<0:continue
         for code in clients[h['id']]:
-            product=text(p.get('codice')).upper();entry=(product,value,h['id'],start,end)
+            product=text(p.get('codice')).upper();entry=(product,value,h['id'],start,end,bool(h.get('tab_verified')),text(h.get('cac')))
             prefix=(code,text(h.get('linea')).upper())
             exact[(*prefix,product)].append(entry)
             canonical[(*prefix,re.sub(r'[^A-Z0-9]','',product))].append(entry)
     return exact,canonical
 
-def offered_price(index,code,division,ref,event):
+def offered_price(index,code,division,ref,event,cac=''):
     exact,canonical=index
-    valid=lambda x: not ((x[3] or x[4]) and not event) and not (event and ((x[3] and event<x[3]) or (x[4] and event>x[4])))
+    valid=lambda x: (not x[5] or (cac and x[6]==cac)) and not ((x[3] or x[4]) and not event) and not (event and ((x[3] and event<x[3]) or (x[4] and event>x[4])))
     target=text(ref).upper();matches=[x for x in exact.get((code,division,target),[]) if valid(x)]
     if not matches:
         matches=[x for x in canonical.get((code,division,re.sub(r'[^A-Z0-9]','',target)),[]) if valid(x)]
         if len({x[0] for x in matches})>1:return None,[], 'REF ambiguo nelle offerte'
+    verified=[x for x in matches if x[5]]
+    if verified:matches=verified
     if not matches:return None,[],'Prezzo offerta mancante o offerta non valida alla data intervento'
     if len({x[1] for x in matches})!=1:return None,[],'Più offerte valide con prezzi diversi'
-    return matches[0][1],sorted({x[2] for x in matches}),''
+    return matches[0][1],sorted({x[2] for x in matches},key=str),''
 
 def management_report(records,links,customers,headers,connections,prices,status_builder,division=None,structure=None,year=None,agent=None):
     status=status_builder(records,links,division,None,year)
@@ -81,11 +83,12 @@ def management_report(records,links,customers,headers,connections,prices,status_
         label=structure_label(p,customers,account_names)
         if structure and label!=structure:continue
         code,reason=customer_code(p,customers)
-        price,offers,price_reason=offered_price(index,code,d['Divisione'],d['REF'],d['Data intervento']) if code else (None,[],reason)
+        price,offers,price_reason=offered_price(index,code,d['Divisione'],d['REF'],d['Data intervento'],text(p.get('cac'))) if code else (None,[],reason)
         reason=reason or price_reason
         key=(d['Divisione'],d['Documento TAB'],d['REF'],d['Lotto'])
         row={'ID intervento TAB':grouping[(d['Divisione'],d['Documento TAB'])],**d,'Struttura':label,'Codice struttura':code,'Agente':name,
           'Periodo':d['Data intervento'][:7] if d['Data intervento'] else 'Data mancante',
+          'Fonte prezzo':'Verificato manualmente' if any(str(o).startswith('verified:') for o in offers) else 'Offerta' if price is not None else 'Da verificare',
           'Prezzo offerta':float(price) if price is not None else None,'Valore atteso':float(price*d['Quantità impiantata']) if price is not None else None,
           'Valore fatturato associato':None if key in missing_amount else float(associated[key]),'Offerte':', '.join(map(str,offers)),'Motivo / azione':reason}
         rows.append(row);row_lookup[key]=row;by_intervention[row['ID intervento TAB']].append(row)
