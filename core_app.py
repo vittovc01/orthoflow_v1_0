@@ -18,6 +18,7 @@ SCARICO_AI_PAGE = "pages/05_Scarico_Sala_AI.py"
 WORK_IMPLANT_PAGE = "pages/07_Work_Implant.py"
 CUSTOMER_CONNECT_PAGE = "pages/08_Customer_Connect.py"
 DDT_PAGE = "pages/04_DDT_Carico_v2.py"
+PRICE_ANOMALIES_PAGE = "pages/14_Anomalie_Prezzi.py"
 DEDICATED_MENU = {"Scarico sala", "Work Implant", "Customer Connect", "DDT carico / Loan"}
 
 
@@ -54,6 +55,11 @@ if quick_menu == "DDT carico / Loan":
     st.switch_page(DDT_PAGE)
     st.stop()
 
+if quick_menu == 'Anomalie':
+    st.session_state.pop('quick_menu',None)
+    st.switch_page(PRICE_ANOMALIES_PAGE)
+    st.stop()
+
 _original_button = DeltaGenerator.button
 
 
@@ -77,6 +83,9 @@ _original_radio = DeltaGenerator.radio
 
 def _route_legacy_menu(value):
     selected = str(value).strip()
+    if selected == 'Anomalie':
+        st.switch_page(PRICE_ANOMALIES_PAGE)
+        st.stop()
     if selected in ('Dashboard','KPI e Fatturato') and (_director or 'AMMINISTRAZIONE' in _p):
         quick=st.session_state.get('quick_menu')
         if not quick or quick in ('Dashboard','KPI e Fatturato'):
