@@ -2,7 +2,7 @@
 import pandas as pd
 import streamlit as st
 from tab_management import management_report,structure_label
-from tab_management_ui import tab_records,tab_catalogs,refresh
+from tab_management_ui import tab_records,tab_catalogs,refresh,refresh_prices,anomaly_report
 from jj_runtime import current_reconciliation
 from jj_status_runtime import current_status
 from jj_report_runtime import current_reports
@@ -65,10 +65,9 @@ def render_tab_price_anomalies(client_factory,reset_client):
     structure=cols[0].selectbox('Struttura anomalie TAB',['Tutte']+sorted({structure_label(r['payload'],customers,accounts) for r in scope}),key='anomaly_tab_structure_'+division)
     year=cols[1].selectbox('Anno anomalie TAB',['Tutti']+sorted({r['payload']['event_date'][:4] for r in scope if r['payload'].get('event_date')},reverse=True),key='anomaly_tab_year_'+division)
     agent=cols[2].selectbox('Agente anomalie TAB',['Tutti']+sorted({payload_agent(r['payload']) for r in scope}),key='anomaly_tab_agent_'+division)
-    report=management_report(records,links,customers,headers,connections,prices,current_status().build_status,
-      None if division=='Tutte' else division,None if structure=='Tutte' else structure,None if year=='Tutti' else year,None if agent=='Tutti' else agent)
-    all_checks=price_checks(management_report(records,links,customers,headers,connections,prices,current_status().build_status,
-      None if division=='Tutte' else division,None,None if year=='Tutti' else year,None if agent=='Tutti' else agent))
+    report=anomaly_report(records,links,catalogs,None if division=='Tutte' else division,
+      None if year=='Tutti' else year,None if agent=='Tutti' else agent)
+    all_checks=price_checks(report)
     pending=sorted({r['Struttura'] for r in all_checks})
     st.caption('Strutture con anomalie: '+str(len(pending))+'. Scegli una struttura nel filtro per completare tutti i suoi REF prima di passare alla successiva.')
     def next_structure():
@@ -76,7 +75,7 @@ def render_tab_price_anomalies(client_factory,reset_client):
         if candidates:st.session_state['anomaly_tab_structure_'+division]=next((x for x in candidates if structure=='Tutte' or x>structure),candidates[0])
         st.session_state['anomaly_tab_search']=''
     st.button('Struttura successiva con anomalie',on_click=next_structure,disabled=not any(x!=structure for x in pending))
-    checks=price_checks(report)
+    checks=all_checks if structure=='Tutte' else [r for r in all_checks if r['Struttura']==structure]
     selected=st.selectbox('Tipo di anomalia TAB',['Tutti']+sorted({r['Categoria'] for r in checks}))
     rows=checks if selected=='Tutti' else [r for r in checks if r['Categoria']==selected]
     search=st.text_input('Cerca REF o descrizione',key='anomaly_tab_search').strip().casefold()
@@ -89,10 +88,10 @@ def render_tab_price_anomalies(client_factory,reset_client):
         col.metric(label,value)
     actions=grouped_actions(rows)
     from tab_verified_prices import render_price_editor
-    render_price_editor(client_factory(),rows,refresh)
-    summary=report['Riepilogo']+[{'Voce':'Tipo anomalia selezionato','Valore':selected},{'Voce':'Segnalazioni TAB mostrate','Valore':len(rows)}]
-    st.download_button('Scarica Excel anomalie TAB',current_reports().excel_report({'Riepilogo':summary,'Anomalie TAB':rows,'Azioni raggruppate':actions}),
-      'Anomalie_Prezzi_TAB_'+division+'.xlsx','application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',type='primary')
+    render_price_editor(client_factory(),rows,refresh_prices)
+    summary=[{'Voce':k,'Valore':v} for k,v in [('Divisione',division),('Struttura',structure),('Anno intervento',year),('Agente',agent),('Tipo anomalia selezionato',selected),('Ricerca REF / descrizione',search),('Segnalazioni TAB mostrate',len(rows))]]
+    st.download_button('Scarica Excel anomalie TAB',lambda:current_reports().excel_report({'Riepilogo':summary,'Anomalie TAB':rows,'Azioni raggruppate':actions}),
+      'Anomalie_Prezzi_TAB_'+division+'.xlsx','application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',type='primary',on_click='ignore')
     if not rows:
         st.success('Nessuna anomalia prezzo TAB nei filtri selezionati.');return
     st.warning(f'{len(rows)} segnalazioni TAB da verificare nei filtri selezionati.')

@@ -122,3 +122,38 @@ def test_erp_structure_without_customer_cac_can_be_priced_but_not_mixed_with_kno
  scope={'Codice struttura':'00901','CAC':'','Divisione':'PROTESICA','REF':'R1'}
  backend=PricesBackend();save_verified_price(backend,scope,10,date(2026,1,1),date(2026,12,31),'user','Customer')
  assert backend.writes[0][1]['p_cac']==''
+
+
+def test_price_save_reuses_ledger_and_shared_offers_but_refreshes_verified_prices(monkeypatch):
+ from collections import Counter
+ b=PricesBackend();b.data['offerte_prezzi']=[]
+ at=page(monkeypatch,b).run();assert not at.exception
+ before=Counter(b.reads)
+ next(x for x in at.number_input if x.label=='Prezzo unitario verificato (€)').set_value(10)
+ next(x for x in at.text_input if x.label=='Riferimento verifica prezzo').set_value('Customer')
+ next(x for x in at.button if x.label=='Salva prezzo e ricalcola anomalie').click().run()
+ assert not at.exception
+ after=Counter(b.reads)
+ for name in ('jj_recon_records','jj_recon_links','clienti','offerte_header','offerte_clienti','offerte_prezzi'):
+  assert after[name]==before[name],name
+ assert after['tab_prezzi_verificati']==before['tab_prezzi_verificati']+1
+ assert next(x for x in at.metric if x.label=='Segnalazioni TAB').value=='0'
+ st.cache_resource.clear();st.cache_data.clear()
+
+
+def test_filter_reruns_do_not_rebuild_report_or_generate_excel(monkeypatch):
+ import tab_management_ui,tab_runtime,jj_report
+ b=Backend();b.data['offerte_prezzi']=[]
+ tab_runtime.current_tab()
+ original=tab_management_ui.management_report;calls=[]
+ def counted(*args,**kwargs):calls.append(1);return original(*args,**kwargs)
+ monkeypatch.setattr(tab_management_ui,'management_report',counted)
+ def forbidden(*args,**kwargs):raise AssertionError('Excel must only be generated on download')
+ monkeypatch.setattr(jj_report,'excel_report',forbidden)
+ at=page(monkeypatch,b).run();assert not at.exception and len(calls)==1
+ next(x for x in at.selectbox if x.label=='Struttura anomalie TAB').select('Sapri').run()
+ next(x for x in at.text_input if x.label=='Cerca REF o descrizione').set_value('413').run()
+ next(x for x in at.selectbox if x.label=='Ordina anomalie per').select('REF e struttura').run()
+ assert not at.exception and len(calls)==1
+ assert next(x for x in at.metric if x.label=='Segnalazioni TAB').value=='1'
+ st.cache_resource.clear();st.cache_data.clear()
