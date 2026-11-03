@@ -18,14 +18,30 @@ def tab_backend():
     if not url or not key:raise RuntimeError('Configurare la connessione server del modulo TAB')
     return create_client(str(url).rstrip('/'),str(key))
 
+@st.cache_data(ttl=300,max_entries=2)
+def base_catalogs(_client):
+    return [read_all(_client,name).to_dict('records') for name in ('clienti','offerte_header','offerte_clienti','offerte_prezzi')]
+
+@st.cache_data(ttl=30,max_entries=2)
+def verified_catalog(_client):
+    return read_all(_client,'tab_prezzi_verificati').to_dict('records')
+
 @st.cache_data(ttl=30,max_entries=2)
 def tab_catalogs(_client):
     from tab_verified_prices import add_verified_prices
-    catalogs=[read_all(_client,name).to_dict('records') for name in ('clienti','offerte_header','offerte_clienti','offerte_prezzi')]
-    return add_verified_prices(catalogs,read_all(_client,'tab_prezzi_verificati').to_dict('records'))
+    return add_verified_prices(base_catalogs(_client),verified_catalog(_client))
+
+@st.cache_data(ttl=30,max_entries=8)
+def anomaly_report(records,links,catalogs,division,year,agent):
+    return management_report(records,links,*catalogs,current_status().build_status,
+      division,None,year,agent)
+
+def refresh_prices():
+    # A price save cannot change implants, allocations or shared offers.
+    verified_catalog.clear();tab_catalogs.clear();anomaly_report.clear()
 
 def refresh():
-    tab_records.clear();tab_catalogs.clear()
+    tab_records.clear();base_catalogs.clear();refresh_prices()
 
 def import_tab(client,records,links,customers,division):
     with st.expander('Carica / aggiorna TAB '+division.title(),expanded=not any(r['kind']=='IMPIANTO' and r['division']==division for r in records)):
