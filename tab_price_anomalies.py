@@ -31,7 +31,7 @@ def price_checks(report):
 def grouped_actions(rows):
     grouped={}
     for row in rows:
-        key=(row['Divisione'],row['Categoria'],row.get('Codice struttura') or row.get('CAC') or row['Struttura'],row.get('REF'))
+        key=(row['Divisione'],row['Categoria'],row.get('CAC') or row.get('Codice struttura') or row['Struttura'],row.get('REF'))
         g=grouped.setdefault(key,{'Divisione':row['Divisione'],'Categoria':row['Categoria'],'Struttura':row['Struttura'],
           'Codice struttura':row.get('Codice struttura',''),'CAC':row.get('CAC',''),'REF':row.get('REF'),'Righe interessate':0,
           'Pezzi interessati':0,'Azione':('Verifica struttura / CC / data in Gestione Interventi' if row['Categoria'] in ('Struttura da verificare','Data intervento da verificare') else 'Verifica la fattura e l’offerta della struttura' if row['Categoria'] in ('Differenza fattura / offerta','Prezzo fattura mancante') else 'Completa o correggi l’offerta della struttura in Controllo di Gestione → Offerte')})

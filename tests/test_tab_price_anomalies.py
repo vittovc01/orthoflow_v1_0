@@ -45,7 +45,7 @@ def test_categories_distinguish_missing_structure_date_ambiguity_and_invoice():
 def test_grouped_invoice_actions_keep_distinct_presidi_with_same_erp_name():
  products=[];issues=[]
  for doc,cac,clinic in [('d1','100','Sapri'),('d2','200','Nocera')]:
-  products.append({'Divisione':'TRAUMA','Documento TAB':doc,'REF':'R1','Lotto':'L1','Struttura':clinic,'CAC':cac})
+  products.append({'Divisione':'TRAUMA','Documento TAB':doc,'REF':'R1','Lotto':'L1','Struttura':clinic,'CAC':cac,'Codice struttura':'9010000'})
   issues.append({'Divisione':'TRAUMA','Documento TAB':doc,'REF':'R1','Lotto':'L1','Struttura':'ASL SALERNO','Quantità':1,'Esito':'FATTURA DIVERSA DALL’OFFERTA'})
  rows=price_checks({'Prodotti TAB':products,'Prezzi da verificare':issues})
  assert {r['Struttura'] for r in rows}=={'Sapri','Nocera'}
