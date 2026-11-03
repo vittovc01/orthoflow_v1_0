@@ -40,6 +40,8 @@ def grouped_actions(rows):
 
 def render_tab_price_anomalies(client_factory,reset_client):
     st.subheader('Prezzi TAB da verificare')
+    notice=st.session_state.pop('tab_price_saved',None)
+    if notice:st.success(notice)
     st.caption('Stessi controlli di Gestione Interventi e Controllo di Gestione: prezzi mancanti, offerte ambigue e differenze fattura/offerta. Le segnalazioni sono ricalcolate dai dati correnti.')
     if st.button('Aggiorna anomalie TAB'):
         refresh()
@@ -65,21 +67,37 @@ def render_tab_price_anomalies(client_factory,reset_client):
     agent=cols[2].selectbox('Agente anomalie TAB',['Tutti']+sorted({payload_agent(r['payload']) for r in scope}),key='anomaly_tab_agent_'+division)
     report=management_report(records,links,customers,headers,connections,prices,current_status().build_status,
       None if division=='Tutte' else division,None if structure=='Tutte' else structure,None if year=='Tutti' else year,None if agent=='Tutti' else agent)
+    all_checks=price_checks(management_report(records,links,customers,headers,connections,prices,current_status().build_status,
+      None if division=='Tutte' else division,None,None if year=='Tutti' else year,None if agent=='Tutti' else agent))
+    pending=sorted({r['Struttura'] for r in all_checks})
+    st.caption('Strutture con anomalie: '+str(len(pending))+'. Scegli una struttura nel filtro per completare tutti i suoi REF prima di passare alla successiva.')
+    def next_structure():
+        candidates=[x for x in pending if x!=structure]
+        if candidates:st.session_state['anomaly_tab_structure_'+division]=next((x for x in candidates if structure=='Tutte' or x>structure),candidates[0])
+        st.session_state['anomaly_tab_search']=''
+    st.button('Struttura successiva con anomalie',on_click=next_structure,disabled=not any(x!=structure for x in pending))
     checks=price_checks(report)
     selected=st.selectbox('Tipo di anomalia TAB',['Tutti']+sorted({r['Categoria'] for r in checks}))
     rows=checks if selected=='Tutti' else [r for r in checks if r['Categoria']==selected]
+    search=st.text_input('Cerca REF o descrizione',key='anomaly_tab_search').strip().casefold()
+    if search:rows=[r for r in rows if search in str(r.get('REF','')).casefold() or search in str(r.get('Descrizione','')).casefold()]
+    ordering=st.selectbox('Ordina anomalie per',['Struttura e REF','REF e struttura','Data intervento'])
+    fields={'Struttura e REF':('Struttura','REF','Data intervento'),'REF e struttura':('REF','Struttura','Data intervento'),'Data intervento':('Data intervento','Struttura','REF')}[ordering]
+    rows=sorted(rows,key=lambda r:tuple(str(r.get(k) or '') for k in fields))
     for col,label,value in zip(st.columns(4),('Righe TAB senza prezzo','Differenze fattura / offerta','Prezzi fattura mancanti','Segnalazioni TAB'),
       (sum(r['Esito']=='VALORIZZAZIONE DA VERIFICARE' for r in rows),sum(r['Esito']=='FATTURA DIVERSA DALL’OFFERTA' for r in rows),sum(r['Esito']=='PREZZO FATTURA MANCANTE' for r in rows),len(rows))):
         col.metric(label,value)
     actions=grouped_actions(rows)
+    from tab_verified_prices import render_price_editor
+    render_price_editor(client_factory(),rows,refresh)
     summary=report['Riepilogo']+[{'Voce':'Tipo anomalia selezionato','Valore':selected},{'Voce':'Segnalazioni TAB mostrate','Valore':len(rows)}]
     st.download_button('Scarica Excel anomalie TAB',current_reports().excel_report({'Riepilogo':summary,'Anomalie TAB':rows,'Azioni raggruppate':actions}),
       'Anomalie_Prezzi_TAB_'+division+'.xlsx','application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',type='primary')
     if not rows:
         st.success('Nessuna anomalia prezzo TAB nei filtri selezionati.');return
     st.warning(f'{len(rows)} segnalazioni TAB da verificare nei filtri selezionati.')
-    columns=['Categoria','Divisione','Struttura','Cartella clinica','Data intervento','Agente','REF','Descrizione','Lotto','Quantità','Prezzo offerta','Prezzo chiusura','Differenza unit.','Motivo / azione']
+    columns=['Categoria','Divisione','Struttura','Cartella clinica','Data intervento','Agente','REF','Descrizione','Lotto','Quantità','Fonte prezzo','Prezzo offerta','Prezzo chiusura','Differenza unit.','Motivo / azione']
     st.dataframe(pd.DataFrame(rows)[[k for k in columns if any(k in r for r in rows)]],hide_index=True,use_container_width=True)
     with st.expander('Azioni per struttura e REF'):
         st.dataframe(pd.DataFrame(actions),hide_index=True,use_container_width=True)
-    st.info('Per i prezzi TAB completa o correggi l’offerta in Controllo di Gestione → Offerte, poi premi Aggiorna anomalie TAB: tutte le righe corrispondenti vengono ricalcolate. Per struttura, CC e data usa la verifica in Gestione Interventi. La regolarizzazione degli scarichi storici qui sotto riguarda solo lo storico.')
+    st.info('Puoi inserire il prezzo direttamente qui sopra: verrà memorizzato con utente, data e riferimento della verifica. Le righe prive di struttura riconosciuta o data richiedono prima la verifica in Gestione Interventi. Per i prezzi TAB puoi anche completare o correggere l’offerta in Controllo di Gestione → Offerte, poi premi Aggiorna anomalie TAB: tutte le righe corrispondenti vengono ricalcolate. Per struttura, CC e data usa la verifica in Gestione Interventi. La regolarizzazione degli scarichi storici qui sotto riguarda solo lo storico.')

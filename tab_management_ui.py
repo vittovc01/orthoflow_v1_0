@@ -20,7 +20,9 @@ def tab_backend():
 
 @st.cache_data(ttl=30,max_entries=2)
 def tab_catalogs(_client):
-    return [read_all(_client,name).to_dict('records') for name in ('clienti','offerte_header','offerte_clienti','offerte_prezzi')]
+    from tab_verified_prices import add_verified_prices
+    catalogs=[read_all(_client,name).to_dict('records') for name in ('clienti','offerte_header','offerte_clienti','offerte_prezzi')]
+    return add_verified_prices(catalogs,read_all(_client,'tab_prezzi_verificati').to_dict('records'))
 
 def refresh():
     tab_records.clear();tab_catalogs.clear()
