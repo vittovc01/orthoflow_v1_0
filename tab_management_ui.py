@@ -138,11 +138,10 @@ def render_tab_management(client=None,analytics=False,records=None):
         col.metric(label,data)
     if missing:st.warning(f'{missing} righe non valorizzate: mancano struttura/offerta/prezzo univoci o una data valida. Il valore mostrato riguarda solo le righe valorizzate.')
     exportable={name:[{key:value for key,value in row.items() if key!='ID intervento TAB'} for row in entries] for name,entries in report.items()}
-    st.download_button('Scarica Excel gestione TAB',current_reports().excel_report(exportable),'Gestione_TAB_'+division+'.xlsx','application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',type='primary')
+    st.download_button('Scarica Excel gestione TAB',lambda:current_reports().excel_report(exportable),'Gestione_TAB_'+division+'.xlsx','application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',type='primary')
     if analytics:
-        for title in ('Per struttura','Per agente','Per periodo'):
-            st.subheader(title)
-            st.dataframe(pd.DataFrame(report[title]),hide_index=True,use_container_width=True)
+        from tab_analytics import render_analytics
+        render_analytics(report)
     else:
         visible=['Divisione','Stato','Stato intervento completo','Struttura','Cartella clinica','Data intervento','Agente','Pezzi impiantati','Pezzi da chiudere','Valore atteso valorizzato','Righe senza prezzo']
         st.dataframe(pd.DataFrame(heads)[[c for c in visible if any(c in h for h in heads)]],hide_index=True,use_container_width=True)
