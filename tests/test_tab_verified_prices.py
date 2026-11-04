@@ -154,3 +154,32 @@ def test_filter_reruns_do_not_rebuild_report_or_generate_excel(monkeypatch):
  assert not at.exception and len(calls)==1
  assert next(x for x in at.metric if x.label=='Segnalazioni TAB').value=='1'
  st.cache_resource.clear();st.cache_data.clear()
+
+
+def test_save_callback_runs_before_report_and_does_not_render_pre_save_report(monkeypatch):
+ import tab_management_ui,tab_runtime
+ b=PricesBackend();b.data['offerte_prezzi']=[]
+ tab_runtime.current_tab();original=tab_management_ui.management_report;calls=[]
+ def track(*args,**kwargs):calls.append(len(b.writes));return original(*args,**kwargs)
+ monkeypatch.setattr(tab_management_ui,'management_report',track)
+ at=page(monkeypatch,b).run();assert not at.exception
+ calls.clear();tab_management_ui.anomaly_report.clear()
+ next(x for x in at.number_input if x.label=='Prezzo unitario verificato (€)').set_value(10)
+ next(x for x in at.button if x.label=='Salva prezzo e ricalcola anomalie').click().run()
+ assert not at.exception and calls==[1]
+ assert next(x for x in at.metric if x.label=='Segnalazioni TAB').value=='0'
+ st.cache_resource.clear();st.cache_data.clear()
+
+
+def test_failed_save_keeps_anomaly_and_reports_error_without_success(monkeypatch):
+ b=PricesBackend();b.data['offerte_prezzi']=[]
+ def fail(*args,**kwargs):
+  return SimpleNamespace(execute=lambda:(_ for _ in ()).throw(RuntimeError('private connection')))
+ b.rpc=fail
+ at=page(monkeypatch,b).run()
+ next(x for x in at.number_input if x.label=='Prezzo unitario verificato (€)').set_value(10)
+ next(x for x in at.button if x.label=='Salva prezzo e ricalcola anomalie').click().run()
+ assert not at.exception and next(x for x in at.metric if x.label=='Segnalazioni TAB').value=='1'
+ assert any('Prezzo non salvato' in x.value for x in at.error)
+ assert not any('Prezzo salvato' in x.value for x in at.success)
+ st.cache_resource.clear();st.cache_data.clear()

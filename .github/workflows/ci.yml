@@ -76,6 +76,9 @@ jobs:
           MOBILE_PREVIEW_DIR: artifacts/mobile
         run: python -m pytest -q tests/test_mobile_navigation.py tests/test_mobile_app_browser.py tests/test_home_browser.py tests/test_unified_browser.py
 
+      - name: Salvataggio prezzi nel browser con cache scadute
+        run: python -m pytest -q -rP tests/test_price_save_browser.py
+
       - name: Anteprime app mobile con dati dimostrativi
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4

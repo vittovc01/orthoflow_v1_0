@@ -50,6 +50,27 @@ def daily_period(item,verified):
     raise ValueError('Questo REF ha più periodi di prezzo: gestisci la variazione in Anagrafica prezzi.')
 
 
+def submit_price(client,item,start,end,refresh,price_key,discount_key):
+    import streamlit as st
+    permissions=set(st.session_state.get('permessi',[]) or [])
+    role=str(st.session_state.get('ruolo','')).strip().lower()
+    user=st.session_state.get('user')
+    if not user or not (role in ('admin','amministrazione') or permissions & {'DIREZIONE','AMMINISTRAZIONE'}):
+        st.session_state['tab_price_error']='Accesso non autorizzato.';return
+    actor=(user.get('email') or user.get('username') or user.get('id')) if isinstance(user,dict) else user
+    discount=bool(st.session_state.get(discount_key,False))
+    try:
+        save_verified_price(client,item,0 if discount else st.session_state.get(price_key),start,end,actor,
+          'Prezzo verificato manualmente dalla pagina Anomalie',discount)
+    except ValueError as exc:st.session_state['tab_price_error']=str(exc);return
+    except Exception as exc:
+        message=str(getattr(exc,'message',''))
+        st.session_state['tab_price_error']=message if 'periodo sovrapposto' in message else 'Prezzo non salvato. Aggiorna la pagina e riprova; nessuna anomalia è stata chiusa.'
+        return
+    refresh()
+    st.session_state['tab_price_saved']=f"Prezzo salvato per {item['Struttura']} · {item['REF']}. Tutte le righe corrispondenti sono state ricalcolate; il filtro struttura rimane selezionato."
+
+
 def render_price_editor(client,rows,refresh,verified=None):
     import streamlit as st
     items=worklist(rows)
@@ -63,20 +84,11 @@ def render_price_editor(client,rows,refresh,verified=None):
     try:start,end=daily_period(item,verified or [])
     except ValueError as exc:st.info(str(exc));return
     form_key='tab_price_'+str(tuple(item[k] for k in ('Divisione','Codice struttura','CAC','REF')))
+    price_key=form_key+'_amount';discount_key=form_key+'_discount'
     with st.form(form_key):
-        price=st.number_input('Prezzo unitario verificato (€)',min_value=0.0,value=None,step=0.01,format='%.4f')
-        discount=st.checkbox('Sconto merce: prezzo verificato €0')
+        price=st.number_input('Prezzo unitario verificato (€)',min_value=0.0,value=None,step=0.01,format='%.4f',key=price_key)
+        discount=st.checkbox('Sconto merce: prezzo verificato €0',key=discount_key)
         note='Prezzo verificato manualmente dalla pagina Anomalie'
         st.caption('Salva e ricalcola tutte le righe corrispondenti. Le eventuali differenze con la fattura restano segnalate.')
-        submitted=st.form_submit_button('Salva prezzo e ricalcola anomalie',type='primary')
-    if submitted:
-        user=st.session_state.get('user')
-        actor=(user.get('email') or user.get('username') or user.get('id')) if isinstance(user,dict) else user
-        try:
-            save_verified_price(client,item,0 if discount else price,start,end,actor,note,discount)
-        except ValueError as exc:st.error(str(exc));return
-        except Exception as exc:
-            message=str(getattr(exc,'message',''))
-            st.error(message if 'periodo sovrapposto' in message else 'Prezzo non salvato. Aggiorna la pagina e riprova; nessuna anomalia è stata chiusa.');return
-        st.session_state['tab_price_saved']=f"Prezzo salvato per {item['Struttura']} · {item['REF']}. Tutte le righe corrispondenti sono state ricalcolate; il filtro struttura rimane selezionato."
-        refresh();st.rerun()
+        st.form_submit_button('Salva prezzo e ricalcola anomalie',type='primary',on_click=submit_price,
+          args=(client,item,start,end,refresh,price_key,discount_key))
