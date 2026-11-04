@@ -46,7 +46,9 @@ def registry_presidi(records,customers,code,division):
 def render_registry():
     st.title('Anagrafica prezzi')
     st.caption('Consulta offerte e prezzi manuali della struttura. Le modifiche manuali valgono solo per la struttura e il presidio selezionati; l’offerta originale resta consultabile.')
-    if st.button('Aggiorna anagrafica prezzi'):refresh()
+    if st.button('Aggiorna anagrafica prezzi'):
+        from legacy_price_recovery import recovery_audit
+        recovery_audit.clear();refresh()
     if st.session_state.get('registry_saved'):st.success(st.session_state.pop('registry_saved'))
     try:
         client=tab_backend();catalogs=base_catalogs(client);verified=verified_catalog(client);records,_=tab_records(client)
@@ -81,6 +83,8 @@ def render_registry():
     with st.expander('Prezzi manuali, validità e verifiche'):
         if manual:st.dataframe(pd.DataFrame(manual).rename(columns={'ref':'REF','prezzo':'Prezzo','dal':'Valido dal','al':'Valido al','utente':'Modificato da','nota':'Riferimento','updated_at':'Ultima modifica'}),hide_index=True,use_container_width=True)
         else:st.caption('Nessun prezzo manuale per questo ambito.')
+    from legacy_price_recovery import render_recovery_history
+    render_recovery_history(client,verified,code,division)
     st.subheader('Modifica o aggiungi prezzo della struttura')
     chosen=st.selectbox('REF anagrafica',['Nuovo REF']+[r['REF'] for r in visible])
     ref=st.text_input('Codice REF da aggiungere') if chosen=='Nuovo REF' else chosen
