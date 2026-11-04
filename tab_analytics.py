@@ -71,6 +71,7 @@ def render_analytics(report):
     st.dataframe(table[[c for c in ordered if c in table]],hide_index=True,use_container_width=True)
     st.subheader('Andamento mensile degli interventi')
     monthly(periods,'Interventi')
+    render_monthly_structures(report)
     undated=sum(r['Interventi'] for r in periods if r['Periodo']=='Data mancante')
     if undated:st.caption(f'{undated} interventi con data mancante restano nei totali e nelle strutture, ma non sono collocati nel grafico mensile.')
     left,right=st.columns(2)
@@ -86,3 +87,24 @@ def render_analytics(report):
     if agents:bar(agents,'Agente','Interventi')
     for title in ('Per agente','Per periodo'):
         with st.expander(title):st.dataframe(pd.DataFrame(tables[title]),hide_index=True,use_container_width=True)
+
+
+@st.fragment
+def render_monthly_structures(report):
+    from management_insights import monthly_structures
+    rows=monthly_structures(report)
+    st.subheader('Interventi mensili per struttura')
+    if not rows:
+        st.info('Nessun intervento con data valida nei filtri selezionati.');return
+    choices=list(dict.fromkeys((r['Struttura'],r['Presidio']) for r in rows))
+    selected=st.multiselect('Strutture nel confronto mensile',choices,default=choices[:5],
+      format_func=lambda x:x[0]+' · '+x[1],key='monthly_structure_choices_'+str(hash(tuple(choices))))
+    visible=[{**r,'Mese':r['Periodo']+'-01','Serie':r['Struttura']+' · '+r['Presidio']+' · '+r['Divisione']} for r in rows if (r['Struttura'],r['Presidio']) in selected]
+    st.caption('Interventi distinti per presidio e linea. Un mese assente indica dati non disponibili, non zero interventi.')
+    if visible:
+        st.vega_lite_chart(pd.DataFrame(visible),{'mark':{'type':'bar'},'height':320,
+          'encoding':{'x':{'field':'Periodo','type':'ordinal','title':'Mese'},
+            'xOffset':{'field':'Serie'},'y':{'field':'Interventi','type':'quantitative','axis':{'tickMinStep':1}},
+            'color':{'field':'Serie','type':'nominal'},
+            'tooltip':[{'field':f,'type':'quantitative' if f=='Interventi' else 'nominal'} for f in ('Struttura','Presidio','Divisione','Periodo','Interventi')]}},use_container_width=True)
+        st.dataframe(pd.DataFrame(visible)[['Struttura','Presidio','Divisione','Periodo','Interventi']],hide_index=True,use_container_width=True)

@@ -32,9 +32,9 @@ def tab_catalogs(_client):
     return add_verified_prices(base_catalogs(_client),verified_catalog(_client))
 
 @st.cache_data(ttl=30,max_entries=8)
-def anomaly_report(records,links,catalogs,division,year,agent):
+def anomaly_report(records,links,catalogs,division,year,agent,structure=None):
     return management_report(records,links,*catalogs,current_status().build_status,
-      division,None,year,agent)
+      division,structure,year,agent)
 
 def refresh_prices():
     # A price save cannot change implants, allocations or shared offers.
@@ -129,8 +129,8 @@ def render_tab_management(client=None,analytics=False,records=None):
     structure=cols[0].selectbox('Struttura TAB',['Tutte']+sorted({structure_label(r['payload'],customers,account_names) for r in scope}),key='tab_structure_'+str(analytics)+division)
     year=cols[1].selectbox('Anno TAB',['Tutti']+sorted({r['payload']['event_date'][:4] for r in scope if r['payload'].get('event_date')},reverse=True),key='tab_year_'+str(analytics)+division)
     agent=cols[2].selectbox('Agente TAB',['Tutti']+sorted({payload_agent(r['payload']) for r in scope}),key='tab_agent_'+str(analytics)+division)
-    report=management_report(records,links,customers,headers,connections,prices,current_status().build_status,
-      None if division=='Tutte' else division,None if structure=='Tutte' else structure,None if year=='Tutti' else year,None if agent=='Tutti' else agent)
+    report=anomaly_report(records,links,[customers,headers,connections,prices],
+      None if division=='Tutte' else division,None if year=='Tutti' else year,None if agent=='Tutti' else agent,None if structure=='Tutte' else structure)
     rows=report['Prodotti TAB'];heads=report['Interventi TAB']
     value=sum(r['Valore atteso'] for r in rows if r['Valore atteso'] is not None);missing=sum(r['Valore atteso'] is None for r in rows)
     value_label='—' if rows and missing==len(rows) else f'€ {value:,.2f}'
@@ -141,7 +141,11 @@ def render_tab_management(client=None,analytics=False,records=None):
     st.download_button('Scarica Excel gestione TAB',lambda:current_reports().excel_report(exportable),'Gestione_TAB_'+division+'.xlsx','application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',type='primary')
     if analytics:
         from tab_analytics import render_analytics
-        render_analytics(report)
+        view=st.radio('Vista controllo di gestione',['Grafici e strutture','Analisi AI e previsioni'],horizontal=True,key='management_view')
+        if view=='Grafici e strutture':render_analytics(report)
+        else:
+            from management_insights_ui import render_insights
+            render_insights(report)
     else:
         visible=['Divisione','Stato','Stato intervento completo','Struttura','Cartella clinica','Data intervento','Agente','Pezzi impiantati','Pezzi da chiudere','Valore atteso valorizzato','Righe senza prezzo']
         st.dataframe(pd.DataFrame(heads)[[c for c in visible if any(c in h for h in heads)]],hide_index=True,use_container_width=True)
@@ -151,7 +155,7 @@ def render_tab_management(client=None,analytics=False,records=None):
             selected_header=next(h for h in heads if h['ID intervento TAB']==selected)
             verify_tab_metadata(client,records,links,customers,selected_header['Documenti TAB'].split(', '),selected_header['Divisione'])
             st.caption('REF, lotto e quantità provengono dal gestionale: correggili lì e ricarica il TAB. Le verifiche di struttura, CC e data restano conservate se il riferimento del documento non cambia.')
-    with st.expander('Prezzi da verificare',expanded=bool(report['Prezzi da verificare'])):
+    with st.expander('Prezzi da verificare',expanded=not analytics and bool(report['Prezzi da verificare'])):
         if report['Prezzi da verificare']:st.dataframe(pd.DataFrame(report['Prezzi da verificare']),hide_index=True,use_container_width=True)
         else:st.caption('Nessuna differenza rilevata nei confronti disponibili.')
     st.caption('Valore atteso da offerta e fatturato associato sono distinti. Per lo stato ordine/fattura consulta Stato interventi. Le analisi per chirurgo non sono previste nel flusso TAB.')

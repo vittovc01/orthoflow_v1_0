@@ -27,5 +27,5 @@ def test_tab_reloads_downstream_bindings_only_after_source_changes(monkeypatch):
     tab_runtime.current_tab();assert calls==[]
     tab_runtime._signatures['tab_management']=None
     tab_runtime.current_tab()
-    assert calls==['tab_management','tab_management_ui','tab_price_anomalies']
+    assert calls==['tab_management','management_insights','management_insights_ui','tab_analytics','tab_management_ui','tab_price_anomalies']
     calls.clear();tab_runtime.current_management();assert calls==[]

@@ -10,7 +10,7 @@ def current_tab():
     with _lock:
         current_reconciliation()
         changed=False
-        for name in ('tab_verified_prices','tab_management','tab_management_ui','tab_price_anomalies'):
+        for name in ('tab_verified_prices','tab_management','management_insights','management_insights_ui','tab_analytics','tab_management_ui','tab_price_anomalies'):
             module=importlib.import_module(name)
             stat=Path(module.__file__).stat()
             signature=(stat.st_mtime_ns,stat.st_size)
