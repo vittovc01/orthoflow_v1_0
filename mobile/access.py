@@ -35,6 +35,7 @@ MODULES = [
     ('work-implant', 'Work Implant', 'AMMINISTRAZIONE', 'Amministrazione', 'Documenti degli impianti'),
     ('customer-connect', 'Customer Connect', 'AMMINISTRAZIONE', 'Amministrazione', 'Reintegri e rapporti con J&J'),
     ('chiusura-guidata', 'Chiusura guidata', 'AMMINISTRAZIONE', 'Amministrazione', 'Incrocia TAB, ordini e chiusura mensile'),
+    ('anagrafica-prezzi', 'Anagrafica prezzi', 'AMMINISTRAZIONE', 'Amministrazione', 'Offerte e prezzi manuali per struttura'),
     ('stato-interventi', 'Stato interventi', 'AMMINISTRAZIONE', 'Amministrazione', 'Chiusi, da chiudere e prezzi da verificare con export Excel'),
     ('documenti-logistica', 'Documenti logistica', 'LOGISTICA', 'Logistica', 'Foto e certificazioni archiviate'),
     ('corrieri', 'Organizzazione corrieri', 'LOGISTICA', 'Logistica', 'Pianifica missioni, consegne e ritiri'),

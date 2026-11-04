@@ -54,10 +54,9 @@ def test_direct_save_form_closes_all_matching_checks_and_keeps_structure_filter(
  at=page(monkeypatch,b).run();assert not at.exception
  next(x for x in at.selectbox if x.label=='Struttura anomalie TAB').select('Sapri').run()
  next(x for x in at.number_input if x.label=='Prezzo unitario verificato (€)').set_value(10)
- next(x for x in at.text_input if x.label=='Riferimento verifica prezzo').set_value('Customer ordine PO1')
  next(x for x in at.button if x.label=='Salva prezzo e ricalcola anomalie').click().run()
  assert not at.exception and len(b.writes)==1
- assert b.writes[0][1]['p_nota']=='Customer ordine PO1' and b.writes[0][1]['p_utente']=='test'
+ assert b.writes[0][1]['p_nota']=='Prezzo verificato manualmente dalla pagina Anomalie' and b.writes[0][1]['p_utente']=='test'
  assert next(x for x in at.selectbox if x.label=='Struttura anomalie TAB').value=='Sapri'
  assert next(x for x in at.metric if x.label=='Segnalazioni TAB').value=='0'
  assert any('Prezzo salvato' in x.value for x in at.success)
@@ -104,7 +103,6 @@ def test_save_keeps_remaining_refs_of_same_clinic_ready(monkeypatch):
  at=page(monkeypatch,b).run()
  next(x for x in at.selectbox if x.label=='Struttura anomalie TAB').select('Sapri').run()
  next(x for x in at.number_input if x.label=='Prezzo unitario verificato (€)').set_value(10)
- next(x for x in at.text_input if x.label=='Riferimento verifica prezzo').set_value('Customer')
  next(x for x in at.button if x.label=='Salva prezzo e ricalcola anomalie').click().run()
  assert not at.exception
  assert next(x for x in at.selectbox if x.label=='Struttura anomalie TAB').value=='Sapri'
@@ -130,7 +128,6 @@ def test_price_save_reuses_ledger_and_shared_offers_but_refreshes_verified_price
  at=page(monkeypatch,b).run();assert not at.exception
  before=Counter(b.reads)
  next(x for x in at.number_input if x.label=='Prezzo unitario verificato (€)').set_value(10)
- next(x for x in at.text_input if x.label=='Riferimento verifica prezzo').set_value('Customer')
  next(x for x in at.button if x.label=='Salva prezzo e ricalcola anomalie').click().run()
  assert not at.exception
  after=Counter(b.reads)
