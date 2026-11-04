@@ -131,6 +131,7 @@ def management_report(records,links,customers,headers,connections,prices,status_
         for r in rows:
             identity=(r.get('CAC') or r.get('Codice struttura') or r[dimension]) if dimension=='Struttura' else r[dimension]
             key=(r['Divisione'],identity);g=groups.setdefault(key,{'Divisione':r['Divisione'],dimension:r[dimension],
+              **({'CAC':r.get('CAC',''),'Codice struttura':r.get('Codice struttura','')} if dimension=='Struttura' else {}),
               '_ids':set(),'_missing_actual':False,'_priced_rows':0,'Pezzi':0,'Valore atteso valorizzato':Decimal(0),'Valore fatturato associato':Decimal(0),'Righe senza prezzo':0})
             g['_ids'].add(r['ID intervento TAB']);g['Pezzi']+=r['Quantità impiantata']
             if r['Valore atteso'] is None:g['Righe senza prezzo']+=1
