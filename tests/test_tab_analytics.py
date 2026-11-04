@@ -58,7 +58,7 @@ def test_missing_prices_do_not_hide_activity_charts(monkeypatch):
  b=Backend();b.data['offerte_prezzi']=[]
  at=app(monkeypatch,b,'core_app.py').run()
  assert not at.exception
- assert len(at.get('vega_lite_chart'))==3
+ assert len(at.get('vega_lite_chart'))==4
  assert any('Valori non disponibili' in x.value for x in at.info)
  frame=next(d.value for d in at.dataframe if 'Struttura' in d.value.columns and 'Interventi' in d.value.columns)
  assert frame['Interventi'].sum()==1
