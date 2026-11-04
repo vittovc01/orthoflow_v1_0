@@ -1,8 +1,9 @@
 """TAB price checks use the management read model, never legacy anomaly rows."""
+from copy import deepcopy
 import pandas as pd
 import streamlit as st
 from tab_management import management_report,structure_label
-from tab_management_ui import tab_records,tab_catalogs,refresh,refresh_prices,anomaly_report,verified_catalog
+from tab_management_ui import tab_records,tab_catalogs,refresh,refresh_prices,anomaly_report,verified_catalog,base_catalogs
 from jj_runtime import current_reconciliation
 from jj_status_runtime import current_status
 from jj_report_runtime import current_reports
@@ -39,22 +40,37 @@ def grouped_actions(rows):
     return list(grouped.values())
 
 def render_tab_price_anomalies(client_factory,reset_client):
+    def read():
+        client=client_factory();records,links=tab_records(client)
+        return records,links,base_catalogs(client)
+    try:
+        try:records,links,base=read()
+        except Exception as exc:
+            if str(getattr(exc,'code','')) not in ('PGRST301','PGRST303','401'):raise
+            reset_client();refresh();records,links,base=read()
+    except Exception:
+        st.error('Anomalie TAB non disponibili. Premi Aggiorna anomalie TAB per riprovare; i dati storici sono mostrati separatamente.');return
+    render_price_workspace(client_factory,reset_client,records,links,base)
+
+@st.fragment
+def render_price_workspace(client_factory,reset_client,records,links,base):
     st.subheader('Prezzi TAB da verificare')
     notice=st.session_state.pop('tab_price_saved',None)
     if notice:st.success(notice)
-    st.caption('Stessi controlli di Gestione Interventi e Controllo di Gestione: prezzi mancanti, offerte ambigue e differenze fattura/offerta. Le segnalazioni sono ricalcolate dai dati correnti.')
+    error=st.session_state.pop('tab_price_error',None)
+    if error:st.error(error)
+    st.caption('Prezzi aggiornati dopo ogni salvataggio. Il pannello riutilizza l’elenco TAB acquisito all’apertura; premi Aggiorna anomalie TAB per acquisire nuovi impianti, offerte o collegamenti.')
     if st.button('Aggiorna anomalie TAB'):
-        refresh()
-    def read():
-        client=client_factory();records,links=tab_records(client)
-        return records,links,tab_catalogs(client)
+        refresh();st.rerun()
     try:
-        try:records,links,catalogs=read()
+        try:verified=verified_catalog(client_factory())
         except Exception as exc:
             if str(getattr(exc,'code','')) not in ('PGRST301','PGRST303','401'):raise
-            reset_client();refresh();records,links,catalogs=read()
+            reset_client();refresh_prices();verified=verified_catalog(client_factory())
     except Exception:
         st.error('Anomalie TAB non disponibili. Premi Aggiorna anomalie TAB per riprovare; i dati storici sono mostrati separatamente.');return
+    from tab_verified_prices import add_verified_prices
+    catalogs=add_verified_prices(deepcopy(base),verified)
     customers,headers,connections,prices=catalogs
     division=st.radio('Linea anomalie TAB',['Tutte','TRAUMA','PROTESICA'],horizontal=True,key='anomaly_tab_division')
     scope=[r for r in records if r['kind']=='IMPIANTO' and (division=='Tutte' or r['division']==division)]
@@ -88,7 +104,7 @@ def render_tab_price_anomalies(client_factory,reset_client):
         col.metric(label,value)
     actions=grouped_actions(rows)
     from tab_verified_prices import render_price_editor
-    render_price_editor(client_factory(),rows,refresh_prices,verified_catalog(client_factory()))
+    render_price_editor(client_factory(),rows,refresh_prices,verified)
     summary=[{'Voce':k,'Valore':v} for k,v in [('Divisione',division),('Struttura',structure),('Anno intervento',year),('Agente',agent),('Tipo anomalia selezionato',selected),('Ricerca REF / descrizione',search),('Segnalazioni TAB mostrate',len(rows))]]
     st.download_button('Scarica Excel anomalie TAB',lambda:current_reports().excel_report({'Riepilogo':summary,'Anomalie TAB':rows,'Azioni raggruppate':actions}),
       'Anomalie_Prezzi_TAB_'+division+'.xlsx','application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',type='primary',on_click='ignore')
