@@ -104,6 +104,8 @@ documents_page = page("pages/10_Documenti_Logistica.py", title="Documenti Logist
 guided_closure_page = page("pages/16_Chiusura_Guidata.py", title="Chiusura guidata", icon="📋", url_path="chiusura-guidata")
 intervention_status_page = page("pages/17_Stato_Interventi.py", title="Stato interventi", icon="📊", url_path="stato-interventi")
 
+price_registry_page = page("pages/18_Anagrafica_Prezzi.py", title="Anagrafica prezzi", icon="💷", url_path="anagrafica-prezzi")
+
 users_page = page("pages/11_Gestione_Utenti.py", title="Utenti & Permessi", icon="👥", url_path="utenti-permessi")
 courier_data_page = page("pages/12_Gestione_Dati_Corrieri.py", title="Gestione Dati Corrieri", icon="🗂️", url_path="gestione-dati-corrieri")
 price_anomalies_page = page("pages/14_Anomalie_Prezzi.py", title="Anomalie Prezzi e Giacenze", icon="⚠️", url_path="anomalie-prezzi")
@@ -134,9 +136,9 @@ else:
     elif "CORRIERE" in permissions:
         pages["CORRIERI"] = [courier_page]
     if is_director:
-        pages["DIREZIONE"] = [operations_page, price_anomalies_page, users_page, courier_data_page, ocr_validation_page]
+        pages["DIREZIONE"] = [operations_page, price_registry_page, price_anomalies_page, users_page, courier_data_page, ocr_validation_page]
     elif 'AMMINISTRAZIONE' in permissions:
-        pages['AMMINISTRAZIONE'].append(operations_page)
+        pages['AMMINISTRAZIONE'].extend([operations_page,price_registry_page])
     elif 'LOGISTICA' in permissions:
         pages['LOGISTICA & MAGAZZINO'].append(operations_page)
     nav = st.navigation(pages, position="hidden" if st.session_state.get("office_runtime") else "sidebar", expanded=True)

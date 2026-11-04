@@ -38,26 +38,36 @@ def worklist(rows):
     return sorted(groups.values(),key=lambda r:(r['Struttura'],r['Divisione'],r['REF']))
 
 
-def render_price_editor(client,rows,refresh):
+def daily_period(item,verified):
+    dates=sorted(item['Date']);first=date.fromisoformat(dates[0]);last=date.fromisoformat(dates[-1])
+    start=first.replace(month=1,day=1);end=last.replace(month=12,day=31)
+    own=[r for r in verified if all(str(r.get(k) or '')==str(item.get(v) or '') for k,v in
+      [('codice_cliente','Codice struttura'),('cac','CAC'),('linea','Divisione'),('ref','REF')])]
+    overlaps=[r for r in own if date.fromisoformat(r['dal'])<=end and date.fromisoformat(r['al'])>=start]
+    if not overlaps:return start,end
+    if len(overlaps)==1 and overlaps[0]['dal']<=dates[0] and overlaps[0]['al']>=dates[-1]:
+        return date.fromisoformat(overlaps[0]['dal']),date.fromisoformat(overlaps[0]['al'])
+    raise ValueError('Questo REF ha più periodi di prezzo: gestisci la variazione in Anagrafica prezzi.')
+
+
+def render_price_editor(client,rows,refresh,verified=None):
     import streamlit as st
     items=worklist(rows)
     if not items:return
     st.subheader('Inserisci prezzo e risolvi per struttura')
-    st.caption('Un solo prezzo unitario per REF, struttura, presidio e linea nel periodo scelto. Il prezzo verificato prevale sulla valorizzazione TAB delle offerte; le offerte condivise e le fatture originali non vengono modificate.')
+    st.caption('Inserisci il prezzo una sola volta per lo stesso REF e struttura. Offerte, validità e variazioni sono consultabili in Anagrafica prezzi.')
     keys=list(range(len(items)))
     pick=st.selectbox('REF da completare',keys,format_func=lambda i:f"{items[i]['Struttura']} · {items[i]['Divisione']} · {items[i]['REF']} · {len(items[i]['Documenti'])} documenti",key='tab_price_workitem')
     item=items[pick]
     st.write(f"**{item['Struttura']} · {item['REF']}** — {item['Descrizione']}")
-    dates=sorted(item['Date']);start=date.fromisoformat(dates[0]);end=date.fromisoformat(dates[-1])
+    try:start,end=daily_period(item,verified or [])
+    except ValueError as exc:st.info(str(exc));return
     form_key='tab_price_'+str(tuple(item[k] for k in ('Divisione','Codice struttura','CAC','REF')))
     with st.form(form_key):
-        cols=st.columns(3)
-        price=cols[0].number_input('Prezzo unitario verificato (€)',min_value=0.0,value=None,step=0.01,format='%.4f')
-        start=cols[1].date_input('Valido dal',value=start.replace(month=1,day=1))
-        end=cols[2].date_input('Valido al',value=end.replace(month=12,day=31))
+        price=st.number_input('Prezzo unitario verificato (€)',min_value=0.0,value=None,step=0.01,format='%.4f')
         discount=st.checkbox('Sconto merce: prezzo verificato €0')
-        note=st.text_input('Riferimento verifica prezzo',placeholder='Es. Customer Connect, ordine … / offerta …')
-        st.caption('Il salvataggio ricalcola tutti i TAB dello stesso REF, codice struttura, CAC e linea nel periodo indicato, anche fuori dai filtri. Non chiude automaticamente differenze con la fattura, dati mancanti o chiusure contabili.')
+        note='Prezzo verificato manualmente dalla pagina Anomalie'
+        st.caption('Salva e ricalcola tutte le righe corrispondenti. Le eventuali differenze con la fattura restano segnalate.')
         submitted=st.form_submit_button('Salva prezzo e ricalcola anomalie',type='primary')
     if submitted:
         user=st.session_state.get('user')

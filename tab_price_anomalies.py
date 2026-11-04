@@ -2,7 +2,7 @@
 import pandas as pd
 import streamlit as st
 from tab_management import management_report,structure_label
-from tab_management_ui import tab_records,tab_catalogs,refresh,refresh_prices,anomaly_report
+from tab_management_ui import tab_records,tab_catalogs,refresh,refresh_prices,anomaly_report,verified_catalog
 from jj_runtime import current_reconciliation
 from jj_status_runtime import current_status
 from jj_report_runtime import current_reports
@@ -88,7 +88,7 @@ def render_tab_price_anomalies(client_factory,reset_client):
         col.metric(label,value)
     actions=grouped_actions(rows)
     from tab_verified_prices import render_price_editor
-    render_price_editor(client_factory(),rows,refresh_prices)
+    render_price_editor(client_factory(),rows,refresh_prices,verified_catalog(client_factory()))
     summary=[{'Voce':k,'Valore':v} for k,v in [('Divisione',division),('Struttura',structure),('Anno intervento',year),('Agente',agent),('Tipo anomalia selezionato',selected),('Ricerca REF / descrizione',search),('Segnalazioni TAB mostrate',len(rows))]]
     st.download_button('Scarica Excel anomalie TAB',lambda:current_reports().excel_report({'Riepilogo':summary,'Anomalie TAB':rows,'Azioni raggruppate':actions}),
       'Anomalie_Prezzi_TAB_'+division+'.xlsx','application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',type='primary',on_click='ignore')
