@@ -33,7 +33,7 @@ def price_preview(tmp_path_factory):
         process.terminate();process.wait(timeout=10)
 
 
-def test_save_refreshes_only_workspace_and_never_rereads_expired_clinical_snapshot(price_preview):
+def test_two_saves_only_write_then_reconcile_on_request(price_preview):
     with sync_playwright() as p:
         browser=p.chromium.launch();page=browser.new_page()
         page.goto(price_preview)
@@ -44,23 +44,28 @@ def test_save_refreshes_only_workspace_and_never_rereads_expired_clinical_snapsh
         before=json.loads(stats.input_value())
         field.fill('10')
         started=time.perf_counter()
-        page.get_by_role('button',name='Salva prezzo e ricalcola anomalie',exact=True).click()
+        page.get_by_role('button',name='Salva e passa al prossimo REF',exact=True).click()
         expect(page.get_by_text('Prezzo salvato per',exact=False)).to_be_visible(timeout=15000)
-        expect(page.get_by_text('Nessuna anomalia prezzo TAB nei filtri selezionati.',exact=True)).to_be_visible()
+        expect(page.get_by_text('Prezzo salvato per Sapri · 413.016S.',exact=True)).to_be_visible()
+        expect(field).to_have_value('')
         elapsed=time.perf_counter()-started
+        field.fill('12')
+        field.press('Enter')
+        expect(page.get_by_text('Prezzo salvato per Sapri · Z2.',exact=True)).to_be_visible()
         page.get_by_role('button',name='Leggi statistiche test',exact=True).click()
         expect(stats).not_to_have_value(json.dumps(before))
         after=json.loads(stats.input_value())
-        assert after['writes']==1 and after['full_runs']==before['full_runs']
-        for table in ('jj_recon_records','jj_recon_links','clienti','offerte_header','offerte_clienti','offerte_prezzi','righe_intervento','anomalie_giacenza'):
-            assert after['reads'].get(table,0)==before['reads'].get(table,0),table
-        assert after['reads']['tab_prezzi_verificati']==before['reads']['tab_prezzi_verificati']+1
+        assert after['writes']==2 and after['full_runs']==before['full_runs']
+        assert after['reads']==before['reads'],after
         expect(page.get_by_test_id('stException')).to_have_count(0)
+        page.get_by_role('button',name='Ricalcola anomalie',exact=True).click()
+        expect(page.get_by_text('Nessuna anomalia prezzo TAB nei filtri selezionati.',exact=True)).to_be_visible(timeout=15000)
+        reconciled=json.loads(stats.input_value())
         # Explicit refresh must acquire new source/catalog data.
         page.get_by_role('button',name='Aggiorna anomalie TAB',exact=True).click()
-        expect(stats).not_to_have_value(json.dumps(after),timeout=15000)
+        expect(stats).not_to_have_value(json.dumps(reconciled),timeout=15000)
         refreshed=json.loads(stats.input_value())
-        assert refreshed['full_runs']>after['full_runs']
-        assert refreshed['reads']['jj_recon_records']>after['reads']['jj_recon_records']
-        print(f'Price save browser: {elapsed:.3f}s; 1 write, 1 price read, no whole-page rerun or clinical/catalog rereads')
+        assert refreshed['full_runs']>reconciled['full_runs']
+        assert refreshed['reads']['jj_recon_records']>reconciled['reads']['jj_recon_records']
+        print(f'Price save browser: {elapsed:.3f}s; two saves, no database reads or whole-page reruns')
         browser.close()

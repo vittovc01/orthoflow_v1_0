@@ -1,4 +1,5 @@
 """Local-only browser fixture: fake prices and simulated remote read latency."""
+from copy import deepcopy
 import json
 import runpy
 from collections import Counter
@@ -16,7 +17,11 @@ class TimedBackend(PricesBackend):
         class Query:
             def execute(inner):
                 sleep(.15)
+                existing=self.data.get('tab_prezzi_verificati',[])
                 result=call.execute()
+                fresh=self.data['tab_prezzi_verificati'][0]
+                fresh['id']=len(self.writes)
+                self.data['tab_prezzi_verificati']=existing+[fresh]
                 # Simulate cache expiry while the user is checking a price.
                 from tab_management_ui import tab_records,base_catalogs
                 tab_records.clear();base_catalogs.clear()
@@ -26,6 +31,8 @@ class TimedBackend(PricesBackend):
 @st.cache_resource
 def backend():
     value=TimedBackend();value.data['offerte_prezzi']=[]
+    lines=value.data['jj_recon_records'][2]['payload']['lines']
+    lines.append({**deepcopy(lines[0]),'key':'R2','ref':'Z2','lot':'L2'})
     return value
 
 b=backend();supabase.create_client=lambda *a,**kw:b

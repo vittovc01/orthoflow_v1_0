@@ -65,6 +65,7 @@ def test_anomalies_page_shows_tab_without_legacy_rows_and_refreshes_offer_change
  assert not at.exception
  assert next(m.value for m in at.metric if m.label=='Righe TAB senza prezzo')=='1'
  assert any('Prezzi TAB' in x.value for x in at.subheader)
+ next(x for x in at.toggle if x.label=='Mostra dettaglio ed esportazione anomalie').set_value(True).run()
  assert any(x.proto.label=='Scarica Excel anomalie TAB' for x in at.get('download_button'))
  assert not any(x.value=='Nessuna anomalia prezzo da verificare.' for x in at.success)
  assert backend.writes==[]

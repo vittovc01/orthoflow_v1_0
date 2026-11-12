@@ -1,6 +1,7 @@
 """Verified TAB prices are scoped to a customer, CAC, division, REF and period."""
 from decimal import Decimal,InvalidOperation
 from datetime import date
+import streamlit as st
 
 
 def add_verified_prices(catalogs,verified):
@@ -50,14 +51,14 @@ def daily_period(item,verified):
     raise ValueError('Questo REF ha più periodi di prezzo: gestisci la variazione in Anagrafica prezzi.')
 
 
-def submit_price(client,item,start,end,refresh,price_key,discount_key):
-    import streamlit as st
+def submit_price(client,item,start,end,refresh,price_key,discount_key,saved):
     permissions=set(st.session_state.get('permessi',[]) or [])
     role=str(st.session_state.get('ruolo','')).strip().lower()
     user=st.session_state.get('user')
     if not user or not (role in ('admin','amministrazione') or permissions & {'DIREZIONE','AMMINISTRAZIONE'}):
         st.session_state['tab_price_error']='Accesso non autorizzato.';return
     actor=(user.get('email') or user.get('username') or user.get('id')) if isinstance(user,dict) else user
+    if work_key(item) in saved:return
     discount=bool(st.session_state.get(discount_key,False))
     try:
         save_verified_price(client,item,0 if discount else st.session_state.get(price_key),start,end,actor,
@@ -67,28 +68,45 @@ def submit_price(client,item,start,end,refresh,price_key,discount_key):
         message=str(getattr(exc,'message',''))
         st.session_state['tab_price_error']=message if 'periodo sovrapposto' in message else 'Prezzo non salvato. Aggiorna la pagina e riprova; nessuna anomalia è stata chiusa.'
         return
+    saved.add(work_key(item))
+    st.session_state.pop('tab_price_workitem',None)
     refresh()
-    st.session_state['tab_price_saved']=f"Prezzo salvato per {item['Struttura']} · {item['REF']}. Tutte le righe corrispondenti sono state ricalcolate; il filtro struttura rimane selezionato."
+    st.session_state['tab_price_saved']=f"Prezzo salvato per {item['Struttura']} · {item['REF']}."
+
+
+def work_key(item):
+    return tuple(str(item.get(k) or '') for k in ('Divisione','Codice struttura','CAC','REF'))
 
 
 def render_price_editor(client,rows,refresh,verified=None):
-    import streamlit as st
-    items=worklist(rows)
-    if not items:return
-    st.subheader('Inserisci prezzo e risolvi per struttura')
-    st.caption('Inserisci il prezzo una sola volta per lo stesso REF e struttura. Offerte, validità e variazioni sono consultabili in Anagrafica prezzi.')
-    keys=list(range(len(items)))
-    pick=st.selectbox('REF da completare',keys,format_func=lambda i:f"{items[i]['Struttura']} · {items[i]['Divisione']} · {items[i]['REF']} · {len(items[i]['Documenti'])} documenti",key='tab_price_workitem')
-    item=items[pick]
+    # A new snapshot is built when the outer filters or report are refreshed.
+    _render_entry(client,worklist(rows),refresh,verified or [],set())
+
+
+@st.fragment
+def _render_entry(client,items,refresh,verified,saved):
+    notice=st.session_state.pop('tab_price_saved',None)
+    error=st.session_state.pop('tab_price_error',None)
+    if not items and not notice and not error:return
+    st.subheader('Inserimento rapido prezzi')
+    if notice:st.success(notice)
+    if error:st.error(error)
+    remaining={work_key(item):item for item in items if work_key(item) not in saved}
+    st.caption(f'{len(remaining)} REF da lavorare · {len(saved)} prezzi salvati in questa serie. Il riepilogo delle anomalie si aggiorna al ricalcolo.')
+    if saved and st.button('Ricalcola anomalie',key='reconcile_saved_prices'):
+        st.rerun()
+    if not remaining:return
+    pick=st.selectbox('REF da completare',list(remaining),format_func=lambda key:
+        f"{remaining[key]['Struttura']} · {key[0]} · {key[3]} · {len(remaining[key]['Documenti'])} documenti",
+        key='tab_price_workitem')
+    item=remaining[pick]
     st.write(f"**{item['Struttura']} · {item['REF']}** — {item['Descrizione']}")
-    try:start,end=daily_period(item,verified or [])
+    try:start,end=daily_period(item,verified)
     except ValueError as exc:st.info(str(exc));return
-    form_key='tab_price_'+str(tuple(item[k] for k in ('Divisione','Codice struttura','CAC','REF')))
+    form_key='tab_price_'+str(pick)
     price_key=form_key+'_amount';discount_key=form_key+'_discount'
     with st.form(form_key):
-        price=st.number_input('Prezzo unitario verificato (€)',min_value=0.0,value=None,step=0.01,format='%.4f',key=price_key)
-        discount=st.checkbox('Sconto merce: prezzo verificato €0',key=discount_key)
-        note='Prezzo verificato manualmente dalla pagina Anomalie'
-        st.caption('Salva e ricalcola tutte le righe corrispondenti. Le eventuali differenze con la fattura restano segnalate.')
-        st.form_submit_button('Salva prezzo e ricalcola anomalie',type='primary',on_click=submit_price,
-          args=(client,item,start,end,refresh,price_key,discount_key))
+        st.number_input('Prezzo unitario verificato (€)',min_value=0.0,value=None,step=0.01,format='%.4f',key=price_key)
+        st.checkbox('Sconto merce: prezzo verificato €0',key=discount_key)
+        st.form_submit_button('Salva e passa al prossimo REF',type='primary',on_click=submit_price,
+          args=(client,item,start,end,refresh,price_key,discount_key,saved))
