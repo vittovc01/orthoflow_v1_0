@@ -46,12 +46,12 @@ def test_two_saves_only_write_then_reconcile_on_request(price_preview):
         started=time.perf_counter()
         page.get_by_role('button',name='Salva e passa al prossimo REF',exact=True).click()
         expect(page.get_by_text('Prezzo salvato per',exact=False)).to_be_visible(timeout=15000)
-        expect(page.get_by_text('Prezzo salvato per Sapri · 413.016S',exact=True)).to_be_visible()
+        expect(page.get_by_text('Prezzo salvato per Sapri · 413.016S.',exact=True)).to_be_visible()
         expect(field).to_have_value('')
         elapsed=time.perf_counter()-started
         field.fill('12')
         field.press('Enter')
-        expect(page.get_by_text('Prezzo salvato per Sapri · Z2',exact=True)).to_be_visible()
+        expect(page.get_by_text('Prezzo salvato per Sapri · Z2.',exact=True)).to_be_visible()
         page.get_by_role('button',name='Leggi statistiche test',exact=True).click()
         expect(stats).not_to_have_value(json.dumps(before))
         after=json.loads(stats.input_value())
@@ -60,11 +60,12 @@ def test_two_saves_only_write_then_reconcile_on_request(price_preview):
         expect(page.get_by_test_id('stException')).to_have_count(0)
         page.get_by_role('button',name='Ricalcola anomalie',exact=True).click()
         expect(page.get_by_text('Nessuna anomalia prezzo TAB nei filtri selezionati.',exact=True)).to_be_visible(timeout=15000)
+        reconciled=json.loads(stats.input_value())
         # Explicit refresh must acquire new source/catalog data.
         page.get_by_role('button',name='Aggiorna anomalie TAB',exact=True).click()
-        expect(stats).not_to_have_value(json.dumps(after),timeout=15000)
+        expect(stats).not_to_have_value(json.dumps(reconciled),timeout=15000)
         refreshed=json.loads(stats.input_value())
-        assert refreshed['full_runs']>after['full_runs']
-        assert refreshed['reads']['jj_recon_records']>after['reads']['jj_recon_records']
+        assert refreshed['full_runs']>reconciled['full_runs']
+        assert refreshed['reads']['jj_recon_records']>reconciled['reads']['jj_recon_records']
         print(f'Price save browser: {elapsed:.3f}s; two saves, no database reads or whole-page reruns')
         browser.close()
