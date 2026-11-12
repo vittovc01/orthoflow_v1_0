@@ -91,11 +91,25 @@ def _render_entry(client,items,refresh,verified,saved):
     st.subheader('Inserimento rapido prezzi')
     if notice:st.success(notice)
     if error:st.error(error)
-    remaining={work_key(item):item for item in items if work_key(item) not in saved}
-    st.caption(f'{len(remaining)} REF da lavorare · {len(saved)} prezzi salvati in questa serie. Il riepilogo delle anomalie si aggiorna al ricalcolo.')
+    def structure_key(item):
+        return item['Struttura'], item['Codice struttura']
+
+    structures=sorted({structure_key(item) for item in items},key=lambda key:(key[0].casefold(),key[1]))
+    selected=None
+    if structures:
+        selected=st.selectbox('Cerca struttura per nome o codice',[None,*structures],
+            format_func=lambda key:f'{key[0]} · {key[1]}' if key else 'Tutte le strutture',
+            key='tab_price_entry_structure',
+            on_change=lambda:st.session_state.pop('tab_price_workitem',None),
+            help='Digita il nome o il codice e scegli una struttura. Per cercare in tutte le strutture, imposta il filtro Struttura anomalie TAB su Tutte.')
+    remaining={work_key(item):item for item in items
+        if (selected is None or structure_key(item)==selected) and work_key(item) not in saved}
+    st.caption(f'{len(remaining)} REF da lavorare nella selezione · {len(saved)} prezzi salvati in questa serie. Il riepilogo delle anomalie si aggiorna al ricalcolo.')
     if saved and st.button('Ricalcola anomalie',key='reconcile_saved_prices'):
         st.rerun()
-    if not remaining:return
+    if not remaining:
+        if selected:st.info('Nessun altro REF da lavorare per questa struttura. Puoi sceglierne un’altra.')
+        return
     pick=st.selectbox('REF da completare',list(remaining),format_func=lambda key:
         f"{remaining[key]['Struttura']} · {key[0]} · {key[3]} · {len(remaining[key]['Documenti'])} documenti",
         key='tab_price_workitem')

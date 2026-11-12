@@ -183,3 +183,28 @@ def test_failed_save_keeps_anomaly_and_reports_error_without_success(monkeypatch
  assert any('Prezzo non salvato' in x.value for x in at.error)
  assert not any('Prezzo salvato' in x.value for x in at.success)
  st.cache_resource.clear();st.cache_data.clear()
+
+
+def test_rapid_structure_search_saves_later_customer_and_keeps_its_remaining_refs(monkeypatch):
+ b=PricesBackend();b.data['offerte_prezzi']=[]
+ source=b.data['jj_recon_records'][2]
+ later=deepcopy(source);later.update(id=99,source_key='LATER')
+ later['payload'].update(customer='Z Clinic',cac='200',customer_code='00902')
+ lines=later['payload']['lines'];lines.append({**lines[0],'key':'R2','ref':'Z2','lot':'L2'})
+ for line in lines:line.update(customer='Z Clinic',cac='200')
+ b.data['jj_recon_records'].append(later)
+ b.data['clienti'].append({'codice_cliente':'00902','descrizione':'Z Clinic'})
+ at=page(monkeypatch,b).run()
+ selector=next(x for x in at.selectbox if x.label=='Cerca struttura per nome o codice')
+ assert 'Sapri · 00901' in selector.options and 'Z Clinic · 00902' in selector.options
+ selector.set_value(('Z Clinic','00902')).run()
+ ref=next(x for x in at.selectbox if x.label=='REF da completare')
+ assert len(ref.options)==2 and all('Z Clinic' in label for label in ref.options)
+ next(x for x in at.number_input if x.label=='Prezzo unitario verificato (€)').set_value(17)
+ next(x for x in at.button if x.label=='Salva e passa al prossimo REF').click().run()
+ assert not at.exception and len(b.writes)==1
+ assert b.writes[0][1]['p_cliente']=='00902' and b.writes[0][1]['p_cac']=='200'
+ assert next(x for x in at.selectbox if x.label=='Cerca struttura per nome o codice').value==('Z Clinic','00902')
+ ref=next(x for x in at.selectbox if x.label=='REF da completare')
+ assert len(ref.options)==1 and 'Z2' in ref.options[0]
+ st.cache_resource.clear();st.cache_data.clear()
