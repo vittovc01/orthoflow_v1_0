@@ -54,7 +54,7 @@ def test_direct_save_form_closes_all_matching_checks_and_keeps_structure_filter(
  at=page(monkeypatch,b).run();assert not at.exception
  next(x for x in at.selectbox if x.label=='Struttura anomalie TAB').select('Sapri').run()
  next(x for x in at.number_input if x.label=='Prezzo unitario verificato (€)').set_value(10)
- next(x for x in at.button if x.label=='Salva prezzo e ricalcola anomalie').click().run()
+ next(x for x in at.button if x.label=='Salva e passa al prossimo REF').click().run()
  assert not at.exception and len(b.writes)==1
  assert b.writes[0][1]['p_nota']=='Prezzo verificato manualmente dalla pagina Anomalie' and b.writes[0][1]['p_utente']=='test'
  assert next(x for x in at.selectbox if x.label=='Struttura anomalie TAB').value=='Sapri'
@@ -65,7 +65,7 @@ def test_direct_save_form_closes_all_matching_checks_and_keeps_structure_filter(
 
 def test_invalid_blank_price_or_note_never_calls_server(monkeypatch):
  b=PricesBackend();b.data['offerte_prezzi']=[];at=page(monkeypatch,b).run()
- next(x for x in at.button if x.label=='Salva prezzo e ricalcola anomalie').click().run()
+ next(x for x in at.button if x.label=='Salva e passa al prossimo REF').click().run()
  assert not at.exception and not b.writes and at.error
  st.cache_resource.clear();st.cache_data.clear()
 
@@ -103,7 +103,7 @@ def test_save_keeps_remaining_refs_of_same_clinic_ready(monkeypatch):
  at=page(monkeypatch,b).run()
  next(x for x in at.selectbox if x.label=='Struttura anomalie TAB').select('Sapri').run()
  next(x for x in at.number_input if x.label=='Prezzo unitario verificato (€)').set_value(10)
- next(x for x in at.button if x.label=='Salva prezzo e ricalcola anomalie').click().run()
+ next(x for x in at.button if x.label=='Salva e passa al prossimo REF').click().run()
  assert not at.exception
  assert next(x for x in at.selectbox if x.label=='Struttura anomalie TAB').value=='Sapri'
  ref=next(x for x in at.selectbox if x.label=='REF da completare')
@@ -128,7 +128,7 @@ def test_price_save_reuses_ledger_and_shared_offers_but_refreshes_verified_price
  at=page(monkeypatch,b).run();assert not at.exception
  before=Counter(b.reads)
  next(x for x in at.number_input if x.label=='Prezzo unitario verificato (€)').set_value(10)
- next(x for x in at.button if x.label=='Salva prezzo e ricalcola anomalie').click().run()
+ next(x for x in at.button if x.label=='Salva e passa al prossimo REF').click().run()
  assert not at.exception
  after=Counter(b.reads)
  for name in ('jj_recon_records','jj_recon_links','clienti','offerte_header','offerte_clienti','offerte_prezzi'):
@@ -165,7 +165,7 @@ def test_save_callback_runs_before_report_and_does_not_render_pre_save_report(mo
  at=page(monkeypatch,b).run();assert not at.exception
  calls.clear();tab_management_ui.anomaly_report.clear()
  next(x for x in at.number_input if x.label=='Prezzo unitario verificato (€)').set_value(10)
- next(x for x in at.button if x.label=='Salva prezzo e ricalcola anomalie').click().run()
+ next(x for x in at.button if x.label=='Salva e passa al prossimo REF').click().run()
  assert not at.exception and calls==[1]
  assert next(x for x in at.metric if x.label=='Segnalazioni TAB').value=='0'
  st.cache_resource.clear();st.cache_data.clear()
@@ -178,7 +178,7 @@ def test_failed_save_keeps_anomaly_and_reports_error_without_success(monkeypatch
  b.rpc=fail
  at=page(monkeypatch,b).run()
  next(x for x in at.number_input if x.label=='Prezzo unitario verificato (€)').set_value(10)
- next(x for x in at.button if x.label=='Salva prezzo e ricalcola anomalie').click().run()
+ next(x for x in at.button if x.label=='Salva e passa al prossimo REF').click().run()
  assert not at.exception and next(x for x in at.metric if x.label=='Segnalazioni TAB').value=='1'
  assert any('Prezzo non salvato' in x.value for x in at.error)
  assert not any('Prezzo salvato' in x.value for x in at.success)

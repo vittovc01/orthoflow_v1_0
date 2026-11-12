@@ -42,7 +42,7 @@ def test_daily_price_form_has_no_dates_or_reference_and_preserves_configured_per
  assert not at.date_input
  assert not any(x.label=='Riferimento verifica prezzo' for x in at.text_input)
  next(x for x in at.number_input if x.label=='Prezzo unitario verificato (€)').set_value(10)
- next(x for x in at.button if x.label=='Salva prezzo e ricalcola anomalie').click().run()
+ next(x for x in at.button if x.label=='Salva e passa al prossimo REF').click().run()
  assert not at.exception and b.writes[0][1]['p_nota'] and b.writes[0][1]['p_dal']=='2026-01-01'
  assert next(x for x in at.metric if x.label=='Segnalazioni TAB').value=='0'
  item={'Date':{'2026-09-01'},'Codice struttura':'00901','CAC':'100','Divisione':'TRAUMA','REF':'413.016S'}

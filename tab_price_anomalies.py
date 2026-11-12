@@ -55,11 +55,7 @@ def render_tab_price_anomalies(client_factory,reset_client):
 @st.fragment
 def render_price_workspace(client_factory,reset_client,records,links,base):
     st.subheader('Prezzi TAB da verificare')
-    notice=st.session_state.pop('tab_price_saved',None)
-    if notice:st.success(notice)
-    error=st.session_state.pop('tab_price_error',None)
-    if error:st.error(error)
-    st.caption('Prezzi aggiornati dopo ogni salvataggio. Il pannello riutilizza l’elenco TAB acquisito all’apertura; premi Aggiorna anomalie TAB per acquisire nuovi impianti, offerte o collegamenti.')
+    st.caption('Salva i prezzi in serie. Premi Ricalcola anomalie per aggiornare il riepilogo, oppure Aggiorna anomalie TAB per rileggere anche impianti, offerte e collegamenti.')
     if st.button('Aggiorna anomalie TAB'):
         refresh();st.rerun()
     try:
@@ -102,14 +98,17 @@ def render_price_workspace(client_factory,reset_client,records,links,base):
     for col,label,value in zip(st.columns(4),('Righe TAB senza prezzo','Differenze fattura / offerta','Prezzi fattura mancanti','Segnalazioni TAB'),
       (sum(r['Esito']=='VALORIZZAZIONE DA VERIFICARE' for r in rows),sum(r['Esito']=='FATTURA DIVERSA DALL’OFFERTA' for r in rows),sum(r['Esito']=='PREZZO FATTURA MANCANTE' for r in rows),len(rows))):
         col.metric(label,value)
-    actions=grouped_actions(rows)
     from tab_verified_prices import render_price_editor
     render_price_editor(client_factory(),rows,refresh_prices,verified)
+    if not rows:
+        st.success('Nessuna anomalia prezzo TAB nei filtri selezionati.');return
+    if not st.toggle('Mostra dettaglio ed esportazione anomalie',key='show_tab_anomaly_details'):
+        return
+    st.caption('Dettaglio e file Excel si riferiscono all’ultimo ricalcolo.')
+    actions=grouped_actions(rows)
     summary=[{'Voce':k,'Valore':v} for k,v in [('Divisione',division),('Struttura',structure),('Anno intervento',year),('Agente',agent),('Tipo anomalia selezionato',selected),('Ricerca REF / descrizione',search),('Segnalazioni TAB mostrate',len(rows))]]
     st.download_button('Scarica Excel anomalie TAB',lambda:current_reports().excel_report({'Riepilogo':summary,'Anomalie TAB':rows,'Azioni raggruppate':actions}),
       'Anomalie_Prezzi_TAB_'+division+'.xlsx','application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',type='primary',on_click='ignore')
-    if not rows:
-        st.success('Nessuna anomalia prezzo TAB nei filtri selezionati.');return
     st.warning(f'{len(rows)} segnalazioni TAB da verificare nei filtri selezionati.')
     columns=['Categoria','Divisione','Struttura','Cartella clinica','Data intervento','Agente','REF','Descrizione','Lotto','Quantità','Fonte prezzo','Prezzo offerta','Prezzo chiusura','Differenza unit.','Motivo / azione']
     st.dataframe(pd.DataFrame(rows)[[k for k in columns if any(k in r for r in rows)]],hide_index=True,use_container_width=True)
